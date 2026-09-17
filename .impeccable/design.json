@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-16T00:00:00Z",
+  "title": "Design System: Orbit",
+  "extensions": {
+    "colorMeta": {
+      "stock": { "role": "neutral", "displayName": "Bond Stock", "canonical": "#edf0f3", "darkValue": "#10151a", "tonalRamp": ["#1b2228", "#2b353d", "#3e4a54", "#57646f", "#7a8792", "#a5b1bb", "#cdd6dd", "#edf0f3"] },
+      "plate": { "role": "neutral", "displayName": "Plate", "canonical": "#ffffff", "darkValue": "#171e25", "tonalRamp": ["#1e2429", "#2f373d", "#454e55", "#5f686f", "#838c93", "#aeb6bc", "#d8dde1", "#ffffff"] },
+      "plate-sunk": { "role": "neutral", "displayName": "Sunk Plate", "canonical": "#f4f6f8", "darkValue": "#131a20", "tonalRamp": ["#1d2328", "#2d353b", "#434b52", "#5d666d", "#818a91", "#acb4bb", "#d6dbdf", "#f4f6f8"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#11161b", "darkValue": "#eef2f6", "tonalRamp": ["#11161b", "#1d242b", "#2c353e", "#414c57", "#5e6b76", "#8b959e", "#bcc4cb", "#e9edf1"] },
+      "ink-2": { "role": "neutral", "displayName": "Ink Two", "canonical": "#4e5a66", "darkValue": "#9daab6", "tonalRamp": ["#141a20", "#212a32", "#313c46", "#43505b", "#4e5a66", "#77838f", "#a6b0ba", "#d5dbe1"] },
+      "rule": { "role": "neutral", "displayName": "Rule", "canonical": "#c9d2da", "darkValue": "#2f3a45", "tonalRamp": ["#1a2027", "#28323a", "#3a4650", "#4f5c67", "#6d7a85", "#96a2ac", "#c9d2da", "#e8edf1"] },
+      "rule-soft": { "role": "neutral", "displayName": "Soft Rule", "canonical": "#e2e8ed", "darkValue": "#222b34", "tonalRamp": ["#1b2127", "#29333b", "#3c4852", "#525f6a", "#707d88", "#9aa6b0", "#c5cdd4", "#e2e8ed"] },
+      "blue": { "role": "primary", "displayName": "Result Blue", "canonical": "#1b54c8", "darkValue": "#5a8af5", "tonalRamp": ["#08163a", "#0c2258", "#113378", "#164399", "#1b54c8", "#4b7ce0", "#8facf0", "#d3e0fb"] },
+      "blue-wash": { "role": "primary", "displayName": "Result Blue Wash", "canonical": "rgba(27, 84, 200, .10)", "darkValue": "rgba(90, 138, 245, .14)" },
+      "blue-soft": { "role": "primary", "displayName": "Result Blue Soft", "canonical": "rgba(27, 84, 200, .16)", "darkValue": "rgba(90, 138, 245, .22)" },
+      "pencil": { "role": "secondary", "displayName": "Counterfactual Pencil", "canonical": "#6e7a85", "darkValue": "#93a0ac", "tonalRamp": ["#14191d", "#212830", "#323b44", "#454f59", "#5a6570", "#6e7a85", "#9ba5ae", "#ccd3d9"] },
+      "red": { "role": "secondary", "displayName": "Live Red", "canonical": "#c0271f", "darkValue": "#ff8a7e", "tonalRamp": ["#3a0b08", "#570f0b", "#7a170f", "#9b1d16", "#c0271f", "#d85b52", "#ec9a93", "#fbd9d6"] },
+      "red-wash": { "role": "secondary", "displayName": "Live Red Wash", "canonical": "rgba(192, 39, 31, .10)", "darkValue": "rgba(255, 138, 126, .14)" },
+      "green": { "role": "tertiary", "displayName": "Measured Green", "canonical": "#15704a", "darkValue": "#4fc48d", "tonalRamp": ["#04180f", "#07281a", "#0b3d28", "#105536", "#15704a", "#2f9468", "#6ab894", "#c3e3d3"] },
+      "amber": { "role": "tertiary", "displayName": "Modelled Amber", "canonical": "#8a5a00", "darkValue": "#e0a33a", "tonalRamp": ["#1e1300", "#301e00", "#472c00", "#673f00", "#8a5a00", "#b57f16", "#d7ab5c", "#f2e0bd"] },
+      "amber-wash": { "role": "tertiary", "displayName": "Modelled Amber Wash", "canonical": "rgba(138, 90, 0, .10)", "darkValue": "rgba(224, 163, 58, .14)" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Gain Figure", "cssVar": "--t-hero", "purpose": "The single largest number on the sheet, in Result Blue; the thing a stranger reads at two metres. Fig 1 only. The token drops to 40px below 860px tall and 46px below 720px wide; the element itself declares font-size once." },
+      "headline": { "displayName": "Pass Number", "purpose": "The current pass, with its unit dropped to .46em Ink Two. A clamp, not a token: it scales with the viewport rather than stepping at a breakpoint." },
+      "title": { "displayName": "Wordmark", "cssVar": "--t-title", "purpose": "ORBIT in the title block. Used once. The token drops to 20px below 720px wide." },
+      "standfirst": { "displayName": "Standfirst", "cssVar": "--t-standfirst", "purpose": "The plain-language question beside the wordmark; the load-bearing clause bolds to 600. Below 720px wide the token resolves to --t-lede rather than to a new step." },
+      "readout": { "displayName": "Score Readout", "purpose": "A compared photo's score, with its / 100 denominator dropped to the 11px small tier at 500 Ink Two so the number carries the weight." },
+      "body": { "displayName": "Body", "purpose": "Sheet default and the boot message. Tabular numerals so live columns do not shiver." },
+      "lede": { "displayName": "Lede / Control", "cssVar": "--t-lede", "purpose": "Two jobs at one size: the sentence beside the gain figure, and the whole control tier — transport buttons, fields, the speed value, the pass phase pill, score-bar rows, table bodies, the satellite name, the lost-link banner. Absorbed the old 12px and 13px steps, which sat half a pixel apart doing the same job in the same rail." },
+      "caption": { "displayName": "Caption", "purpose": "Plate captions, control hints, the conditions line, the figure legend, key/value rows, the meter caption, the tooltip, and the sentence-case descriptor in a plate heading." },
+      "small": { "displayName": "Small", "purpose": "The dense readout tier: chart and axis text, queue rows, triplet meters, satellite metadata, the ledger lane name at 700/.05em, the sheet tabs at 600/.085em caps, the gain total. Absorbed the old 10.5px step." },
+      "label": { "displayName": "Plate Heading", "purpose": "Uppercase micro-caps plate and strip headings, plus .micro section labels at .09em; the figure number inside takes Ink at wdth 118%. A caps tier — never used for sentence-case text." },
+      "micro": { "displayName": "Stamp", "purpose": "Chips, honesty tags, rail labels, table heads, the compare who-line, the sent-photo caption, and the ledger lane name past three satellites. A caps tier — letter-spaced caps read optically larger than their pixel size." },
+      "mono": { "displayName": "Wire Log", "purpose": "The raw wire trace only; never used for display or UI text." }
+    },
+    "shadows": [
+      { "name": "plate-lift", "value": "0 1px 2px rgba(17, 22, 27, .05), 0 6px 18px -12px rgba(17, 22, 27, .30)", "purpose": "The only elevation token. Every plate, every control group, the lost-link banner. Ambient, never directional." },
+      { "name": "plate-lift-dark", "value": "0 1px 2px rgba(0, 0, 0, .40), 0 8px 22px -14px rgba(0, 0, 0, .70)", "purpose": "The same token redefined in dark mode." },
+      { "name": "live-ring", "value": "0 0 0 2px var(--plate), 0 0 0 3.5px var(--red)", "purpose": "Identification, not elevation: the slot happening right now in the ledger, haloed in the plate colour so it survives against its neighbours." },
+      { "name": "now-segment-ring", "value": "inset 0 0 0 2px var(--red)", "purpose": "The current unfilled segment of the contact-window meter." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(.16, 1, .3, 1)", "purpose": "The system's only easing curve; fast out, long settle." },
+      { "name": "bar-fill", "value": "transform .3s cubic-bezier(.16, 1, .3, 1)", "purpose": "Score bars and queue rows animate by scaleX on a pre-built element, never by width or rebuild." },
+      { "name": "control-state", "value": "background-color .14s cubic-bezier(.16, 1, .3, 1), border-color .14s, color .14s", "purpose": "Button and tab state changes." },
+      { "name": "slot-land", "value": "land .45s cubic-bezier(.16, 1, .3, 1) both — scaleY(.25) and opacity .2 to full", "purpose": "A newly awarded slot cell landing in the ledger." },
+      { "name": "pass-lamp-breathe", "value": "breathe 1.9s cubic-bezier(.16, 1, .3, 1) infinite — opacity 1 to .35, scale 1 to .82", "purpose": "The only looping animation in the system; marks a pass that is open right now." },
+      { "name": "reduced-motion", "value": "all animations and transitions clamped to .001ms under prefers-reduced-motion", "purpose": "Global, unconditional." }
+    ],
+    "breakpoints": [
+      { "name": "short", "value": "max-height: 860px", "purpose": "--t-hero to 40px, satellite thumbnails 96px to 84px, grid rows tighten." },
+      { "name": "shorter", "value": "max-height: 780px and min-width: 1181px", "purpose": "Drops the sent-photo strip and the compare caption; nothing shrinks." },
+      { "name": "scroll-escape", "value": "max-height: 759px and min-width: 1181px", "purpose": "The page starts scrolling and fixed rows become content-sized, rather than clipping a figure in half." },
+      { "name": "stack", "value": "max-width: 1180px", "purpose": "Two-column stack in source order; plates stop clipping; the page scrolls." },
+      { "name": "single-column", "value": "max-width: 720px", "purpose": "One column; --t-title to 20px, --t-standfirst to --t-lede, --t-hero to 46px." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Plate",
+      "kind": "card",
+      "refersTo": "plate",
+      "description": "The sheet's only container: white, hairline-bordered, 3px corners, one ambient shadow, with a micro-caps figure heading.",
+      "html": "<section class=\"ds-plate\"><h2 class=\"ds-plate-h\"><span class=\"ds-plate-n\">Fig 1</span> <span class=\"ds-plate-thin\">Useful imagery delivered, same photos, same window</span></h2><div class=\"ds-plate-body\">Plate content.</div><div class=\"ds-plate-cap\">A <b>pass</b> is one flyover of a ground station.</div></section>",
+      "css": ".ds-plate { background: var(--plate, #fff); border: 1px solid var(--rule-soft, #e2e8ed); border-radius: 3px; box-shadow: 0 1px 2px rgba(17,22,27,.05), 0 6px 18px -12px rgba(17,22,27,.30); padding: 12px; color: var(--ink, #11161b); font: 400 14px/1.4 Archivo, system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-plate-h { margin: 0 0 8px; font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2, #4e5a66); display: flex; align-items: center; gap: 8px; } .ds-plate-n { color: var(--ink, #11161b); font-stretch: 118%; } .ds-plate-thin { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 11.5px; } .ds-plate-cap { font-size: 11.5px; line-height: 1.35; color: var(--ink-2, #4e5a66); margin-top: 7px; } .ds-plate-cap b { color: var(--ink, #11161b); font-weight: 600; }"
+    },
+    {
+      "name": "Provenance Chip",
+      "kind": "chip",
+      "refersTo": "chip-hw",
+      "description": "A stamp declaring what a thing is: real board (green), simulated (amber), faulted (red wash), neutral, or happening now (solid red).",
+      "html": "<span class=\"ds-chip ds-chip-hw\">Real board</span> <span class=\"ds-chip ds-chip-sim\">Simulated</span> <span class=\"ds-chip ds-chip-bad\">Link fault</span> <span class=\"ds-chip ds-chip-plain\">Idle</span> <span class=\"ds-chip ds-chip-solid\">Sending now</span>",
+      "css": ".ds-chip { display: inline-block; font: 700 9.5px/1.2 Archivo, system-ui, sans-serif; letter-spacing: .07em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; } .ds-chip-hw { color: var(--green, #15704a); } .ds-chip-sim { color: var(--amber, #8a5a00); } .ds-chip-bad { color: var(--red, #c0271f); border-color: transparent; background: rgba(192,39,31,.10); } .ds-chip-plain { color: var(--ink-2, #4e5a66); border-color: var(--rule, #c9d2da); } .ds-chip-solid { color: var(--plate, #fff); background: var(--red, #c0271f); border-color: transparent; }"
+    },
+    {
+      "name": "Honesty Tag",
+      "kind": "chip",
+      "refersTo": "tag-measured",
+      "description": "The provenance of a single number, inline and unboxed: measured on hardware, modelled or not yet measured, or failed.",
+      "html": "<div class=\"ds-tagline\"><span class=\"ds-tag ds-tag-m\">measured</span> Vivado report &nbsp;·&nbsp; <span class=\"ds-tag ds-tag-e\">not measured yet</span> &nbsp;·&nbsp; <span class=\"ds-tag ds-tag-x\">NO</span> slack −0.8 ns</div>",
+      "css": ".ds-tagline { font: 400 12.5px/1.4 Archivo, system-ui, sans-serif; color: var(--ink-2, #4e5a66); } .ds-tag { font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; } .ds-tag-m { color: var(--green, #15704a); } .ds-tag-e { color: var(--amber, #8a5a00); } .ds-tag-x { color: var(--red, #c0271f); }"
+    },
+    {
+      "name": "Transport Button",
+      "kind": "button",
+      "refersTo": "transport-button",
+      "description": "The operator's controls: sunk fill at rest, stock fill on hover, fully inverted when active. Set on the 12.5px lede/control step.",
+      "html": "<div class=\"ds-transport\"><button class=\"ds-btn\">Play</button><button class=\"ds-btn\" aria-pressed=\"true\">Pause</button><button class=\"ds-btn\">Step</button><button class=\"ds-btn\" disabled>Reset</button></div>",
+      "css": ".ds-transport { display: flex; gap: 3px; } .ds-btn { font: 600 12.5px/1.4 Archivo, system-ui, sans-serif; color: var(--ink, #11161b); background: var(--plate-sunk, #f4f6f8); border: 1px solid var(--rule-soft, #e2e8ed); border-radius: 3px; padding: 5px 11px; cursor: pointer; white-space: nowrap; transition: background-color .14s cubic-bezier(.16,1,.3,1), border-color .14s cubic-bezier(.16,1,.3,1), color .14s cubic-bezier(.16,1,.3,1); } .ds-btn:hover { border-color: var(--rule, #c9d2da); background: var(--stock, #edf0f3); } .ds-btn:focus-visible { outline: 2px solid var(--blue, #1b54c8); outline-offset: 2px; } .ds-btn[aria-pressed=\"true\"] { background: var(--ink, #11161b); border-color: var(--ink, #11161b); color: var(--plate, #fff); } .ds-btn:disabled { opacity: .4; cursor: default; }"
+    },
+    {
+      "name": "Control Group",
+      "kind": "input",
+      "refersTo": "control-group",
+      "description": "A labelled cell of the single control rail: 9.5px caps label, 11.5px hints, 12.5px fields, on a white plate-let.",
+      "html": "<div class=\"ds-grp\"><span class=\"ds-lab\">Fairness</span><span class=\"ds-hint\">force a switch after</span><input class=\"ds-num\" type=\"number\" value=\"3\" aria-label=\"Wins in a row before a forced switch\"><span class=\"ds-hint\">wins in a row</span></div>",
+      "css": ".ds-grp { display: inline-flex; align-items: center; gap: 8px; background: var(--plate, #fff); border: 1px solid var(--rule-soft, #e2e8ed); border-radius: 3px; padding: 4px 9px; min-height: 36px; box-shadow: 0 1px 2px rgba(17,22,27,.05), 0 6px 18px -12px rgba(17,22,27,.30); font: 400 14px/1.4 Archivo, system-ui, sans-serif; } .ds-lab { font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2, #4e5a66); white-space: nowrap; } .ds-hint { font-size: 11.5px; color: var(--ink-2, #4e5a66); line-height: 1.25; } .ds-num { font: inherit; font-size: 12.5px; color: var(--ink, #11161b); background: var(--plate-sunk, #f4f6f8); border: 1px solid var(--rule-soft, #e2e8ed); border-radius: 3px; padding: 5px 7px; width: 52px; text-align: center; } .ds-num:focus-visible { outline: 2px solid var(--blue, #1b54c8); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sheet Tabs",
+      "kind": "nav",
+      "refersTo": "sheet-tab",
+      "description": "The three sheets of the report, on the 11px small step. The selected tab inverts to Ink; there is no underline or indicator bar.",
+      "html": "<div class=\"ds-sheets\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">1 · Live run</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">2 · Hardware</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">3 · How far it scales</button></div>",
+      "css": ".ds-sheets { display: flex; gap: 2px; align-items: center; } .ds-tab { font: 600 11px/1.4 Archivo, system-ui, sans-serif; letter-spacing: .085em; text-transform: uppercase; color: var(--ink-2, #4e5a66); background: transparent; border: 1px solid transparent; padding: 5px 11px; border-radius: 3px; cursor: pointer; transition: color .16s cubic-bezier(.16,1,.3,1), background-color .16s cubic-bezier(.16,1,.3,1); } .ds-tab:hover { color: var(--ink, #11161b); background: var(--plate, #fff); } .ds-tab:focus-visible { outline: 2px solid var(--blue, #1b54c8); outline-offset: 2px; } .ds-tab[aria-selected=\"true\"] { color: var(--plate, #fff); background: var(--ink, #11161b); }"
+    },
+    {
+      "name": "Score Bar",
+      "kind": "custom",
+      "refersTo": "score-bar-track",
+      "description": "Name, track, value on the 12.5px control step. The fill takes the track's own 5px radius and is driven by scaleX so the 10 Hz tick never rebuilds it.",
+      "html": "<div class=\"ds-bars\"><div class=\"ds-bar\"><span class=\"ds-bar-t\">Worth sending</span><span class=\"ds-bar-track\"><i style=\"transform:scaleX(.87)\"></i></span><span class=\"ds-bar-v\">87.0</span></div><div class=\"ds-bar\"><span class=\"ds-bar-t\">Sharpness</span><span class=\"ds-bar-track\"><i style=\"transform:scaleX(.62)\"></i></span><span class=\"ds-bar-v\">62.4</span></div></div>",
+      "css": ".ds-bars { display: flex; flex-direction: column; gap: 3px; font: 400 12.5px/1.4 Archivo, system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-bar { display: grid; grid-template-columns: 82px minmax(0, 1fr) 44px; gap: 8px; align-items: center; } .ds-bar-t { color: var(--ink-2, #4e5a66); white-space: nowrap; } .ds-bar-track { height: 10px; border-radius: 5px; background: var(--plate-sunk, #f4f6f8); overflow: hidden; } .ds-bar-track i { display: block; height: 100%; width: 100%; border-radius: 5px; background: var(--blue, #1b54c8); transform-origin: left center; transition: transform .3s cubic-bezier(.16,1,.3,1); } .ds-bar-v { text-align: right; font-weight: 700; color: var(--ink, #11161b); }"
+    },
+    {
+      "name": "Slot Ledger Lane",
+      "kind": "custom",
+      "refersTo": "lane-cell",
+      "description": "The signature component: one unbroken row of equal cells per satellite, lane name on the 11px small step. Blue won the slot, red was a forced fairness switch, the ringed cell is happening now.",
+      "html": "<div class=\"ds-lanes\"><div class=\"ds-lane\"><span class=\"ds-lane-name\">Satellite 1</span><span class=\"ds-cells\"><b></b><b data-won></b><b data-won></b><b></b><b data-forced></b><b data-won></b><b data-won data-live></b><b></b><b></b><b></b></span></div><div class=\"ds-lane\"><span class=\"ds-lane-name\">Satellite 2</span><span class=\"ds-cells\"><b data-won></b><b></b><b></b><b data-won></b><b></b><b></b><b></b><b></b><b></b><b></b></span></div></div>",
+      "css": ".ds-lanes { display: flex; flex-direction: column; gap: 3px; font-family: Archivo, system-ui, sans-serif; } .ds-lane { display: flex; align-items: center; gap: 8px; } .ds-lane-name { width: 74px; flex: none; font-size: 11px; font-weight: 700; letter-spacing: .05em; color: var(--ink-2, #4e5a66); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-cells { flex: 1 1 auto; display: flex; gap: 2px; min-width: 0; } .ds-cells b { flex: 1 1 0; min-width: 4px; height: 17px; border-radius: 2px; background: var(--rule-soft, #e2e8ed); } .ds-cells b[data-won] { background: var(--blue, #1b54c8); } .ds-cells b[data-forced] { background: var(--red, #c0271f); } .ds-cells b[data-live] { box-shadow: 0 0 0 2px var(--plate, #fff), 0 0 0 3.5px var(--red, #c0271f); z-index: 2; }"
+    },
+    {
+      "name": "Contact Window Meter",
+      "kind": "custom",
+      "refersTo": "plate",
+      "description": "The ledger's geometry at another scale: a segmented trough of window capacity, filled blue as it is spent, with the current slot ringed red.",
+      "html": "<div class=\"ds-meter\"><div class=\"ds-phase\" data-live><span class=\"ds-lamp\"></span>Pass open</div><div class=\"ds-track\"><i data-used></i><i data-used></i><i data-used></i><i data-now></i><i></i><i></i><i></i><i></i></div><div class=\"ds-cap\"><span><b>3</b> of 8 slots used</span><span><b>5</b> left this pass</span></div></div>",
+      "css": ".ds-meter { font: 400 14px/1.4 Archivo, system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-phase { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 9px; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; padding: 4px 10px 4px 8px; border-radius: 3px; background: rgba(192,39,31,.10); border: 1px solid transparent; color: var(--red, #c0271f); } .ds-lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--red, #c0271f); flex: none; animation: ds-breathe 1.9s cubic-bezier(.16,1,.3,1) infinite; } @keyframes ds-breathe { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } } .ds-track { height: 20px; border-radius: 2px; background: var(--plate-sunk, #f4f6f8); border: 1px solid var(--rule-soft, #e2e8ed); display: flex; gap: 2px; padding: 2px; overflow: hidden; } .ds-track i { flex: 1 1 0; border-radius: 1px; background: var(--rule-soft, #e2e8ed); transition: background-color .25s cubic-bezier(.16,1,.3,1); } .ds-track i[data-used] { background: var(--blue, #1b54c8); } .ds-track i[data-now] { background: var(--rule-soft, #e2e8ed); box-shadow: inset 0 0 0 2px var(--red, #c0271f); } .ds-cap { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-2, #4e5a66); margin-top: 5px; } .ds-cap b { color: var(--ink, #11161b); font-weight: 700; }"
+    },
+    {
+      "name": "Figure Key",
+      "kind": "custom",
+      "refersTo": "plate",
+      "description": "The legend under Fig 1. Result Blue is a solid rule, the counterfactual is dashed pencil — identity is never carried by colour alone.",
+      "html": "<div class=\"ds-key\"><span><i></i> Orbit: best photos first</span><span><i class=\"ds-pencil\"></i> Baseline: oldest photos first</span><span><i class=\"ds-dot\"></i> Sending now</span></div>",
+      "css": ".ds-key { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 400 11.5px/1.4 Archivo, system-ui, sans-serif; color: var(--ink-2, #4e5a66); align-items: center; } .ds-key span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; } .ds-key i { display: block; width: 16px; height: 0; border-top: 2.5px solid var(--blue, #1b54c8); border-radius: 2px; } .ds-key i.ds-pencil { border-top: 2.5px dashed var(--pencil, #6e7a85); } .ds-key i.ds-dot { width: 9px; height: 9px; border: 0; border-radius: 50%; background: var(--red, #c0271f); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Test Report, Written Live",
+    "overview": "Orbit is a semiconductor datasheet and test-report spread that happens to be updating ten times a second. Every quantity on the sheet carries a plain-English name, a unit, and how we know it; anything nobody has measured says so in the same breath, in the same size type, without apology. The surface is cool bond stock (#edf0f3) carrying white plates (#ffffff), hairline rules doing nearly all the separation, and Archivo alone across the whole ramp — width axis for plate headings and big figures, weight and size for everything else.\n\nThe density is high and deliberately unpadded: a 9–12px rhythm, 9.5–12.5px supporting type, and figures that jump to 34–54px so a stranger two metres away reads the gain before they read anything else. Nothing is decorative. There is no hue that does not mean something, no icon, no gradient, no glass, no neon. The build explicitly refuses the mission-control console with green-on-black telemetry that every space demo ships, and the rounded-card dashboard it replaced.\n\nElevation is one token and one token only (--sh), a two-stop ambient lift carried by every plate and control group. It is diffuse, near-invisible in isolation, and it exists to separate a white plate from a nearly-white stock where a 1px rule alone read as a seam. It is not a card shadow: there is no hard offset, no hover lift, and no second step. A future surface that wants depth reuses this token or goes without.",
+    "keyCharacteristics": [
+      "Cool bond stock, white plates, hairline rules, 3px corners at the largest.",
+      "Five semantic pens, each with exactly one job; no sixth pen may be invented.",
+      "Archivo variable alone, width axis carrying the datasheet voice.",
+      "A closed type ramp: seven literal steps and four responsive tokens.",
+      "Every figure is named, united, and tagged measured / modelled / failed.",
+      "One screen above 1180×759; panels clip, the page never does.",
+      "Fully self-hosted — no CDN font, script, or image, enforced by the build."
+    ],
+    "rules": [
+      { "name": "The Five Pens Rule", "body": "Blue, pencil, red, green, amber. Each has exactly one job: result, baseline, live-or-forced, measured, modelled. A new colour is a new claim, and there are no more claims to make. Never add a sixth pen, and never borrow an existing pen for a meaning it does not already carry.", "section": "colors" },
+      { "name": "The Numbered Lane Rule", "body": "A satellite is identified by its lane position and its number, never by a hue. This is what lets the ledger show twelve satellites without generating twelve colours, and what keeps blue meaning \"Orbit's result\" in a panel full of satellites. Never assign a per-satellite colour.", "section": "colors" },
+      { "name": "The Never Colour Alone Rule", "body": "The baseline curve is dashed as well as grey; the window-saturation line is dashed as well as amber; a live slot gets a ring as well as red. Any distinction carried by one of the five pens must also be carried by a second channel — dash, ring, weight, or position.", "section": "colors" },
+      { "name": "The Ink-Only Rule", "body": "A colour value in this build is always ink. The two overflow masks on the queue and the sent-photo strip are written with the black keyword precisely because they are alpha channels, not paint — reading them as an undocumented colour token would be the mistake they are written to prevent.", "section": "colors" },
+      { "name": "The Closed Ramp Rule", "body": "Seven literal steps and four tokens are the whole ramp. A new surface picks the nearest existing step; it does not add one. If two steps would sit within half a pixel of each other doing the same job, they are the same step — that is how 13px and 12px were absorbed into 12.5, and 10.5 into 11.", "section": "typography" },
+      { "name": "The One Declaration Rule", "body": "A role that changes size at a breakpoint owns a :root token (--t-hero, --t-title, --t-lede, --t-standfirst) and exactly one font-size declaration. Media queries override the token, never the element. Never reintroduce a per-breakpoint font-size on a component.", "section": "typography" },
+      { "name": "The Caps Tier Rule", "body": "9.5 and 10px exist only as uppercase, letter-spaced type; 11 and 11.5px exist only as sentence-case text. Letter-spaced caps read larger than their pixel size, so the two pairs are separate tiers and swapping one for the other inverts the hierarchy. Never set a caps label at 11px or body text at 10px.", "section": "typography" },
+      { "name": "The Width-Axis Rule", "body": "Hierarchy is carried by size and weight; the width axis is carried by role. Figures and headings widen (106–118%); nothing else touches font-stretch. Never substitute a second family for emphasis — Archivo is the only face on the sheet.", "section": "typography" },
+      { "name": "The Named Quantity Rule", "body": "Every number on the sheet appears with a plain-English name a non-specialist can read, its unit in Ink Two beside it, and a provenance tag. \"Photos scored per second · photos/s · MEASURED at 100 MHz\", never a bare number under an acronym.", "section": "typography" },
+      { "name": "The One Screen Rule", "body": "Above 1180px wide and 759px tall the live sheet fits the viewport with body { overflow: hidden }. Panels clip their own overflow — the queue fades out under a 9px mask, the sent-photo strip under a 22px horizontal mask — and the page never scrolls. Below 759px tall the page is allowed to scroll on purpose. Audit test: at 1440×800, nothing on sheet 1 is reachable by scrolling, and no figure is cut.", "section": "layout" },
+      { "name": "The Drop, Don't Shrink Rule", "body": "When height runs out, whole secondary elements are removed by media query and the primary ones keep their size. Never solve a height squeeze by shrinking the gain figure below 40px or the queue below 38px.", "section": "layout" },
+      { "name": "The One Elevation Rule", "body": "There is a single shadow token and it is ambient. Never introduce a second elevation step, a hover lift, a directional or hard offset shadow, or a shadow on anything smaller than a plate.", "section": "elevation" },
+      { "name": "The Matched Radius Rule", "body": "A fill takes the radius of the well it sits in: the score-bar fill is 5px because its track is 5px, not because 4px looked close enough. Never invent a radius step for an inner element.", "section": "shapes" },
+      { "name": "The Round Number Rule", "body": "niceScale picks the axis step from 0.1/0.2/0.25/0.5/1/2/2.5/5 × a power of ten, keeps 3–7 steps, and among the candidates keeps the one clearing the peak with the least headroom — an axis towering over the data flattens the very gap the figure exists to show. Then it labels every ⌈ticks/4⌉th line so labels breathe. Never hand-pick an axis maximum.", "section": "components" },
+      { "name": "The Built Once Rule", "body": "The DOM is constructed once and updated in place on the 10 Hz tick — text content, attributes, and transform: scaleX() on a bar fill with a .3s ease. Never re-render a live region with innerHTML on tick, and never create an <img> before a real corpus frame exists for it. This is why the display does not flicker while a judge is reading it.", "section": "components" }
+    ],
+    "dos": [
+      "Do give every pen exactly one job: blue = Orbit's result, pencil = the baseline, red = live or forced, green = measured on hardware, amber = modelled or not yet measured.",
+      "Do identify satellites by numbered lane and position, so the display scales to twelve without inventing hues.",
+      "Do pair a provenance tag with every figure — measured (green) with where it was measured, estimate / modelled (amber) with what the model assumed, and the literal not measured yet where no number exists.",
+      "Do carry any distinction in a second channel besides colour: the baseline is dashed as well as grey, the live slot is ringed as well as red.",
+      "Do pick the nearest existing step on the ramp — 9.5, 10, 11, 11.5, 12.5, 14, 19px, or one of the four --t- tokens.",
+      "Do give a role that resizes at a breakpoint a :root token and one font-size declaration, and override the token in the media query.",
+      "Do keep 9.5 and 10px for uppercase letter-spaced type and 11 and 11.5px for sentence case; the caps tiers read larger than their number.",
+      "Do keep the live sheet on one screen above 1180×759 — clip inside panels, with a mask fade, and let the page scroll only below 759px tall.",
+      "Do write mask gradients with the black keyword, so an alpha stop is never mistaken for a colour token.",
+      "Do set the SVG viewBox to the box's pixel size so one unit is one pixel.",
+      "Do build the DOM once and update text, attributes and scaleX() in place on the 10 Hz tick.",
+      "Do self-host every asset under viz/static/ — tools/offline_check.py fails the build on any https:// reference from index.html.",
+      "Do set plate headings and large figures on the width axis (106–118%) and leave everything else at the default width."
+    ],
+    "donts": [
+      "Don't invent a sixth pen, or reuse one of the five for a meaning it does not already carry.",
+      "Don't give a satellite its own colour, ever.",
+      "Don't print a number without a plain-English name, a unit, and a provenance tag — a bare figure reads as measured whether it is or not.",
+      "Don't add a type step. If a size sits within half a pixel of an existing step doing the same job, it is that step.",
+      "Don't put a font-size on a component inside a media query; override the role's --t- token instead.",
+      "Don't add a second elevation step, a hover lift, or a directional or hard offset shadow; there is one ambient shadow token and it applies to plates.",
+      "Don't reach for a second typeface, an icon font, or a glyph icon; Archivo and drawn SVG marks are the whole vocabulary.",
+      "Don't solve a height squeeze by shrinking the gain figure or the queue — drop a secondary element instead.",
+      "Don't give an inner fill a different radius from the well it sits in.",
+      "Don't rebuild a live region with innerHTML on the tick, or create image elements for frames that do not exist yet.",
+      "Don't link a font, script, or image from a CDN.",
+      "Don't round a corner past 3px (5px on bar tracks) or introduce a gradient, glow, or green-on-black telemetry styling; this is a test report, not a console."
+    ]
+  }
+}
