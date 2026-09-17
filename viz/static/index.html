@@ -50,12 +50,13 @@
 
   /* type ramp: the responsive steps live here so each role is declared once */
   --t-hero: clamp(34px, 3.6vw, 54px);
-  --t-title: 23px;
-  --t-lede: 12.5px;
-  --t-standfirst: 14.5px;
+  --t-title: 24px;
+  --t-pass: clamp(24px, 2.3vw, 31px);
+  --t-lede: 13px;
+  --t-standfirst: 15px;
 
-  --gap: 10px;
-  --pad: 12px;
+  --gap: 12px;
+  --pad: 15px;
   --ease: cubic-bezier(.16, 1, .3, 1);
   color-scheme: light;
 }
@@ -110,7 +111,7 @@ body {
   margin: 0;
   background: var(--stock);
   color: var(--ink);
-  font: 400 14px/1.4 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font: 400 14.5px/1.45 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
   overflow: hidden;
@@ -127,8 +128,8 @@ body {
   height: 100%;
   display: grid;
   grid-template-rows: auto auto 1fr;
-  gap: 9px;
-  padding: 9px 14px 11px;
+  gap: 11px;
+  padding: 11px 16px 13px;
 }
 
 /* ── title block ───────────────────────────────────────────────────────── */
@@ -145,9 +146,9 @@ body {
 .titleblock .spacer { flex: 1 1 24px; }
 
 .sheets { display: flex; gap: 2px; align-self: center; align-items: center; }
-.sheets .btn { margin-left: 10px; font-size: 11px; letter-spacing: .06em; padding: 5px 10px; background: transparent; }
+.sheets .btn { margin-left: 10px; font-size: 12px; letter-spacing: .06em; padding: 5px 10px; background: transparent; }
 .sheets button {
-  font: inherit; font-size: 11px; font-weight: 600; letter-spacing: .085em; text-transform: uppercase;
+  font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .085em; text-transform: uppercase;
   color: var(--ink-2); background: transparent; border: 1px solid transparent;
   padding: 5px 11px; border-radius: 3px; cursor: pointer;
   transition: color .16s var(--ease), background-color .16s var(--ease);
@@ -163,12 +164,12 @@ body {
   padding: 4px 9px; min-height: 36px; box-shadow: var(--sh);
 }
 .grp > .lab {
-  font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-2); white-space: nowrap;
 }
 .transport { display: flex; gap: 3px; }
 .transport button, .btn {
-  font: inherit; font-size: 12.5px; font-weight: 600;
+  font: inherit; font-size: 13px; font-weight: 600;
   color: var(--ink); background: var(--plate-sunk);
   border: 1px solid var(--rule-soft); border-radius: 3px;
   padding: 5px 11px; cursor: pointer; white-space: nowrap;
@@ -178,22 +179,22 @@ body {
 .transport button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--plate); }
 .transport button:disabled, .btn:disabled { opacity: .4; cursor: default; }
 select, input[type="number"] {
-  font: inherit; font-size: 12.5px; color: var(--ink);
+  font: inherit; font-size: 13px; color: var(--ink);
   background: var(--plate-sunk); border: 1px solid var(--rule-soft);
   border-radius: 3px; padding: 5px 7px; max-width: 220px;
 }
 input[type="number"] { width: 52px; text-align: center; }
 input[type="range"] { width: 92px; accent-color: var(--blue); }
-.hint { font-size: 11.5px; color: var(--ink-2); max-width: 30ch; line-height: 1.25; }
-.val { font-size: 12.5px; font-weight: 700; min-width: 2.4em; }
+.hint { font-size: 12px; color: var(--ink-2); max-width: 30ch; line-height: 1.25; }
+.val { font-size: 13px; font-weight: 700; min-width: 2.4em; }
 
 /* ── conditions line ───────────────────────────────────────────────────── */
 .conditions {
   grid-column: 1 / -1;
   display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline;
-  font-size: 11.5px; color: var(--ink-2); padding: 1px 2px;
+  font-size: 12px; color: var(--ink-2); padding: 1px 2px;
 }
-.conditions .k { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 9.5px; }
+.conditions .k { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 10px; }
 .conditions b { color: var(--ink); font-weight: 600; }
 
 /* ── plates ────────────────────────────────────────────────────────────── */
@@ -203,13 +204,13 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
   display: flex; flex-direction: column;
 }
 .plate > h2 {
-  margin: 0 0 8px; font-size: 10px; font-weight: 700; letter-spacing: .11em;
+  margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .11em;
   text-transform: uppercase; color: var(--ink-2);
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .plate > h2 .n { color: var(--ink); font-stretch: 118%; }
-.plate > h2 .thin { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 11.5px; }
-.caption { font-size: 11.5px; line-height: 1.35; color: var(--ink-2); margin-top: 7px; }
+.plate > h2 .thin { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 12px; }
+.caption { font-size: 12px; line-height: 1.35; color: var(--ink-2); margin-top: 7px; }
 .caption b { color: var(--ink); font-weight: 600; }
 
 /* ── live sheet grid ───────────────────────────────────────────────────── */
@@ -217,7 +218,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .sheet[data-active] { display: grid; }
 #sheet-live {
   grid-template-columns: minmax(0, 1.5fr) minmax(244px, .8fr) minmax(246px, .74fr);
-  grid-template-rows: minmax(262px, .9fr) auto minmax(196px, 1.1fr);
+  grid-template-rows: minmax(300px, 1fr) auto minmax(200px, .85fr);
   gap: var(--gap);
 }
 #sheet-live > .plate { overflow: hidden; }
@@ -236,17 +237,17 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 }
 .hero .say { font-size: var(--t-lede); line-height: 1.26; padding-top: 2px; max-width: 40ch; }
 .hero .say b { font-weight: 700; }
-.hero .tot { font-size: 11px; color: var(--ink-2); margin-top: 4px; }
+.hero .tot { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
 .chartbox { position: relative; flex: 1 1 auto; min-height: 104px; margin-top: 4px; }
 .chartbox svg { display: block; width: 100%; height: 100%; }
-.chartbox svg text { font-family: inherit; font-size: 11px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chartbox svg text { font-family: inherit; font-size: 12px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
 /* a direct label sits on top of its own line, so it carries a plate-coloured
    outline and reads cleanly wherever the curve happens to be */
-.chartbox svg text.lbl { font-size: 11px; font-weight: 700;
+.chartbox svg text.lbl { font-size: 12px; font-weight: 700;
   paint-order: stroke; stroke: var(--plate); stroke-width: 4px; stroke-linejoin: round; }
 .tip {
   position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%, -100%);
-  background: var(--ink); color: var(--plate); font-size: 11.5px; line-height: 1.45;
+  background: var(--ink); color: var(--plate); font-size: 12px; line-height: 1.45;
   padding: 6px 9px; border-radius: 3px; white-space: nowrap; z-index: 6;
   transition: opacity .12s linear;
 }
@@ -254,7 +255,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
 
 /* ── key / legend ──────────────────────────────────────────────────────── */
-.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11.5px; color: var(--ink-2); align-items: center; }
+.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); align-items: center; }
 .key span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .key i { display: block; width: 16px; height: 0; border-top: 2.5px solid var(--blue); border-radius: 2px; }
 .key i.pencil { border-top: 2.5px dashed var(--pencil); }
@@ -265,7 +266,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .versus { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .versus figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; align-items: center; }
 .versus .who {
-  font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
   display: flex; align-items: flex-start; gap: 5px; min-height: 2.4em; align-self: stretch; flex: none;
 }
 .versus .who i { margin-top: 2px; }
@@ -277,19 +278,19 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
   border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk);
 }
 .shot img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; display: block; border-radius: 1px; }
-.versus figcaption { font-size: 11.5px; color: var(--ink-2); line-height: 1.3; align-self: stretch; flex: none; }
-.versus .sc { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: -.02em; }
-.versus .sc small { font-size: 11px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+.versus figcaption { font-size: 12px; color: var(--ink-2); line-height: 1.3; align-self: stretch; flex: none; }
+.versus .sc { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.02em; }
+.versus .sc small { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
 
 /* ── window plate ──────────────────────────────────────────────────────── */
 .passno {
-  font-size: clamp(24px, 2.3vw, 31px); font-weight: 800; font-stretch: 106%;
+  font-size: var(--t-pass); font-weight: 800; font-stretch: 106%;
   letter-spacing: -.025em; line-height: 1; font-variant-numeric: proportional-nums;
 }
 .passno small { font-size: .46em; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
 .phase {
-  display: inline-flex; align-items: center; gap: 7px; margin-top: 8px;
-  font-size: 12.5px; font-weight: 700; letter-spacing: .02em;
+  display: inline-flex; align-items: center; gap: 7px; margin-top: 6px;
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
   padding: 4px 10px 4px 8px; border-radius: 3px;
   background: var(--plate-sunk); border: 1px solid var(--rule-soft); color: var(--ink);
 }
@@ -298,7 +299,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .phase[data-live] .lamp { background: var(--red); animation: breathe 1.9s var(--ease) infinite; }
 @keyframes breathe { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
 
-.meter { margin-top: 9px; }
+.meter { margin-top: 7px; }
 .meter .track {
   height: 20px; border-radius: 2px; background: var(--plate-sunk);
   border: 1px solid var(--rule-soft); display: flex; gap: 2px; padding: 2px; overflow: hidden;
@@ -306,10 +307,10 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .meter .track i { flex: 1 1 0; border-radius: 1px; background: var(--rule-soft); transition: background-color .25s var(--ease); }
 .meter .track i[data-used] { background: var(--blue); }
 .meter .track i[data-now] { background: var(--rule-soft); box-shadow: inset 0 0 0 2px var(--red); }
-.meter .cap { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-2); margin-top: 5px; }
+.meter .cap { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 4px; }
 .meter .cap b { color: var(--ink); font-weight: 700; }
 
-.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11.5px; align-items: baseline; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; align-items: baseline; }
 .kv dt { color: var(--ink-2); }
 .kv dd { margin: 0; text-align: right; font-weight: 600; }
 
@@ -317,7 +318,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .lanes { display: flex; flex-direction: column; gap: 3px; }
 .lane { display: flex; align-items: center; gap: 8px; }
 .lane .name {
-  width: 74px; flex: none; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  width: 74px; flex: none; font-size: 12px; font-weight: 700; letter-spacing: .05em;
   color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .lane .cells { flex: 1 1 auto; display: flex; gap: 2px; min-width: 0; }
@@ -325,7 +326,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
   flex: 1 1 0; min-width: 4px; height: var(--lane-h, 17px); border-radius: 2px;
   background: var(--rule-soft); position: relative;
 }
-.lanes[data-many] .lane .name { font-size: 9.5px; }
+.lanes[data-many] .lane .name { font-size: 10px; }
 .lane .cells b[data-won]  { background: var(--blue); }
 .lane .cells b[data-forced] { background: var(--red); }
 .lane .cells b[data-live] { box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red); z-index: 2; }
@@ -333,19 +334,19 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 @keyframes land { from { transform: scaleY(.25); opacity: .2; } to { transform: scaleY(1); opacity: 1; } }
 .axis { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
 .axis .name { width: 74px; flex: none; }
-.axis .rng { flex: 1 1 auto; display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); }
+.axis .rng { flex: 1 1 auto; display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); }
 
 /* ── satellite strips ──────────────────────────────────────────────────── */
-#sats { display: grid; gap: 9px; min-height: 0; height: 100%; grid-auto-rows: minmax(0, 1fr); }
+#sats { display: grid; gap: 12px; min-height: 0; height: 100%; grid-auto-rows: minmax(0, 1fr); }
 .sat { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
   gap: 4px 12px; overflow: hidden; }
 .sat .head {
   grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin: 0 0 2px; font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2);
+  margin: 0 0 2px; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2);
 }
-.sat .head .n { font-size: 12.5px; letter-spacing: .04em; color: var(--ink); font-stretch: 112%; }
+.sat .head .n { font-size: 13px; letter-spacing: .04em; color: var(--ink); font-stretch: 112%; }
 .chip {
-  font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
   padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap;
 }
 .chip.hw     { color: var(--green); }
@@ -359,17 +360,17 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
   width: 96px; height: 96px;
   border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk);
 }
-.sat .now .meta { font-size: 11px; color: var(--ink-2); line-height: 1.25; }
+.sat .now .meta { font-size: 12px; color: var(--ink-2); line-height: 1.25; }
 .sat .body { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; overflow: hidden; }
 .sat .barswrap, .sat .sentwrap { flex: none; }
 .sat .qwrap { flex: 1 1 auto; min-height: 38px; overflow: hidden; display: flex; flex-direction: column; gap: 3px; }
 
 .bars { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
-.bar { display: grid; grid-template-columns: 82px minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: 12.5px; }
+.bar { display: grid; grid-template-columns: 82px minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: 13px; }
 .bar .t { color: var(--ink-2); white-space: nowrap; }
 .bar .track { height: 10px; border-radius: 5px; background: var(--plate-sunk); overflow: hidden; }
 .triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-top: 5px; }
-.triplet .m { display: grid; grid-template-columns: auto minmax(14px, 1fr) 28px; gap: 5px; align-items: center; font-size: 11px; }
+.triplet .m { display: grid; grid-template-columns: auto minmax(14px, 1fr) 28px; gap: 5px; align-items: center; font-size: 12px; }
 .triplet .m .t { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .triplet .m .track { height: 5px; border-radius: 3px; background: var(--plate-sunk); overflow: hidden; }
 .triplet .m .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft);
@@ -382,7 +383,7 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .queue { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden;
   -webkit-mask-image: linear-gradient(black calc(100% - 9px), transparent);
   mask-image: linear-gradient(black calc(100% - 9px), transparent); }
-.queue .qrow { display: grid; grid-template-columns: minmax(0, 1fr) 34px 38px; gap: 7px; align-items: center; font-size: 11px; }
+.queue .qrow { display: grid; grid-template-columns: minmax(0, 1fr) 34px 38px; gap: 7px; align-items: center; font-size: 12px; }
 .queue .qrow .track { height: 9px; border-radius: 2px; background: var(--plate-sunk); overflow: hidden; }
 .queue .qrow .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft);
   transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
@@ -395,11 +396,11 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
   mask-image: linear-gradient(90deg, black calc(100% - 22px), transparent); }
 .sentrow figure { margin: 0; text-align: center; flex: none; }
 .sentrow .shot { width: 36px; height: 36px; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); display: block; }
-.sentrow figcaption { font-size: 9.5px; color: var(--ink-2); margin-top: 2px; }
-.sentwrap .none { font-size: 11.5px; color: var(--ink-2); }
-.micro { font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+.sentrow figcaption { font-size: 10px; color: var(--ink-2); margin-top: 2px; }
+.sentwrap .none { font-size: 12px; color: var(--ink-2); }
+.micro { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
 .qline { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.qdetail { font-size: 11.5px; color: var(--ink-2); }
+.qdetail { font-size: 12px; color: var(--ink-2); }
 
 /* More than three satellites: one line each, and the list scrolls inside its own
    panel rather than pushing the figures off the screen. */
@@ -424,9 +425,9 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 #sats[data-compact] .sat .queue, #sats[data-compact] .sat .sentwrap { display: none; }
 
 /* ── tables (device / scaling sheets) ──────────────────────────────────── */
-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
 thead th {
-  text-align: left; font-size: 9.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-2); padding: 0 12px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap;
 }
 tbody td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: baseline; }
@@ -437,7 +438,7 @@ td.how { color: var(--ink-2); }
 tbody td:first-child { padding-right: 16px; }
 tbody tr[data-mark] { background: var(--amber-wash); }
 tbody tr[data-mark] td { font-weight: 700; }
-.tag { font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
 .tag.m { color: var(--green); }
 .tag.e { color: var(--amber); }
 .tag.x { color: var(--red); }
@@ -481,21 +482,25 @@ tbody tr[data-mark] td { font-weight: 700; }
 /* ── connection banner ─────────────────────────────────────────────────── */
 #offline {
   position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
-  background: var(--red); color: #fff; font-size: 12.5px; font-weight: 700;
+  background: var(--red); color: #fff; font-size: 13px; font-weight: 700;
   padding: 7px 14px; border-radius: 3px; z-index: 40; box-shadow: var(--sh); display: none;
 }
 #offline[data-show] { display: block; }
-.boot { display: grid; place-items: center; height: 100%; color: var(--ink-2); font-size: 14px; }
+.boot { display: grid; place-items: center; height: 100%; color: var(--ink-2); font-size: 14.5px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
 }
-@media (max-height: 780px) and (min-width: 1181px) {
-  /* Only where the sheet is fixed to one screen and something has to give: the
-     priority queue is the story, the haul of already-sent photos is not. Narrow
-     layouts scroll, so they keep both. */
+@media (max-height: 900px) and (min-width: 1181px) {
+  /* Where the sheet is fixed to one screen, height is spent in this order: the
+     figures and the priority queue keep their room, the haul of already-sent
+     photos goes first, and the caption that teaches what a score is goes last.
+     Narrow layouts scroll, so they keep everything. */
   #sats:not([data-compact]) .sat .sentwrap { display: none; }
+}
+@media (max-height: 800px) and (min-width: 1181px) {
   #p-compare .caption { display: none; }
+  :root { --t-pass: clamp(22px, 2.1vw, 27px); }
 }
 @media (max-height: 759px) and (min-width: 1181px) {
   /* Shorter than the fixed sheet needs: scroll rather than clip a figure in half.
@@ -503,7 +508,7 @@ tbody tr[data-mark] td { font-weight: 700; }
      container height to divide collapses its plate to nothing. */
   body { overflow: auto; }
   #app { height: auto; min-height: 100%; }
-  #sheet-live { grid-template-rows: minmax(262px, auto) auto minmax(196px, auto); }
+  #sheet-live { grid-template-rows: minmax(300px, auto) auto minmax(200px, auto); }
   #sheet-device { grid-template-rows: auto auto; }
   #sheet-device > .plate { max-height: none; }
   #d-engine, #d-link { min-height: 280px; }
@@ -511,10 +516,10 @@ tbody tr[data-mark] td { font-weight: 700; }
   #sweepbox { height: 260px; }
 }
 @media (max-height: 860px) {
-  :root { --t-hero: 40px; }
-  .sat .now, .sat .now .shot { width: 84px; }
-  .sat .now .shot { height: 84px; }
-  #sheet-live { grid-template-rows: minmax(196px, 1fr) auto minmax(172px, 1fr); }
+  :root { --t-hero: 42px; }
+  .sat .now, .sat .now .shot { width: 88px; }
+  .sat .now .shot { height: 88px; }
+  #sheet-live { grid-template-rows: minmax(252px, 1fr) auto minmax(196px, .82fr); }
 }
 @media (max-width: 1180px) {
   body { overflow: auto; }
@@ -541,11 +546,11 @@ tbody tr[data-mark] td { font-weight: 700; }
   #app { padding: 10px; gap: 8px; }
   .triplet { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   /* the page scrolls here, so the gain figure gets bigger, not smaller */
-  :root { --t-title: 20px; --t-standfirst: var(--t-lede); --t-hero: 46px; }
+  :root { --t-title: 21px; --t-standfirst: var(--t-lede); --t-hero: 46px; }
   #sheet-live { grid-template-columns: minmax(0, 1fr); }
   #p-figure, #p-compare, #p-window, #p-slots, #p-sats { grid-column: 1; }
   .hero { flex-direction: column; gap: 6px; }
-  .lane .name, .axis .name { width: 54px; font-size: 9.5px; }
+  .lane .name, .axis .name { width: 54px; font-size: 10px; }
   .grp { flex: 0 1 auto; min-height: 32px; padding: 3px 8px; gap: 6px; }
   .rail { gap: 6px; }
   #scenario-hint { display: none; }
@@ -664,7 +669,7 @@ tbody tr[data-mark] td { font-weight: 700; }
     </section>
 
     <section class="plate" id="p-compare">
-      <h2><span class="n">Fig 2</span> <span class="thin">The last photo sent, beside what the baseline would have sent instead</span></h2>
+      <h2><span class="n">Fig 2</span> <span class="thin">The last photo sent, and what the baseline would have sent</span></h2>
       <div class="versus">
         <figure>
           <div class="who" style="color:var(--blue)"><i style="background:var(--blue)"></i>Orbit sent</div>
@@ -677,8 +682,8 @@ tbody tr[data-mark] td { font-weight: 700; }
           <figcaption><span class="sc" id="cmp-b-sc">—<small> / 100</small></span><br><span id="cmp-b-meta">same slot, same airtime</span></figcaption>
         </figure>
       </div>
-      <div class="caption">Both photos cost the same airtime. The score is how worth sending the photo is:
-        <b>cloud-free, detailed, and different from last time</b>.</div>
+      <div class="caption">Both cost the same airtime. The score rates
+        <b>cloud-free, detailed, changed since last time</b>.</div>
     </section>
 
     <section class="plate" id="p-window">
@@ -689,12 +694,12 @@ tbody tr[data-mark] td { font-weight: 700; }
         <div class="track" id="wtrack"></div>
         <div class="cap"><span id="wcap">—</span><span id="wcap2"></span></div>
       </div>
-      <dl class="kv" style="margin-top:9px" id="wkv"></dl>
+      <dl class="kv" style="margin-top:6px" id="wkv"></dl>
       <div class="caption" id="wcaption" style="margin-top:auto"></div>
     </section>
 
     <section class="plate" id="p-slots">
-      <h2><span class="n">Fig 3</span> <span class="thin">Who got each send slot: one row per satellite, one block per slot</span>
+      <h2><span class="n">Fig 3</span> <span class="thin">Who got each send slot</span>
         <span class="key" style="margin-left:auto">
           <span><i class="blk"></i> won the slot</span>
           <span><i class="blk" style="background:var(--red)"></i> fairness forced the switch</span>
@@ -1021,12 +1026,14 @@ function renderWindow(s) {
 
   const kv = [
     ['Photos taken this pass', `${s.frames_per_pass} each`],
-    ['Fairness switches so far', `${s.starvation_switches}`],
+    ['Fairness switches', `${s.starvation_switches}`],
   ];
   const html = kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   if ($('wkv').innerHTML !== html) $('wkv').innerHTML = html;
-  $('wcaption').innerHTML = `A <b>pass</b> is one flyover of a ground station: the only chance to send.` +
-    (w.scaled ? `<br><span style="color:var(--amber)">Scaled for the demo: <b>${w.slots_total} photos per pass</b>,
+  // Two short lines rather than a paragraph: this plate is the tightest on the
+  // sheet and the scaled-window admission must never be the thing that gets cut.
+  $('wcaption').innerHTML = `A <b>pass</b> is one flyover of a ground station.` +
+    (w.scaled ? `<br><span style="color:var(--amber)"><b>Scaled for the demo:</b> ${w.slots_total} photos a pass,
       not ${num(Math.floor(s.params.WINDOW_DURATION_S * s.params.LINK_RATE_BPS / 8 / s.params.FRAME_BYTES))}.</span>` : '');
 }
 
