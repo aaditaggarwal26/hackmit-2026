@@ -240,7 +240,10 @@ input[type="range"] { width: 92px; accent-color: var(--blue); }
 .chartbox { position: relative; flex: 1 1 auto; min-height: 104px; margin-top: 4px; }
 .chartbox svg { display: block; width: 100%; height: 100%; }
 .chartbox svg text { font-family: inherit; font-size: 11px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
-.chartbox svg text.lbl { font-size: 11px; font-weight: 700; }
+/* a direct label sits on top of its own line, so it carries a plate-coloured
+   outline and reads cleanly wherever the curve happens to be */
+.chartbox svg text.lbl { font-size: 11px; font-weight: 700;
+  paint-order: stroke; stroke: var(--plate); stroke-width: 4px; stroke-linejoin: round; }
 .tip {
   position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%, -100%);
   background: var(--ink); color: var(--plate); font-size: 11.5px; line-height: 1.45;
@@ -444,18 +447,36 @@ tbody tr[data-mark] td { font-weight: 700; }
   white-space: pre; color: var(--ink-2); overflow: auto; min-height: 0; flex: 1 1 auto;
 }
 
-#sheet-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr); gap: 9px; }
+#sheet-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr); gap: 10px; }
 #sheet-device > .plate { overflow: hidden; }
 #d-engine { grid-column: 1; grid-row: 1; }
 #d-link   { grid-column: 2; grid-row: 1; }
 #d-log    { grid-column: 1 / -1; grid-row: 2; }
-#sheet-scaling { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); grid-template-rows: auto auto;
-  gap: 9px; align-items: start; align-content: start; }
-#s-chart { grid-column: 1; grid-row: 1; }
-#s-table { grid-column: 2; grid-row: 1; }
-#s-notes { grid-column: 1 / -1; grid-row: 2; }
-#sheet-scaling > .plate { overflow: hidden; max-height: 100%; }
-#sweepbox { height: clamp(210px, 34vh, 330px); flex: none; }
+#sheet-scaling { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto;
+  gap: 10px; align-items: start; align-content: start; }
+#s-lede    { grid-column: 1 / -1; grid-row: 1; }
+#s-chart   { grid-column: 1; grid-row: 2; }
+#s-quality { grid-column: 2; grid-row: 2; }
+#s-table   { grid-column: 1 / -1; grid-row: 3; }
+#sheet-scaling { overflow-y: auto; padding-right: 4px; }
+#sheet-scaling > .plate { overflow: visible; }
+#sweepbox, #qualbox { height: clamp(200px, 30vh, 300px); flex: none; }
+
+/* the sweep runs for the better part of a minute, so it has to look alive */
+.sweeprun { margin: 2px 0 10px; }
+.sweeprun .track { height: 6px; border-radius: 3px; background: var(--plate-sunk); overflow: hidden; }
+.sweeprun .track i { display: block; height: 100%; width: 100%; background: var(--blue);
+  transform-origin: left center; transform: scaleX(0); transition: transform .4s var(--ease); }
+.runline { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-2); margin-top: 5px; }
+.runline b { color: var(--ink); font-weight: 700; }
+
+/* the three numbers this whole sheet is about */
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; margin: 2px 0 6px; }
+.stats .s { min-width: 0; }
+.stats .s .v { font-size: clamp(23px, 2.3vw, 31px); font-weight: 800; font-stretch: 106%;
+  letter-spacing: -.025em; line-height: 1; font-variant-numeric: proportional-nums; }
+.stats .s .t { font-size: 12px; color: var(--ink-2); line-height: 1.3; margin-top: 5px; }
+.stats .s .t b { color: var(--ink); font-weight: 600; }
 
 /* ── connection banner ─────────────────────────────────────────────────── */
 #offline {
@@ -718,35 +739,58 @@ tbody tr[data-mark] td { font-weight: 700; }
 
   <!-- ── SHEET 3 · SCALING ──────────────────────────────────────────── -->
   <section class="sheet" id="sheet-scaling" role="tabpanel" aria-labelledby="tab-scaling">
-    <section class="plate" id="s-chart">
-      <h2><span class="n">Fig 4</span> <span class="thin">Useful imagery delivered as satellites are added</span>
+    <section class="plate" id="s-lede">
+      <h2>What happens when the sky gets crowded
         <button class="btn" id="sweep" style="margin-left:auto">Run the test</button></h2>
+      <div class="sweeprun" id="s-run" hidden>
+        <div class="track"><i id="s-bar"></i></div>
+        <div class="runline"><span id="s-runtext"></span><span id="s-runelapsed" class="num"></span></div>
+      </div>
+      <div class="stats" id="s-stats"></div>
+      <div class="caption" id="s-note"></div>
+    </section>
+
+    <section class="plate" id="s-chart">
+      <h2><span class="n">Fig 4</span> <span class="thin">Photos taken, and photos that actually got home</span></h2>
       <div class="chartbox" id="sweepbox">
-        <svg id="sweepchart" aria-label="Total score delivered against number of satellites"></svg>
+        <svg id="sweepchart" aria-label="Photos taken and photos sent home, against the number of satellites"></svg>
         <div class="tip" id="sweeptip"></div>
       </div>
       <div class="key" style="margin-top:8px">
-        <span><i></i> Total score delivered</span>
-        <span><i class="dot" style="background:var(--amber)"></i> where the satellites start capturing more than the window can carry</span>
+        <span><i class="pencil"></i> Photos taken by the fleet</span>
+        <span><i></i> Photos sent home</span>
+        <span><i class="dot" style="background:var(--amber)"></i> the window fills here</span>
       </div>
-      <div class="caption" id="s-note">Press <b>Run the test</b>. Every satellite is simulated, all of them share the same
-        contact window, and the run happens off to the side without disturbing the live one.</div>
+      <div class="caption">The window does not grow. Everything in the shaded gap is imagery that
+        was captured and never left orbit.</div>
     </section>
-    <section class="plate" id="s-notes">
-      <h2>Notes <span class="thin">where the limit comes from</span></h2>
-      <div class="kv" id="s-kv" style="max-width:760px"></div>
-      <div class="caption" id="s-notes-body"></div>
+
+    <section class="plate" id="s-quality">
+      <h2><span class="n">Fig 5</span> <span class="thin">How good the photos that got home were</span></h2>
+      <div class="chartbox" id="qualbox">
+        <svg id="qualchart" aria-label="Average score of the photos delivered, Orbit against the baseline"></svg>
+        <div class="tip" id="qualtip"></div>
+      </div>
+      <div class="key" style="margin-top:8px">
+        <span><i></i> Orbit: best photos first</span>
+        <span><i class="pencil"></i> Baseline: oldest photos first</span>
+      </div>
+      <div class="caption">Same window, same airtime, every fleet size. The more there is to choose
+        from, the better Orbit's choices get, and the baseline's do not move.</div>
     </section>
+
     <section class="plate" id="s-table">
-      <h2><span class="n">Table 3</span> <span class="thin">The same run, as numbers</span></h2>
+      <h2><span class="n">Table 3</span> <span class="thin">The same runs, as numbers</span></h2>
       <div class="scroll"><table>
-        <thead><tr><th class="num">Satellites</th><th class="num">Photos taken</th><th class="num">Window could carry</th>
-          <th class="num">Orbit points</th><th class="num">Baseline points</th><th class="num">Gain</th><th class="num">Dropped</th></tr></thead>
-        <tbody id="t-scaling"><tr><td colspan="7" style="color:var(--ink-2)">Not run yet.</td></tr></tbody>
+        <thead><tr><th class="num">Satellites</th><th class="num">Photos taken</th><th class="num">Sent home</th>
+          <th class="num">Never sent</th><th class="num">Share sent</th>
+          <th class="num">Orbit points</th><th class="num">Baseline points</th><th class="num">Gain</th></tr></thead>
+        <tbody id="t-scaling"><tr><td colspan="8" style="color:var(--ink-2)">Not run yet.</td></tr></tbody>
       </table></div>
-      <div class="caption">Every row is a two-pass run at that fleet size, on the same scaled window.</div>
+      <div class="caption" id="s-table-note"></div>
     </section>
   </section>
+</section>
 </div>
 
 <script>
@@ -1314,102 +1358,181 @@ function renderDevice(s) {
 }
 function setHTML(el, html) { if (el.innerHTML !== html) el.innerHTML = html; }
 
-/* ── Sheet 3 — scaling ─────────────────────────────────────────────────── */
-let sweepPts = [], sweepGeom = null;
+/* ── Sheet 3 — how far it scales ───────────────────────────────────────────
+   Three questions in order: how much gets home as the fleet grows, how good it
+   is, and the numbers behind both. The sweep publishes a row per fleet size as
+   it finishes, so everything here fills in while the run is still going. */
+let sweepRows = [], sweepGeom = null, qualGeom = null, sweepStarted = 0;
+
 function renderScaling(s) {
-  const sc = s.scaling;
-  $('sweep').disabled = sc.state === 'running';
-  $('sweep').textContent = sc.state === 'running' ? 'Running…' : sc.state === 'done' ? 'Run again' : 'Run the test';
+  const sc = s.scaling, rows = sc.rows || [], running = sc.state === 'running';
+  $('sweep').disabled = running;
+  $('sweep').textContent = running ? 'Running…' : sc.state === 'done' ? 'Run it again' : 'Run the test';
+
+  // progress: the sweep takes the better part of a minute, so show it moving
+  const run = $('s-run');
+  run.hidden = !running;
+  if (running) {
+    if (!sweepStarted) sweepStarted = Date.now();
+    const done = sc.done_n || 0, total = sc.total_n || 12;
+    $('s-bar').style.transform = `scaleX(${done / total})`;
+    $('s-runtext').innerHTML = done
+      ? `Simulated a fleet of <b>${done}</b>. Now running <b>${Math.min(done + 1, total)} satellites</b>…`
+      : 'Starting the first run…';
+    $('s-runelapsed').textContent = `${((Date.now() - sweepStarted) / 1000).toFixed(0)} s`;
+  } else { sweepStarted = 0; }
+
+  sweepRows = rows;
+  drawSweep(); drawQual();
+
+  const last = rows.length ? rows[rows.length - 1] : null;
+  const cross = rows.find(r => r.window_full);
+  const gain = last && last.fifo ? last.filtered / last.fifo : null;
+
+  // the three numbers the sheet exists to deliver
+  setHTML($('s-stats'), !last ? '' : [
+    [num(last.captured), `photos the fleet took at <b>${last.n} satellite${last.n === 1 ? '' : 's'}</b>`],
+    [num(last.delivered_frames), `got home. The window carries <b>${num(last.capacity_frames)}</b>, however many satellites there are`],
+    [gain ? (gain >= 1 ? '+' : '') + Math.round((gain - 1) * 100) + '%' : '—',
+     gain && gain > 1.005 ? 'more useful imagery than sending the oldest first'
+                          : 'difference from sending the oldest first, while the window still has room'],
+  ].map(([v, t]) => `<div class="s"><div class="v">${v}</div><div class="t">${t}</div></div>`).join(''));
+
   if (sc.state === 'error') {
     $('s-note').innerHTML = `<b style="color:var(--red)">The test failed:</b> ${sc.note}`;
-  } else if (sc.state !== 'done') {
-    $('s-note').innerHTML = sc.state === 'running'
-      ? 'Running every satellite count from 2 upwards, off to the side. A few seconds.'
-      : 'Press <b>Run the test</b>. Every satellite is simulated, all of them share the same contact window, and the run happens off to the side without disturbing the live one.';
+  } else if (!rows.length) {
+    $('s-note').innerHTML = `Press <b>Run the test</b>. It simulates the whole system once per fleet size, from one
+      satellite up to twelve, giving every run the same contact window. Nothing here touches the live run on sheet 1.`;
+  } else if (cross) {
+    $('s-note').innerHTML = `Up to <b>${cross.n - 1} satellite${cross.n - 1 === 1 ? '' : 's'}</b> the window has room
+      for everything, so both policies send the same photos and the gain is exactly zero: <b>choosing only matters once
+      you cannot send everything</b>. From <b>${cross.n}</b> on, the window is full. The number that gets home stops
+      growing, the share that gets home collapses, and the gap between choosing well and not choosing keeps widening.`;
+  } else {
+    $('s-note').innerHTML = `So far the window still has room for everything the fleet takes, so both policies send the
+      same photos. Keep watching: the gain appears the moment the window fills.`;
   }
-  // The arithmetic behind the limit, from the numbers the run is actually using.
-  const capacity = s.window.slots_total, demand = s.frames_per_pass;
-  const fills = Math.max(1, Math.ceil(capacity / demand));
-  setHTML($('s-kv'), [
-    ['Photos one pass can carry', `${capacity}`],
-    ['Photos each satellite takes per pass', `${demand}`],
-    ['Window is full from', `${fills} satellite${fills === 1 ? '' : 's'} onwards`],
-  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join(''));
-  $('s-notes-body').innerHTML = `Capacity is the length of a pass multiplied by the link rate. Demand is the number
-    of satellites multiplied by the photos each one takes. They cross somewhere, and past that point extra satellites
-    add photos the window cannot carry.
-    <br><span style="color:var(--amber)">The window here is scaled down for the demo</span>, so it fills almost at
-    once. On the real numbers it carries
-    ${num(Math.floor(s.params.WINDOW_DURATION_S * s.params.LINK_RATE_BPS / 8 / s.params.FRAME_BYTES))} photos a pass
-    and the crossing moves out with it. The shape of the curve is the same either way, and so is the point:
-    <b>Orbit keeps sending the best of what fits.</b>`;
 
-  const rows = sc.rows || [];
-  if (!rows.length) { sweepPts = []; drawSweep(); setHTML($('t-scaling'), '<tr><td colspan="7" style="color:var(--ink-2)">Not run yet.</td></tr>'); return; }
+  const wnd = sc.window_slots_per_pass;
+  $('s-table-note').innerHTML = `Each row is one two-pass run at that fleet size. Every run shares one contact window of
+    <b>${wnd ? wnd * 2 : '—'} photos</b>${wnd ? ` (${wnd} a pass)` : ''}, which is wider than the live run's window on
+    sheet 1 — that one is <span style="color:var(--amber)">deliberately tight</span> so two satellites already contend.
+    A sweep against a window that is full from the first satellite has nothing to show.`;
 
-  const cross = rows.find(r => r.demand_frames > r.capacity_frames);
-  sweepPts = rows.map(r => ({ n: r.n, v: r.filtered / 655.35, over: r.demand_frames > r.capacity_frames }));
-  drawSweep();
-  if (sc.state === 'done') {
-    $('s-note').innerHTML = cross
-      ? `From <b>${cross.n} satellite${cross.n === 1 ? '' : 's'}</b> on, the fleet photographs more than the window can
-         carry, so the total stops climbing. Orbit still sends the best of what fits. It does not scale forever,
-         and this is where it stops.`
-      : `Up to <b>${rows.at(-1).n} satellites</b> the window still has room, so the total keeps climbing.`;
-  }
-  setHTML($('t-scaling'), rows.map(r => `<tr${cross && r.n === cross.n ? ' data-mark' : ''}>
-      <td class="num">${r.n}</td><td class="num">${num(r.captured)}</td><td class="num">${num(r.capacity_frames)}</td>
+  setHTML($('t-scaling'), !rows.length
+    ? '<tr><td colspan="8" style="color:var(--ink-2)">Not run yet.</td></tr>'
+    : rows.map(r => `<tr${cross && r.n === cross.n ? ' data-mark' : ''}>
+      <td class="num">${r.n}</td><td class="num">${num(r.captured)}</td><td class="num">${num(r.delivered_frames)}</td>
+      <td class="num">${num(r.unsent_frames)}</td><td class="num">${(r.share_delivered * 100).toFixed(0)}%</td>
       <td class="num">${num(Math.round(r.filtered / 655.35))}</td><td class="num">${num(Math.round(r.fifo / 655.35))}</td>
-      <td class="num">${r.fifo ? '+' + Math.round((r.filtered / r.fifo - 1) * 100) + '%' : '—'}</td>
-      <td class="num">${num(r.evicted)}</td></tr>`).join(''));
+      <td class="num">${r.fifo ? (r.filtered / r.fifo >= 1 ? '+' : '') + Math.round((r.filtered / r.fifo - 1) * 100) + '%' : '—'}</td>
+      </tr>`).join(''));
 }
-function drawSweep() {
-  const box = $('sweepbox'), svg = $('sweepchart');
+
+/* shared frame for both sweep charts: x is the fleet size */
+function sweepFrame(box, svg, yMaxValue, yLabel) {
   const W = Math.max(240, box.clientWidth), H = Math.max(120, box.clientHeight);
-  const L = 56, R = 16, T = 18, B = 42;
+  const L = 56, R = 18, T = 18, B = 42;
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  if (!sweepPts.length) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">Not run yet.</text>`; sweepGeom = null; return; }
-  const { max: maxY, step: stepY, ticks: nY, label: kY } = niceScale(Math.max(...sweepPts.map(p => p.v)));
-  const n0 = sweepPts[0].n, n1 = sweepPts[sweepPts.length - 1].n;
-  const sx = n => L + (n1 > n0 ? (n - n0) / (n1 - n0) : .5) * (W - L - R);
+  const { max: maxY, step: stepY, ticks: nY, label: kY } = niceScale(yMaxValue);
+  const n0 = sweepRows[0].n, n1 = Math.max(sweepRows[sweepRows.length - 1].n, n0 + 1);
+  const sx = n => L + (n - n0) / (n1 - n0) * (W - L - R);
   const sy = y => T + (1 - y / maxY) * (H - T - B);
-  sweepGeom = { sx, sy };
   const g = [];
   for (let k = 0; k <= nY; k += kY) {
     const v = stepY * k, y = sy(v);
     g.push(`<line x1="${L}" x2="${W - R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--rule-soft)"/>`);
     g.push(`<text x="${L - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${num(v)}</text>`);
   }
-  const first = sweepPts.find(p => p.over);
-  if (first) {
-    const x = sx(first.n);
-    g.push(`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${T}" y2="${sy(0).toFixed(1)}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 4"/>`);
-    const lab = first.n === sweepPts[0].n ? 'window already full at the smallest fleet' : `window fills at ${first.n} satellites`;
-    g.push(`<text class="lbl" x="${(x + 7).toFixed(1)}" y="${T + 12}" fill="var(--amber)">${lab}</text>`);
-  }
-  g.push(`<path d="${sweepPts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.n).toFixed(1)},${sy(p.v).toFixed(1)}`).join(' ')}"
-    fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
-  sweepPts.forEach(p => g.push(`<circle cx="${sx(p.n).toFixed(1)}" cy="${sy(p.v).toFixed(1)}" r="4" fill="var(--blue)" stroke="var(--plate)" stroke-width="2"/>`));
-  sweepPts.forEach(p => g.push(`<text x="${sx(p.n).toFixed(1)}" y="${H - 24}" text-anchor="middle">${p.n}</text>`));
+  sweepRows.forEach(r => g.push(`<text x="${sx(r.n).toFixed(1)}" y="${H - 24}" text-anchor="middle">${r.n}</text>`));
   g.push(`<text x="${((L + W - R) / 2).toFixed(1)}" y="${H - 7}" text-anchor="middle" style="font-weight:700">number of satellites</text>`);
-  g.push(`<text x="${L}" y="${T - 5}">points delivered</text>`);
-  svg.innerHTML = g.join('');
+  g.push(`<text x="${L}" y="${T - 5}">${yLabel}</text>`);
+  return { W, H, L, R, T, B, sx, sy, g };
 }
-(function sweepHover() {
-  const box = $('sweepbox'), tip = $('sweeptip');
+function crossRule(f) {
+  const c = sweepRows.find(r => r.window_full);
+  if (!c) return;
+  const x = f.sx(c.n);
+  f.g.push(`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${f.T}" y2="${f.sy(0).toFixed(1)}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 4"/>`);
+  f.g.push(`<text class="lbl" x="${(x + 7).toFixed(1)}" y="${f.T + 12}" fill="var(--amber)">window fills at ${c.n}</text>`);
+}
+function line(f, key, colour, dashed) {
+  return `<path d="${sweepRows.map((r, i) => `${i ? 'L' : 'M'}${f.sx(r.n).toFixed(1)},${f.sy(key(r)).toFixed(1)}`).join(' ')}"
+    fill="none" stroke="${colour}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${dashed ? ' stroke-dasharray="7 5"' : ''}/>`;
+}
+function dots(f, key, colour) {
+  return sweepRows.map(r => `<circle cx="${f.sx(r.n).toFixed(1)}" cy="${f.sy(key(r)).toFixed(1)}" r="4" fill="${colour}" stroke="var(--plate)" stroke-width="2"/>`).join('');
+}
+function empty(svg, box, msg) {
+  const W = Math.max(240, box.clientWidth), H = Math.max(120, box.clientHeight);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${msg}</text>`;
+}
+
+/* Fig 4 — what the fleet took, against what got home. Same unit, one axis, and
+   the gap between them is imagery that never left orbit. */
+function drawSweep() {
+  const box = $('sweepbox'), svg = $('sweepchart');
+  if (!sweepRows.length) { sweepGeom = null; return empty(svg, box, 'Not run yet.'); }
+  const f = sweepFrame(box, svg, Math.max(...sweepRows.map(r => r.captured)), 'photos');
+  sweepGeom = f;
+  const took = r => r.captured, home = r => r.delivered_frames;
+  f.g.push(`<path d="${sweepRows.map((r, i) => `${i ? 'L' : 'M'}${f.sx(r.n).toFixed(1)},${f.sy(took(r)).toFixed(1)}`).join(' ')} ` +
+    sweepRows.slice().reverse().map(r => `L${f.sx(r.n).toFixed(1)},${f.sy(home(r)).toFixed(1)}`).join(' ') + ' Z" fill="var(--blue-wash)" stroke="none"/>');
+  crossRule(f);
+  f.g.push(line(f, took, 'var(--pencil)', true));
+  f.g.push(line(f, home, 'var(--blue)', false));
+  f.g.push(dots(f, home, 'var(--blue)'));
+  const last = sweepRows[sweepRows.length - 1];
+  if (sweepRows.length > 1) {
+    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(took(last)) + 14).toFixed(1)}" text-anchor="end" fill="var(--pencil)">${num(took(last))} taken</text>`);
+    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(home(last)) - 9).toFixed(1)}" text-anchor="end" fill="var(--blue)">${num(home(last))} sent</text>`);
+  }
+  svg.innerHTML = f.g.join('');
+}
+
+/* Fig 5 — the payoff: the average score of the photos each policy chose to send. */
+function drawQual() {
+  const box = $('qualbox'), svg = $('qualchart');
+  if (!sweepRows.length) { qualGeom = null; return empty(svg, box, 'Not run yet.'); }
+  const o = r => r.mean_filtered / 655.35, b = r => r.mean_fifo / 655.35;
+  const f = sweepFrame(box, svg, Math.max(...sweepRows.map(r => Math.max(o(r), b(r)))), 'average score, out of 100');
+  qualGeom = f;
+  crossRule(f);
+  f.g.push(line(f, b, 'var(--pencil)', true));
+  f.g.push(line(f, o, 'var(--blue)', false));
+  f.g.push(dots(f, o, 'var(--blue)'));
+  const last = sweepRows[sweepRows.length - 1];
+  if (sweepRows.length > 1) {
+    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(o(last)) - 9).toFixed(1)}" text-anchor="end" fill="var(--blue)">${o(last).toFixed(0)}</text>`);
+    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(b(last)) + 15).toFixed(1)}" text-anchor="end" fill="var(--pencil)">${b(last).toFixed(0)}</text>`);
+  }
+  svg.innerHTML = f.g.join('');
+}
+
+function sweepHoverOn(boxId, tipId, geomFn, body) {
+  const box = $(boxId), tip = $(tipId);
   box.addEventListener('pointermove', e => {
-    if (!sweepGeom || !sweepPts.length) return;
-    const r = box.getBoundingClientRect(), mx = e.clientX - r.left;
-    let best = sweepPts[0], bd = Infinity;
-    for (const p of sweepPts) { const d = Math.abs(sweepGeom.sx(p.n) - mx); if (d < bd) { bd = d; best = p; } }
-    tip.innerHTML = `<b>${best.n} satellites</b><br>${num(Math.round(best.v))} points delivered` +
-      (best.over ? '<br>more photos taken than the window can carry' : '');
-    tip.style.left = Math.min(Math.max(sweepGeom.sx(best.n), 100), r.width - 100) + 'px';
-    tip.style.top = Math.max(tip.offsetHeight + 6, sweepGeom.sy(best.v) - 10) + 'px';
+    const f = geomFn();
+    if (!f || !sweepRows.length) return;
+    const r0 = box.getBoundingClientRect(), mx = e.clientX - r0.left;
+    let best = sweepRows[0], bd = Infinity;
+    for (const r of sweepRows) { const d = Math.abs(f.sx(r.n) - mx); if (d < bd) { bd = d; best = r; } }
+    tip.innerHTML = body(best);
+    tip.style.left = Math.min(Math.max(f.sx(best.n), 110), r0.width - 110) + 'px';
+    tip.style.top = Math.max(tip.offsetHeight + 6, f.T + 4) + 'px';
     tip.style.opacity = 1;
   });
   box.addEventListener('pointerleave', () => tip.style.opacity = 0);
-})();
+}
+sweepHoverOn('sweepbox', 'sweeptip', () => sweepGeom, r =>
+  `<b>${r.n} satellite${r.n === 1 ? '' : 's'}</b>` +
+  `<br><span class="sw" style="background:var(--pencil)"></span>${num(r.captured)} photos taken` +
+  `<br><span class="sw" style="background:var(--blue)"></span>${num(r.delivered_frames)} sent home (${(r.share_delivered * 100).toFixed(0)}%)`);
+sweepHoverOn('qualbox', 'qualtip', () => qualGeom, r =>
+  `<b>${r.n} satellite${r.n === 1 ? '' : 's'}</b>` +
+  `<br><span class="sw" style="background:var(--blue)"></span>Orbit ${(r.mean_filtered / 655.35).toFixed(1)} average` +
+  `<br><span class="sw" style="background:var(--pencil)"></span>Baseline ${(r.mean_fifo / 655.35).toFixed(1)} average`);
 
 /* ── redraw on resize, once per frame ──────────────────────────────────── */
 let raf = 0;
