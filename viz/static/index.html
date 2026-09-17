@@ -644,6 +644,7 @@ tbody tr[data-mark] td { font-weight: 700; }
         <span class="hint" style="max-width:none">force a switch after</span>
         <input id="starv" type="number" min="1" max="20" aria-label="Wins in a row before a forced switch">
         <span class="hint" style="max-width:none">wins in a row</span>
+        <span class="hint" id="starv-warn" style="max-width:22ch;color:var(--amber)" hidden></span>
       </div>
       <div class="grp">
         <span class="lab">Extra satellites</span>
@@ -938,6 +939,12 @@ function renderRail(s) {
   if (document.activeElement !== sel) { sel.value = s.scenario; hintFor(s.scenario); }
   if (document.activeElement !== $('speed')) { $('speed').value = s.speed; $('speedv').textContent = s.speed + '×'; }
   if (document.activeElement !== $('starv')) $('starv').value = s.starvation_n;
+  // A satellite's winning streak resets when a window opens, so a threshold at or
+  // above the slots in a window can never be reached. Say so rather than letting
+  // the knob look live while doing nothing.
+  const warn = $('starv-warn'), dead = s.starvation_n >= s.window.slots_total;
+  warn.hidden = !dead;
+  if (dead) warn.textContent = `never fires: a pass only grants ${s.window.slots_total}`;
   if (document.activeElement !== $('simn')) $('simn').value = s.sim_extra;
   $('play').setAttribute('aria-pressed', String(!s.paused && !s.done));
   $('pause').setAttribute('aria-pressed', String(s.paused));

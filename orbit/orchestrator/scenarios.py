@@ -88,7 +88,15 @@ def build(name: str, nodes: list[str] = params.NODES, seed: int = 0, passes: int
     orders = orders_for(name, len(nodes), seed, corpus)
     if name == "filtered_vs_fifo" and passes is None:
         passes = g["passes"] * 2
-    window = ContactWindow.for_slots(slots_per_pass or g["slots_per_pass"], window_s or g["window_s"])
+    slots = slots_per_pass or g["slots_per_pass"]
+    if name == "starvation":
+        # The arbiter's streak resets when a window opens, so the guard can only
+        # fire inside a window that grants more slots than the threshold. At the
+        # gate's pacing (3 slots a pass) with the default threshold of 3 it can
+        # never fire, and the scenario named for it would demonstrate nothing.
+        # This one scenario therefore widens its window just enough to show it.
+        slots = max(slots, starvation_n + 2)
+    window = ContactWindow.for_slots(slots, window_s or g["window_s"])
     return Orchestrator(nodes=nodes, source=CorpusSource(orders, corpus), scenario=name, window=window,
                         frames_per_pass=frames_per_pass or g["frames_per_pass"], passes=passes or g["passes"],
                         starvation_n=starvation_n, pacing_source=g["source"], **orch_kw)
