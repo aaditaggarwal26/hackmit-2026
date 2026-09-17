@@ -65,19 +65,50 @@ def load_bench(directory: str) -> dict | None:
     return {"stamp": Path(paths[-1]).stem, "path": paths[-1], "entries": entries}
 
 
-def scaling_sweep(base_nodes: list[str], n_max: int = MAX_SWEEP, passes: int = 2, seed: int = 0) -> list[dict]:
-    """Delivered value vs number of satellites, all simulated, same window each: where demand
-    (N x frames per pass) crosses capacity (slots per pass) the curve flattens. Headless, virtual clock."""
-    out = []
-    for n in range(2, n_max + 1):
+SWEEP_HEADROOM = 2.5     # window capacity = this many satellites' worth of captures
+
+
+def sweep_slots_per_pass(frames_per_pass: int) -> int:
+    """How wide the sweep's window has to be for the sweep to show anything.
+
+    The demo's own window is deliberately tight: 3 frames a pass, so it is already
+    full with one satellite and stays full however many you add. Sweeping N against
+    that window plots a flat line and calls it a finding. The sweep therefore runs
+    its own window, wide enough to start with room to spare, so the run crosses from
+    'the window has room' to 'the window is the limit' somewhere inside the sweep and
+    the crossing is a thing you can see rather than a thing you assert. The sheet
+    states this window; it is not the live run's."""
+    return max(1, int(round(frames_per_pass * SWEEP_HEADROOM)))
+
+
+def scaling_sweep(base_nodes: list[str], n_max: int = MAX_SWEEP, passes: int = 2, seed: int = 0,
+                  on_row=None) -> list[dict]:
+    """One headless run per fleet size, 1..n_max, all satellites simulated, every run
+    sharing one contact window. Below the crossing the window has room and both
+    policies send everything, so scoring changes nothing and the gain is 1.00x. Above
+    it the total flattens and the gain opens. `on_row` is called with the rows so far
+    after each run, so the sheet can fill in while the sweep is still going."""
+    out: list[dict] = []
+    for n in range(1, n_max + 1):
         nodes = [f"sim://{k}" for k in range(n)]
-        o = scenarios.build("scaling", nodes=nodes, passes=passes, seed=seed, virtual=True)
+        probe = scenarios.gate_params()
+        o = scenarios.build("scaling", nodes=nodes, passes=passes, seed=seed, virtual=True,
+                            slots_per_pass=sweep_slots_per_pass(probe["frames_per_pass"]))
         asyncio.run(o.run())
         o.close()
-        out.append(dict(n=n, physical=0, simulated=n, slots=len(o.slots), filtered=o.value_filtered, fifo=o.value_fifo,
-                        captured=sum(x.captures for x in o.nodes), evicted=sum(x.mirror.evicted for x in o.nodes),
-                        demand_frames=n * o.frames_per_pass * passes, capacity_frames=o.window.slots_total * passes,
+        slots, captured = len(o.slots), sum(x.captures for x in o.nodes)
+        capacity = o.window.slots_total * passes
+        out.append(dict(n=n, physical=0, simulated=n, slots=slots, filtered=o.value_filtered, fifo=o.value_fifo,
+                        captured=captured, evicted=sum(x.mirror.evicted for x in o.nodes),
+                        demand_frames=n * o.frames_per_pass * passes, capacity_frames=capacity,
+                        delivered_frames=slots, unsent_frames=max(0, captured - slots),
+                        share_delivered=(slots / captured) if captured else 0.0,
+                        mean_filtered=(o.value_filtered / slots) if slots else 0.0,
+                        mean_fifo=(o.value_fifo / slots) if slots else 0.0,
+                        window_full=captured > capacity,
                         starvation_switches=o.arbiter.starvation_switches))
+        if on_row:
+            on_row(list(out), n, n_max)
     return out
 
 
@@ -152,13 +183,26 @@ class Session:
                 self.clients.discard(ws)
 
     async def _sweep(self) -> None:
-        self.scaling = dict(state="running", rows=[])
+        """The sweep runs off the event loop, but publishes each fleet size as it
+        finishes: the ticker is already broadcasting `scaling` at 10 Hz, so replacing
+        the dict from the worker thread is enough for the sheet to fill in live. The
+        dict is swapped whole rather than mutated, so a snapshot never catches it
+        half-written."""
+        window = sweep_slots_per_pass(scenarios.gate_params()["frames_per_pass"])
+        self.scaling = dict(state="running", rows=[], done_n=0, total_n=MAX_SWEEP, window_slots_per_pass=window)
+
+        def publish(rows: list[dict], n: int, total: int) -> None:
+            self.scaling = dict(state="running", rows=rows, done_n=n, total_n=total,
+                                window_slots_per_pass=window)
+
         try:
-            rows = await asyncio.to_thread(scaling_sweep, self.base_nodes)
-            self.scaling = dict(state="done", rows=rows, note="all satellites simulated on the golden model; "
-                                "same scaled window as the live run")
+            rows = await asyncio.to_thread(scaling_sweep, self.base_nodes, MAX_SWEEP, 2, 0, publish)
+            self.scaling = dict(state="done", rows=rows, done_n=len(rows), total_n=MAX_SWEEP,
+                                window_slots_per_pass=window,
+                                note="every satellite simulated on the golden model, two passes each, all fleet "
+                                     "sizes sharing one window")
         except Exception as e:                       # surfaced on the panel, never a dead ticker
-            self.scaling = dict(state="error", rows=[], note=str(e))
+            self.scaling = dict(state="error", rows=[], done_n=0, total_n=MAX_SWEEP, note=str(e))
 
     async def handle(self, cmd: dict) -> None:
         o, c, v = self.orch, cmd.get("cmd"), cmd.get("value")
