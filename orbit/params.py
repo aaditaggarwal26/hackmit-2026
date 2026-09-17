@@ -23,7 +23,7 @@ SHARP_SHIFT_MAX = 24                     # CONFIG_SET rejects larger shifts (sum
 # --- contact window (ground model; scaled for the demo at the corpus gate, labelled as such) ---
 WINDOW_DURATION_S = 600
 LINK_RATE_BPS = 10_000_000
-STARVATION_N = 3                         # consecutive grants to one node before a forced switch
+STARVATION_N = 2                         # consecutive grants to one node before a forced switch
 
 # --- link ----------------------------------------------------------------------
 CLK_HZ = 100_000_000
