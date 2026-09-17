@@ -443,18 +443,27 @@ tbody tr[data-mark] td { font-weight: 700; }
 .tag.e { color: var(--amber); }
 .tag.x { color: var(--red); }
 .scroll { overflow: auto; min-height: 0; flex: 1 1 auto; }
+/* sheets 2 and 3 scroll as a whole, so their tables must not also scroll inside a
+   plate - nesting the two hides rows behind a scrollbar nobody looks for */
+#sheet-device .scroll, #sheet-scaling .scroll { overflow: visible; flex: none; }
 .log {
   font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre; color: var(--ink-2); overflow: auto; min-height: 0; flex: 1 1 auto;
 }
 
-#sheet-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1.08fr) minmax(0, .92fr); gap: 10px; }
-#sheet-device > .plate { overflow: hidden; }
-#d-engine { grid-column: 1; grid-row: 1; }
-#d-link   { grid-column: 2; grid-row: 1; }
-#d-log    { grid-column: 1 / -1; grid-row: 2; }
-#sheet-scaling { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto;
-  gap: 10px; align-items: start; align-content: start; }
+#sheet-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: max-content max-content max-content;
+  gap: 12px; align-items: start; align-content: start; overflow-y: auto; padding-right: 4px; }
+#sheet-device > .plate { overflow: visible; }
+#d-state  { grid-column: 1 / -1; grid-row: 1; }
+#d-engine { grid-column: 1; grid-row: 2; }
+#d-link   { grid-column: 2; grid-row: 2; }
+#d-health { grid-column: 1; grid-row: 3; }
+#d-log    { grid-column: 2; grid-row: 3; }
+#d-log .log { height: 260px; flex: none; }
+#sheet-scaling { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: max-content max-content max-content;
+  gap: 12px; align-items: start; align-content: start; }
 #s-lede    { grid-column: 1 / -1; grid-row: 1; }
 #s-chart   { grid-column: 1; grid-row: 2; }
 #s-quality { grid-column: 2; grid-row: 2; }
@@ -509,7 +518,7 @@ tbody tr[data-mark] td { font-weight: 700; }
   body { overflow: auto; }
   #app { height: auto; min-height: 100%; }
   #sheet-live { grid-template-rows: minmax(300px, auto) auto minmax(200px, auto); }
-  #sheet-device { grid-template-rows: auto auto; }
+  #sheet-device { grid-template-rows: max-content max-content max-content; }
   #sheet-device > .plate { max-height: none; }
   #d-engine, #d-link { min-height: 280px; }
   #d-log .log { height: 220px; flex: none; }
@@ -538,7 +547,8 @@ tbody tr[data-mark] td { font-weight: 700; }
   .sat { overflow: visible; }
   #sheet-device > .plate, #sheet-scaling > .plate { overflow: visible; max-height: none; }
   #d-engine, #d-link, #d-log, #s-chart, #s-table, #s-notes { grid-column: 1 / -1; grid-row: auto; }
-  #sheet-device, #sheet-scaling { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  #sheet-device, #sheet-scaling { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
+    grid-auto-rows: max-content; }
   #d-engine { grid-row: auto; }
   .chartbox { min-height: 220px; }
 }
@@ -715,6 +725,12 @@ tbody tr[data-mark] td { font-weight: 700; }
 
   <!-- ── SHEET 2 · HARDWARE ─────────────────────────────────────────── -->
   <section class="sheet" id="sheet-device" role="tabpanel" aria-labelledby="tab-device">
+    <section class="plate" id="d-state">
+      <h2>What has been measured, and what is still waiting</h2>
+      <div class="stats" id="d-stats"></div>
+      <div class="caption" id="d-state-note"></div>
+    </section>
+
     <section class="plate" id="d-engine">
       <h2><span class="n">Table 1</span> <span class="thin">The scoring engine on the board</span></h2>
       <div class="scroll"><table>
@@ -734,6 +750,17 @@ tbody tr[data-mark] td { font-weight: 700; }
       <div class="caption">The cable between the laptop and each board carries photo rows in, and scores,
         grants and accounting out. It <b>never carries the downlink itself</b>. The contact window is a byte budget
         the ground keeps, scaled down so one pass holds a handful of photos instead of tens of thousands.</div>
+    </section>
+
+    <section class="plate" id="d-health">
+      <h2><span class="n">Table 3</span> <span class="thin">Is the link behaving? One column per satellite</span></h2>
+      <div class="scroll"><table>
+        <thead><tr id="t-health-head"></tr></thead>
+        <tbody id="t-health"></tbody>
+      </table></div>
+      <div class="caption">These are counted live, board or no board. Every score a satellite reports is
+        re-computed on the ground from the same photo, so <b>disagreements with the model</b> is the row that
+        proves the two are doing the same arithmetic. It should read zero.</div>
     </section>
 
     <section class="plate" id="d-log">
@@ -1308,7 +1335,7 @@ function row(what, value, unit, how) {
   return `<tr><td>${what}</td><td class="num">${value}</td><td class="unit">${unit || ''}</td><td class="how">${how}</td></tr>`;
 }
 function renderDevice(s) {
-  const v = s.vivado || {}, b = s.bench;
+  const v = s.vivado || {}, b = s.bench, phys = s.physical_nodes.length;
   const cycles = (s.nodes.find(n => n.status && n.status.cycles_last_frame) || { status: {} }).status.cycles_last_frame;
   const u = v.utilization || {}, tm = v.timing || {}, pw = v.power_w || {};
   const util = (r, what, unit) => v.measured && r && typeof r === 'object'
@@ -1355,6 +1382,49 @@ function renderDevice(s) {
     row('What stops a satellite sending', 'being out of range', '',
         'not cloud. Cloud only lowers a photo’s score.'),
   ].join(''));
+
+  // ── what is measured, what is waiting, and on what ──────────────────────
+  // Counted from the rows themselves rather than asserted, so the sheet cannot
+  // claim progress it does not have.
+  const tags = [...$('t-engine').querySelectorAll('.tag'), ...$('t-link').querySelectorAll('.tag')];
+  const measured = tags.filter(t => t.classList.contains('m')).length;
+  const waiting = tags.length - measured;
+  const needBoard = [...$('t-engine').querySelectorAll('td.how')].filter(c => /board/.test(c.textContent)).length;
+  const needVivado = [...$('t-engine').querySelectorAll('td.how')].filter(c => /Vivado/.test(c.textContent)).length;
+  const needBench = [...$('t-engine').querySelectorAll('td.how')].filter(c => /benchmark/.test(c.textContent)).length;
+  setHTML($('d-stats'), [
+    [`${measured}`, `figure${measured === 1 ? '' : 's'} on this sheet <b>measured</b> so far`],
+    [`${waiting}`, `still <b>waiting</b> on hardware nobody has run yet`],
+    [phys ? `${phys}` : 'None', phys ? `board${phys > 1 ? 's' : ''} on the wire right now` : 'No board is connected right now'],
+  ].map(([v, t]) => `<div class="s"><div class="v">${v}</div><div class="t">${t}</div></div>`).join(''));
+  $('d-state-note').innerHTML = (phys
+    ? `A board is on the wire, so the rows that need one are filling in live.`
+    : `Everything on this sheet that needs silicon says so. Nothing here is estimated into looking finished.`) +
+    ` What is outstanding: <b>${needBoard}</b> row${needBoard === 1 ? '' : 's'} need a board on the wire,
+      <b>${needVivado}</b> need the Vivado build to run on a Windows machine, and <b>${needBench}</b> needs an
+      energy benchmark. Until then the honest reading of this sheet is
+      <b class="tag e">not measured yet</b>, and Table 3 below is what can be checked today.`;
+
+  // ── Table 3: link health, per satellite, board or no board ───────────────
+  const H = [
+    ['Photos scored', n => n.status ? num(n.status.frames_scored) : '—'],
+    ['Photos sent home', n => num(n.frames_sent)],
+    ['Photo rows received', n => n.status ? num(n.status.rows_rx) : '—'],
+    ['Messages back to the ground', n => num(Object.values(n.rx_counts || {}).reduce((a, b2) => a + b2, 0))],
+    ['Checksum errors', n => n.status ? num(n.status.crc_errors) : '—'],
+    ['Malformed messages', n => n.status ? num(n.status.len_errors + n.status.unknown_type) : '—'],
+    ['Dropped because it was busy', n => n.status ? num(n.status.busy_drops) : '—'],
+    ['Replies that never came', n => num(n.timeouts)],
+    ['Disagreements with the model', n => num(n.mismatches)],
+  ];
+  setHTML($('t-health-head'), '<th>What</th>' + s.nodes.map((n, i) =>
+    `<th class="num">Satellite ${i + 1}<br><span class="tag ${n.simulated ? 'e' : 'm'}">${n.simulated ? 'simulated' : 'real board'}</span></th>`).join(''));
+  setHTML($('t-health'), H.map(([what, get]) => {
+    const vals = s.nodes.map(get);
+    const bad = /errors|Malformed|Disagreements|never came|busy/.test(what) && vals.some(v => v !== '—' && v !== '0');
+    return `<tr><td>${what}</td>` + vals.map(v =>
+      `<td class="num"${bad && v !== '0' && v !== '—' ? ' style="color:var(--red)"' : ''}>${v}</td>`).join('') + '</tr>';
+  }).join(''));
 
   const fr = [...s.frames.notable_tx, ...s.frames.notable_rx].sort((a, b2) => a.t_ms - b2.t_ms).slice(-60);
   const txt = fr.map(f => `${String(f.t_ms).padStart(8)}  ${f.way === 'tx' ? 'ground → sat' : 'sat → ground'} ${f.node + 1}  ${f.type.padEnd(12)} ` +
