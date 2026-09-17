@@ -35,168 +35,162 @@ typography:
     letterSpacing: "-.025em"
     fontVariation: "'wdth' 106"
     fontFeature: "proportional-nums"
+  figure:
+    fontFamily: "{typography.display.fontFamily}"
+    fontSize: "clamp(23px, 2.3vw, 31px)"
+    fontWeight: 800
+    lineHeight: "1"
+    letterSpacing: "-.025em"
+    fontVariation: "'wdth' 106"
+    fontFeature: "proportional-nums"
   title:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "23px"
+    fontSize: "24px"
     fontWeight: 800
     lineHeight: "1"
     letterSpacing: "-.012em"
     fontVariation: "'wdth' 112"
   standfirst:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "14.5px"
+    fontSize: "15px"
     fontWeight: 400
-    lineHeight: "1.4"
+    lineHeight: "1.45"
     letterSpacing: "-.005em"
-  readout:
+  score:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "19px"
+    fontSize: "20px"
     fontWeight: 700
-    lineHeight: "1.2"
+    lineHeight: "1.45"
     letterSpacing: "-.02em"
   body:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "14px"
+    fontSize: "14.5px"
     fontWeight: 400
-    lineHeight: "1.4"
+    lineHeight: "1.45"
+    letterSpacing: "normal"
     fontFeature: "tabular-nums"
   lede:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "12.5px"
+    fontSize: "13px"
     fontWeight: 400
     lineHeight: "1.26"
+    letterSpacing: "normal"
+  control:
+    fontFamily: "{typography.display.fontFamily}"
+    fontSize: "13px"
+    fontWeight: 600
+    lineHeight: "1.45"
+    letterSpacing: "normal"
   caption:
     fontFamily: "{typography.display.fontFamily}"
-    fontSize: "11.5px"
+    fontSize: "12px"
     fontWeight: 400
     lineHeight: "1.35"
-  small:
+    letterSpacing: "normal"
+  plate-heading:
     fontFamily: "{typography.display.fontFamily}"
     fontSize: "11px"
-    fontWeight: 400
-    lineHeight: "1.25"
+    fontWeight: 700
+    lineHeight: "1.45"
+    letterSpacing: ".11em"
   label:
     fontFamily: "{typography.display.fontFamily}"
     fontSize: "10px"
     fontWeight: 700
-    lineHeight: "1.2"
-    letterSpacing: ".11em"
-  micro:
-    fontFamily: "{typography.display.fontFamily}"
-    fontSize: "9.5px"
-    fontWeight: 700
-    lineHeight: "1.2"
+    lineHeight: "1.45"
     letterSpacing: ".1em"
-  mono:
+  log:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
     fontSize: "11px"
     fontWeight: 400
     lineHeight: "1.5"
+    letterSpacing: "normal"
 rounded:
   hair: "1px"
-  chip: "2px"
-  plate: "3px"
+  inner: "2px"
+  surface: "3px"
   pill: "5px"
+  round: "50%"
 spacing:
   hair: "2px"
   tight: "3px"
-  xs: "4px"
-  sm: "8px"
-  grid: "9px"
-  gap: "10px"
-  pad: "12px"
-  rail: "14px"
+  xs: "5px"
+  sm: "7px"
+  md: "8px"
+  gap: "12px"
+  pad: "15px"
+  page: "16px"
 components:
   plate:
     backgroundColor: "{colors.plate}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.plate}"
+    rounded: "{rounded.surface}"
     padding: "{spacing.pad}"
-  plate-heading:
-    textColor: "{colors.ink-2}"
-    typography: "{typography.label}"
-  control-group:
-    backgroundColor: "{colors.plate}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.plate}"
-    padding: "4px 9px"
-    height: "36px"
-  transport-button:
+  button-transport:
     backgroundColor: "{colors.plate-sunk}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.plate}"
+    typography: "{typography.control}"
+    rounded: "{rounded.surface}"
     padding: "5px 11px"
-    typography: "{typography.lede}"
-  transport-button-hover:
+  button-transport-hover:
     backgroundColor: "{colors.stock}"
     textColor: "{colors.ink}"
-  transport-button-pressed:
+  button-transport-pressed:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.plate}"
-  sheet-tab:
+  button-sheet:
     backgroundColor: "transparent"
     textColor: "{colors.ink-2}"
-    rounded: "{rounded.plate}"
+    rounded: "{rounded.surface}"
     padding: "5px 11px"
-    typography: "{typography.small}"
-  sheet-tab-selected:
+  button-sheet-selected:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.plate}"
-  chip-hw:
+  input-field:
+    backgroundColor: "{colors.plate-sunk}"
+    textColor: "{colors.ink}"
+    typography: "{typography.control}"
+    rounded: "{rounded.surface}"
+    padding: "5px 7px"
+  chip-measured:
     backgroundColor: "transparent"
     textColor: "{colors.green}"
-    rounded: "{rounded.chip}"
+    typography: "{typography.label}"
+    rounded: "{rounded.inner}"
     padding: "2px 6px"
-    typography: "{typography.micro}"
-  chip-sim:
+  chip-modelled:
     backgroundColor: "transparent"
     textColor: "{colors.amber}"
-    rounded: "{rounded.chip}"
+    typography: "{typography.label}"
+    rounded: "{rounded.inner}"
     padding: "2px 6px"
-    typography: "{typography.micro}"
-  chip-bad:
+  chip-fault:
     backgroundColor: "{colors.red-wash}"
     textColor: "{colors.red}"
-    rounded: "{rounded.chip}"
+    typography: "{typography.label}"
+    rounded: "{rounded.inner}"
     padding: "2px 6px"
-    typography: "{typography.micro}"
-  chip-plain:
-    backgroundColor: "transparent"
-    textColor: "{colors.ink-2}"
-    rounded: "{rounded.chip}"
-    padding: "2px 6px"
-    typography: "{typography.micro}"
-  chip-solid:
+  chip-sending:
     backgroundColor: "{colors.red}"
     textColor: "{colors.plate}"
-    rounded: "{rounded.chip}"
+    typography: "{typography.label}"
+    rounded: "{rounded.inner}"
     padding: "2px 6px"
-    typography: "{typography.micro}"
-  tag-measured:
-    textColor: "{colors.green}"
-    typography: "{typography.micro}"
-  tag-estimate:
-    textColor: "{colors.amber}"
-    typography: "{typography.micro}"
-  tag-failed:
-    textColor: "{colors.red}"
-    typography: "{typography.micro}"
-  score-bar-track:
+  phase-badge:
     backgroundColor: "{colors.plate-sunk}"
-    rounded: "{rounded.pill}"
-    height: "10px"
-  score-bar-fill:
-    backgroundColor: "{colors.blue}"
-    rounded: "{rounded.pill}"
-    height: "10px"
-  lane-cell:
-    backgroundColor: "{colors.rule-soft}"
-    rounded: "{rounded.chip}"
-    height: "17px"
-  lane-cell-won:
-    backgroundColor: "{colors.blue}"
-  lane-cell-forced:
-    backgroundColor: "{colors.red}"
+    textColor: "{colors.ink}"
+    typography: "{typography.control}"
+    rounded: "{rounded.surface}"
+    padding: "4px 10px 4px 8px"
+  phase-badge-live:
+    backgroundColor: "{colors.red-wash}"
+    textColor: "{colors.red}"
+  tooltip:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.plate}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.surface}"
+    padding: "6px 9px"
 ---
 
 # Design System: Orbit
@@ -205,361 +199,416 @@ components:
 
 **Creative North Star: "The Test Report, Written Live"**
 
-Orbit is a semiconductor datasheet and test-report spread that happens to be
-updating ten times a second. Every quantity on the sheet carries a plain-English
-name, a unit, and how we know it; anything nobody has measured says so in the
-same breath, in the same size type, without apology. The surface is cool bond
-stock (#edf0f3) carrying white plates (#ffffff), hairline rules doing nearly all
-the separation, and Archivo alone across the whole ramp — width axis for plate
-headings and big figures, weight and size for everything else.
+Orbit is a semiconductor datasheet that happens to be updating ten times a
+second. Its surface is cool bond stock with white plates laid on it, lifted by a
+single whisper of ambient shadow and separated by hairline rules. Everything a
+console would do to look technical — neon on black, gradients, glow, gauges,
+hover lift — is refused. What makes it read as instrumentation instead is the
+discipline of the numbers: every quantity on the sheet carries a plain-English
+name, a unit, and a provenance tag saying how we know it, and anything nobody
+has measured says `not measured yet` in the same breath rather than going quiet.
 
-The density is high and deliberately unpadded: a 9–12px rhythm, 9.5–12.5px
-supporting type, and figures that jump to 34–54px so a stranger two metres away
-reads the gain before they read anything else. Nothing is decorative. There is no
-hue that does not mean something, no icon, no gradient, no glass, no neon. The
-build explicitly refuses the mission-control console with green-on-black
-telemetry that every space demo ships, and the rounded-card dashboard it
-replaced.
+The palette is five pens and nothing else. Blue is Orbit's own result, pencil
+grey is the baseline it beats, red is live-right-now or an intervention the
+ground forced, green is measured on real hardware, amber is modelled or not yet
+measured. A colour never means "satellite 3"; satellites are numbered lanes and
+positions, so the display carries twelve of them without inventing a twelfth
+hue. Archivo carries the whole page alone — the width axis for plate headings
+and large figures, weight and size for everything else — with one deliberate
+exception: the raw device log on sheet 2 is set in a system monospace stack,
+because a wrapped log of fixed-width fields is less legible in a proportional
+face than the divergence from Archivo-alone costs.
 
-Elevation is one token and one token only (`--sh`), a two-stop ambient lift
-carried by every plate and control group. It is diffuse, near-invisible in
-isolation, and it exists to separate a white plate from a nearly-white stock
-where a 1px rule alone read as a seam. It is not a card shadow: there is no hard
-offset, no hover lift, and no second step. A future surface that wants depth
-reuses this token or goes without.
+Density is high but no longer bought at the cost of legibility. Sheet 1 fits one
+screen above 1180×759 and every supporting type step sits a notch above the
+minimum that would fit, because the audience reads it from two metres. Sheets 2
+and 3 gave up fixed-height instrument framing entirely and became scrolling
+reference spreads, where a row that needs more height simply takes it.
 
 **Key Characteristics:**
-- Cool bond stock, white plates, hairline rules, 3px corners at the largest.
-- Five semantic pens, each with exactly one job; no sixth pen may be invented.
-- Archivo variable alone, width axis carrying the datasheet voice.
-- A closed type ramp: seven literal steps and four responsive tokens.
-- Every figure is named, united, and tagged measured / modelled / failed.
-- One screen above 1180×759; panels clip, the page never does.
-- Fully self-hosted — no CDN font, script, or image, enforced by the build.
+- Cool bond stock, white plates, hairline rules; one ambient shadow and no second step.
+- Five pens with one job each; satellites are numbered lanes, never hues.
+- Archivo alone, width axis reserved for plate headings and large figures.
+- Six literal type steps (10, 11, 12, 13, 14.5, 20px) plus five responsive `:root` tokens.
+- Every number carries a name, a unit, and a provenance tag.
+- Sheet 1 is one fixed screen; sheets 2 and 3 scroll.
 
 ## Colors
 
-A cool grey paper stock and five working inks, where hue is a claim about
-provenance rather than a decoration.
+A cool, near-neutral paper with five saturated inks, each rationed to a single
+meaning and each also carried by a second, non-colour channel.
 
 ### Primary
-- **Result Blue** (`{colors.blue}`): Orbit's own result, and only that. The gain
-  figure, the Orbit curve in Fig 1, the filled score bars, a won slot in the
-  ledger, the used segments of the contact-window meter, the focus ring. Its
-  10% and 16% washes shade the gap between the two curves and fill secondary
-  bars, so the wash always means "the same claim, quieter".
+- **Orbit Blue** (`{colors.blue}`): the system's own result, everywhere it
+  appears — the gain figure, the filtered curve in Fig 1, the delivered curve in
+  Fig 4, won slots in the ledger, used capacity in the contact-window meter,
+  filled score bars, the top row of each priority queue, and the sweep progress
+  track. Nothing that is not Orbit's result is blue.
+- **Blue Wash** (`{colors.blue-wash}`) and **Blue Soft** (`{colors.blue-soft}`):
+  the same ink at 10% and 16%. The wash is the shaded gap between the two curves
+  — the quantity the figure exists to show. The soft tint fills secondary bars
+  (score components, non-leading queue rows) and the text selection highlight.
 
 ### Secondary
-- **Counterfactual Pencil** (`{colors.pencil}`): the baseline Orbit is beating —
-  send-oldest-first. Always drawn dashed as well as grey, never grey alone.
-- **Live Red** (`{colors.red}`): something happening right now, or something the
-  ground forced. The breathing pass lamp, the ring on the live slot, a forced
-  fairness switch, a fault chip, the lost-link banner, a failed test tag.
+- **Pencil Grey** (`{colors.pencil}`): the counterfactual baseline — first-in
+  first-out, no scoring. It is the ink of the line Orbit beats, and it is always
+  dashed as well as grey. Also the idle lamp in the pass badge.
 
 ### Tertiary
-- **Measured Green** (`{colors.green}`): this number came off real hardware —
-  a Vivado report, an on-board counter, a live wire measurement. Nothing else.
-- **Modelled Amber** (`{colors.amber}`): modelled, scaled, simulated, or not
-  measured yet. Its wash marks the highlighted row of a scaling table and the
-  dashed line where the contact window saturates.
+- **Live Red** (`{colors.red}`): two meanings that are one meaning — this is
+  happening right now, or the ground forced it. The breathing lamp on a live
+  pass, the ring on the current slot, the forced-switch cell in the ledger, the
+  `Sending now` chip, a fault chip, a failed timing tag, and the lost-link
+  banner.
+- **Measured Green** (`{colors.green}`): a number that came off real hardware —
+  a Vivado report, a counter on the board, a stopwatch on the link. It appears
+  only as a tag or a provenance chip, never as a fill or a curve.
+- **Modelled Amber** (`{colors.amber}`): a number that came from a model, a
+  simulation, a scaling estimate, or does not exist yet. The dashed vertical rule
+  marking where the contact window fills on sheets 3's two figures, the
+  highlighted row in a sweep table (`{colors.amber-wash}`), the `sim` chip on a
+  simulated satellite, and the literal `not measured yet` tag.
 
 ### Neutral
-- **Bond Stock** (`{colors.stock}`): the page itself; also the hover fill of a
-  raised control.
-- **Plate** (`{colors.plate}`): every panel, and the halo stroke ringing chart
-  end-dots so a mark reads against its own plate.
-- **Sunk Plate** (`{colors.plate-sunk}`): recessed wells — input fields, bar
-  tracks, image placeholders, the meter trough.
-- **Ink** (`{colors.ink}`) / **Ink Two** (`{colors.ink-2}`): primary text and
-  the quieter register for units, captions, labels, and axis text.
-- **Rule** (`{colors.rule}`) / **Soft Rule** (`{colors.rule-soft}`): the hairline
-  at 1px that does the separating — table heads and the baseline axis take the
-  stronger rule, plate borders and gridlines the softer one.
+- **Bond Stock** (`{colors.stock}`): the page itself; the cool grey the plates
+  sit on.
+- **Plate** (`{colors.plate}`): the white of every panel, and the stroke colour
+  behind direct chart labels and end dots.
+- **Sunk Plate** (`{colors.plate-sunk}`): the recessed well — empty track, empty
+  image slot, control field, badge ground.
+- **Ink** (`{colors.ink}`) / **Second Ink** (`{colors.ink-2}`): primary text and
+  supporting text. `ink` is also the ground of a selected tab and of the tooltip.
+- **Rule** (`{colors.rule}`) / **Soft Rule** (`{colors.rule-soft}`): the two
+  hairlines. `rule` divides sections and heads tables; `rule-soft` is the plate
+  border, the row divider, and the unfilled portion of any track.
 
-A dark mode redefines all sixteen tokens at the same names (both via
-`prefers-color-scheme` and an explicit `data-theme`), lifting each pen to a
-brighter form against #10151a. Nothing downstream knows which mode it is in.
+A dark scheme exists with a parallel set of the same seventeen tokens (honoring
+`prefers-color-scheme` and an explicit `data-theme` override). The roles do not
+change; only the values do.
 
 ### Named Rules
 
 **The Five Pens Rule.** Blue, pencil, red, green, amber. Each has exactly one
-job: result, baseline, live-or-forced, measured, modelled. A new colour is a new
-claim, and there are no more claims to make. Never add a sixth pen, and never
-borrow an existing pen for a meaning it does not already carry.
+job and no ink may be borrowed for a second meaning. If a new distinction needs
+a colour, it does not get one — it gets a position, a dash pattern, a ring, or a
+word.
 
-**The Numbered Lane Rule.** A satellite is identified by its lane position and
-its number, never by a hue. This is what lets the ledger show twelve satellites
-without generating twelve colours, and what keeps blue meaning "Orbit's result"
-in a panel full of satellites. Never assign a per-satellite colour.
+**The Numbered Lane Rule.** A satellite is a numbered lane and a fixed row
+position, never a hue. Twelve satellites must look the same as two.
 
-**The Never Colour Alone Rule.** The baseline curve is dashed as well as grey;
-the window-saturation line is dashed as well as amber; a live slot gets a ring as
-well as red. Any distinction carried by one of the five pens must also be carried
-by a second channel — dash, ring, weight, or position.
+**The Never Colour Alone Rule.** Every distinction carried by colour is carried
+by a second channel too: the baseline curve is dashed as well as pencil, the
+live slot is ringed as well as red, the window-fill rule is dashed as well as
+amber, a provenance tag carries the literal word as well as the ink.
 
-**The Ink-Only Rule.** A colour value in this build is always ink. The two
-overflow masks on the queue and the sent-photo strip are written with the `black`
-keyword precisely because they are alpha channels, not paint — reading them as an
-undocumented colour token would be the mistake they are written to prevent.
+**The Ink-Only Rule.** A colour value is always an ink. The three washes
+(`blue-wash`, `red-wash`, `amber-wash`, 10% of their pen) are the only fills the
+palette permits, and they only ever tint an area that already belongs to that
+pen's meaning. No gradient, no glow, no tinted surface for decoration.
 
 ## Typography
 
-**Display Font:** Archivo variable (wght 400–800, wdth 62–125), self-hosted at
-`/static/fonts/archivo-latin.woff2`, with a system sans fallback.
-**Body Font:** Archivo — the same face, the whole ramp.
-**Mono Font:** the platform monospace stack, used only inside the raw wire log.
+**Display Font:** Archivo (variable, wght 400–800, wdth 62–125), self-hosted
+from `/static/fonts/archivo-latin.woff2`, falling back to the platform UI stack.
+**Body Font:** Archivo — the same face carries everything.
+**Label/Mono Font:** a system monospace stack (`ui-monospace, SFMono-Regular,
+Menlo, Consolas`), used only for the raw device log.
 
-**Character:** One grotesque doing every job, with the width axis as the sheet's
-accent. Headings and big figures are set wider (106–118%) and tight-tracked;
-supporting labels are set small, bold, and widely letter-spaced in caps. Tabular
-numerals are the body default so a live-updating column never shivers; the two
-big proportional figures opt out because they are read as a shape, not a column.
-
-The ramp is closed and small: seven literal steps — 9.5, 10, 11, 11.5, 12.5, 14
-and 19px — plus two clamps and four responsive tokens. Four of those steps live
-inside two pixels of each other, which is deliberate rather than sloppy: 9.5 and
-10 are always uppercase and letter-spaced, and caps at .07–.11em tracking read
-optically larger and wider than the same pixel size set lowercase. The caps tiers
-and the small-text tiers are therefore not interchangeable, and 11px lowercase
-sits comfortably below 10px caps in the hierarchy despite the number.
+**Character:** Archivo is a grotesque with a real width axis, which is what makes
+a one-typeface page possible: headings get their authority from width and weight
+rather than from a second face, and large figures can be squeezed or extended to
+sit on the grid without a size change. Body text is tabular by default so live
+digits do not shimmy as they update; the two big proportional figures opt out,
+because at 34–54px tabular spacing looks gappy.
 
 ### Hierarchy
-- **Display** (`--t-hero`, 800, clamp 34–54px, lh .88, wdth 108%, tracking
-  −.035em): the gain figure in Fig 1, in Result Blue. The one thing readable at
-  two metres.
-- **Headline** (800, clamp 24–31px, wdth 106%, tracking −.025em): the pass number;
-  its trailing unit drops to .46em and Ink Two.
-- **Title** (`--t-title`, 800, 23px, wdth 112%, tracking −.012em): the ORBIT
-  wordmark, once.
-- **Standfirst** (`--t-standfirst`, 400, 14.5px, tracking −.005em): the sentence
-  beside the wordmark, with the question bolded to 600.
-- **Readout** (700, 19px, tracking −.02em): a compared photo's score, with its
-  `/ 100` denominator at 11px/500 Ink Two so the number carries the weight.
-- **Body** (400, 14px/1.4, tabular): the sheet default and the boot message.
-- **Lede** (`--t-lede`, 12.5px): two jobs at one size — the sentence beside the
-  gain figure at lh 1.26 and max 40ch, and the entire control tier (transport
-  buttons at 600, fields, the speed value at 700, the pass phase pill at 700,
-  score-bar rows, table bodies, the satellite name at wdth 112%, the lost-link
-  banner at 700).
-- **Caption** (400, 11.5px/1.35, Ink Two): plate captions, control hints, the
-  conditions line, the figure legend, key/value rows, the meter caption, the
-  tooltip, the sentence-case descriptor in a plate heading at 500.
-- **Small** (400, 11px, Ink Two): the dense readout tier — chart and axis text,
-  queue rows, triplet meters, satellite metadata, the ledger lane name at
-  700/.05em, the sheet tabs at 600/.085em uppercase, the gain total.
-- **Label** (700, 10px, tracking .11em, uppercase, Ink Two): plate headings and
-  satellite-strip headings, plus `.micro` section labels at .09em. The figure
-  number inside a heading takes Ink and wdth 118%.
-- **Micro** (700, 9.5px, tracking .07–.1em, uppercase): chips, honesty tags,
-  control-rail labels, table heads, the compare plate's who-line, the sent-photo
-  caption, and the ledger lane name once past three satellites.
-- **Mono** (400, 11px/1.5, Ink Two, `white-space: pre`): the wire log only.
-
-Responsive type changes are values on this ramp, not new steps: `--t-hero` drops
-to 40px below 860px tall and 46px below 720px wide; `--t-title` to 20px and
-`--t-standfirst` to `--t-lede` below 720px wide.
+- **Display** (800, `--t-hero` clamp 34–54px, line-height .88, tracking -.035em,
+  wdth 108, proportional figures): the gain number — the one thing a stranger
+  reads at two metres. One per screen. Overridden to 42px under 860px tall and
+  *up* to 46px under 720px wide, where the page scrolls and there is room.
+- **Headline** (800, `--t-pass` clamp 24–31px, line-height 1, tracking -.025em,
+  wdth 106, proportional figures): the pass number on the contact-window plate.
+  Drops to clamp 22–27px under 800px tall.
+- **Figure** (800, clamp 23–31px, wdth 106): the three-across statistics that
+  lead sheets 2 and 3. Same voice as the headline at a smaller weight of
+  attention.
+- **Title** (800, `--t-title` 24px, wdth 112, tracking -.012em): the wordmark.
+  21px under 720px wide.
+- **Standfirst** (400, `--t-standfirst` 15px, tracking -.005em, second ink with
+  the question set in ink at 600): the one sentence that states the problem,
+  beside the wordmark. Collapses to the lede size under 720px.
+- **Score** (700, 20px, tracking -.02em): the per-photo score under each of the
+  two compared photographs, with its `out of 100` qualifier set at caption size.
+- **Body** (400, 14.5px/1.45, tabular): the document default.
+- **Lede** (400, `--t-lede` 13px/1.26, max 40ch): the sentence beside the gain
+  figure that says what the gain means.
+- **Control** (600, 13px): buttons, selects, number and range fields, table
+  cells, score-bar rows, the pass-phase badge.
+- **Caption** (400, 12px/1.3–1.35, second ink): teaching captions, chart axis
+  text, key/legend rows, hints, metering figures, queue rows.
+- **Plate heading** (700, 11px, tracking .11em, uppercase, second ink; the
+  figure number set in ink at wdth 118): every plate's `h2`, and the satellite
+  strip head. A `.thin` variant (500, 12px, sentence case) carries the trailing
+  explanatory phrase in the same line.
+- **Label** (700, 10px, tracking .1em, uppercase, second ink): rail group
+  labels, conditions keys, the photo-column headers, table column heads.
+  Provenance chips and tags use the same size at .07em.
+- **Log** (400, 11px/1.5, monospace, second ink, `white-space: pre`): the device
+  log only.
 
 ### Named Rules
 
-**The Closed Ramp Rule.** Seven literal steps and four tokens are the whole ramp.
-A new surface picks the nearest existing step; it does not add one. If two steps
-would sit within half a pixel of each other doing the same job, they are the same
-step — that is how 13px and 12px were absorbed into 12.5, and 10.5 into 11.
+**The Six Step Rule.** The literal ramp is six sizes — 10, 11, 12, 13, 14.5 and
+20px — plus five `:root` tokens (`--t-hero`, `--t-pass`, `--t-title`,
+`--t-standfirst`, `--t-lede`) for the roles that resize. That is the whole ramp.
+A new size must be an existing step; if a value sits within half a pixel of a
+step doing the same job, it *is* that step.
 
 **The One Declaration Rule.** A role that changes size at a breakpoint owns a
-`:root` token (`--t-hero`, `--t-title`, `--t-lede`, `--t-standfirst`) and exactly
-one `font-size` declaration. Media queries override the token, never the element.
-Never reintroduce a per-breakpoint `font-size` on a component.
+`--t-` token and declares `font-size` exactly once. The media query overrides the
+token on `:root`, never the component. This is why the hero can grow at the
+narrow breakpoint and shrink at the short one without either rule knowing about
+the other.
 
-**The Caps Tier Rule.** 9.5 and 10px exist only as uppercase, letter-spaced type;
-11 and 11.5px exist only as sentence-case text. Letter-spaced caps read larger
-than their pixel size, so the two pairs are separate tiers and swapping one for
-the other inverts the hierarchy. Never set a caps label at 11px or body text at 10px.
+**The Caps Tier Rule.** 10 and 11px exist only as uppercase, letter-spaced type;
+12 and 13px only as sentence case. A letter-spaced caps tier reads optically
+larger than a sentence-case tier at the same pixel size, so the ramp's two
+smallest steps are legible precisely because they are never set in sentence case.
 
-**The Width-Axis Rule.** Hierarchy is carried by size and weight; the width axis
-is carried by role. Figures and headings widen (106–118%); nothing else touches
-`font-stretch`. Never substitute a second family for emphasis — Archivo is the
-only face on the sheet.
+**The Width-Axis Rule.** Hierarchy is carried by size and weight. The width axis
+(106–118%) is reserved for plate headings, the wordmark, and large figures; every
+other element stays at the default width. Width is a signal, not a texture.
 
-**The Named Quantity Rule.** Every number on the sheet appears with a
-plain-English name a non-specialist can read, its unit in Ink Two beside it, and
-a provenance tag. "Photos scored per second · photos/s · MEASURED at 100 MHz",
-never a bare number under an acronym.
+**The Named Quantity Rule.** A number never appears alone. It carries a
+plain-English name, a unit, and a provenance tag — `measured` in green with
+where, `estimate`/`modelled` in amber with what the model assumed, or the literal
+`not measured yet`. A bare figure reads as measured whether it is or not.
 
 ## Layout
 
-The sheet is a full-viewport three-row grid — title block, control rail with
-conditions line, then the active sheet — at 9px gaps and 9/14/11px page padding.
-Three sheets (Live run, Hardware, How far it scales) swap in place as tab panels;
-only one is ever laid out.
+The page is a full-height grid of three rows — title block, control rail with
+the conditions line, then the active sheet — inset 11px top, 16px sides, 13px
+bottom, with an 11px row gap (dropping to a flat 10px inset and an 8px gap under
+720px). Plates carry 15px of padding and sit 12px apart (`--gap`). The small
+rhythm inside a plate runs 2 / 3 / 5 / 7 / 8px; 22px is the one wide gutter,
+between the three score-component meters.
 
-The live sheet is a fixed 3×3 grid: Fig 1 (gain plus the two curves, gap shaded)
-at 1.5fr on the left, the two compared photos in the centre column
-(min 244px), the pass and contact window on the right (min 246px); the slot
-ledger spans full width; the satellite strips span full width beneath, with
-rows at minmax(262px,.9fr) / auto / minmax(196px,1.1fr). The hardware sheet is a
-2×2 (engine, link, log full width); the scaling sheet is a 1.12fr/1fr pair over a
-full-width notes plate.
+**Sheet 1 (live run)** is a fixed three-column, three-row grid:
+`1.5fr / minmax(244px, .8fr) / minmax(246px, .74fr)` across, and
+`minmax(300px, 1fr) / auto / minmax(200px, .85fr)` down. Fig 1 and its gain sit
+left, the two compared photographs centre, the pass and contact window right;
+the slot ledger spans the full width beneath them; the satellite strips span the
+full width below that. Plates clip their overflow, and a list that overruns fades
+out under a mask gradient rather than being cut off square.
 
-Responsive behaviour is height-first, because the constraint is one screen, not
-one column:
-- **≤860px tall:** `--t-hero` drops to 40px, satellite thumbnails from 96px to
-  84px, and the grid rows tighten.
-- **≤780px tall (wide):** the already-sent photo strip and the compare caption
-  are dropped — the priority queue is the story, the haul is not.
-- **≤759px tall (wide):** the page starts scrolling and every fixed row becomes
-  content-sized, deliberately, rather than clipping a figure in half.
-- **≤1180px wide:** the sheet stacks in source order at two columns, every
-  explicit grid row is cleared, plates stop clipping, and the page scrolls.
-- **≤720px wide:** single column, `--t-title` to 20px and `--t-standfirst` to
-  `--t-lede`, `--t-hero` to 46px, triplet metrics stack, the scenario hint is
-  dropped, satellite thumbnails inline at 76px.
+**Sheets 2 and 3 (hardware, scaling)** are two-column scrolling spreads with
+`max-content` rows, aligned and packed to the start. They are reference
+documents, not instruments: they scroll as a whole.
 
-Spacing rhythm is fine and datasheet-tight: 2/3/4px inside components, 8–9px
-between them, `--gap` 10px between plates, `--pad` 12px inside a plate. There is
-no 16px+ step in the system; generous padding is not part of this world.
+**Responsive behaviour.** Four height breakpoints and two width breakpoints, in
+a stated order. At 900px tall the already-sent photo strip goes. At 800px the
+compared-photos caption goes and the pass number steps down. At 860px the hero
+drops to 42px and the per-satellite thumbnails shrink to 88px. Below 759px tall
+the live sheet stops being fixed and the page scrolls, with every row becoming
+content-sized. Below 1180px wide the whole page scrolls and the sheets restack in
+source order; below 720px everything is a single column, the satellite strips
+lose their thumbnail column, and the gain figure gets *bigger*.
+
+**Satellite density.** Up to three satellites get full strips: thumbnail, score
+bars, the three score components, the priority queue, and the already-sent haul.
+Beyond three, the strips collapse to fixed 46px single-line rows inside their own
+scroller, keeping only the identity, the provenance chips, and one queue line.
 
 ### Named Rules
 
 **The One Screen Rule.** Above 1180px wide and 759px tall the live sheet fits the
-viewport with `body { overflow: hidden }`. Panels clip their own overflow — the
-queue fades out under a 9px mask, the sent-photo strip under a 22px horizontal
-mask — and the page never scrolls. Below 759px tall the page is allowed to
-scroll on purpose. Audit test: at 1440×800, nothing on sheet 1 is reachable by
-scrolling, and no figure is cut.
+viewport with no page scroll. Overflow is handled inside plates — clipped, with a
+mask fade — never by growing the document.
 
-**The Drop, Don't Shrink Rule.** When height runs out, whole secondary elements
-are removed by media query and the primary ones keep their size. Never solve a
-height squeeze by shrinking the gain figure below 40px or the queue below 38px.
+**The Order of Sacrifice Rule.** When height runs short, things are dropped whole
+in a fixed order, never shrunk: the figures row has a hard floor because a chart
+and a pair of photographs cannot shrink gracefully, so the queue absorbs the
+squeeze first, the already-sent photo strip is the first whole element dropped,
+and the caption that teaches what a score is goes last.
+
+**The Definite Scroller Rule.** Inside a scrolling sheet of definite height,
+`auto` grid rows compress toward min-content and let plates overflow into each
+other; those sheets use `max-content` rows. And a scrolling wrapper nested
+inside an already-scrolling sheet hides rows behind a scrollbar nobody looks for,
+so an inner `.scroll` inside sheets 2 and 3 is `overflow: visible`.
 
 ## Elevation & Depth
 
-Depth is carried almost entirely by tone and hairline rules: white plates on cool
-stock, sunk wells in `plate-sunk` for anything that receives a value, and 1px
-rules in two strengths. There is exactly one shadow token, applied uniformly, and
-it is ambient rather than directional — a hairline contact plus a wide, deeply
-negative-spread haze that reads as separation, not as lift. Nothing in the system
-rises on hover; hover changes fill and border colour instead.
+The system has one elevation step and no second. A plate is white on cool stock
+with a hairline `rule-soft` border and a single two-layer ambient shadow — a 1px
+contact shadow plus a wide, heavily-negative-spread ambient
+(`0 1px 2px rgba(17,22,27,.05), 0 6px 18px -12px rgba(17,22,27,.30)`). Depth
+beyond that is tonal: recessed things are `plate-sunk`, divisions are hairlines,
+and the page never uses a shadow to say "on top of". Nothing lifts on hover — a
+hover changes a border colour or a background tone, never a `translateY`.
 
 ### Shadow Vocabulary
-- **Plate lift** (`box-shadow: 0 1px 2px rgba(17,22,27,.05), 0 6px 18px -12px rgba(17,22,27,.30)`;
-  dark: `0 1px 2px rgba(0,0,0,.40), 0 8px 22px -14px rgba(0,0,0,.70)`): every
-  plate, every control group, the lost-link banner. There is no second step.
-- **Ring, not shadow** (`box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red)`):
-  the live slot cell in the ledger; a plate-coloured halo then a red ring, so the
-  mark survives against neighbouring cells. This is identification, not elevation.
+- **Plate lift** (`--sh`): the only elevation token. Applied to plates, rail
+  groups, and the lost-link banner. Nothing else takes a shadow for depth.
+- **Live ring** (`box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red)`):
+  not elevation. A plate-coloured halo and a red hairline ring marking the slot
+  being transmitted right now.
+- **Now-marker ring** (`box-shadow: inset 0 0 0 2px var(--red)`): the same idea
+  inside the contact-window meter, marking the cell currently being spent.
 
 ### Named Rules
 
-**The One Elevation Rule.** There is a single shadow token and it is ambient.
-Never introduce a second elevation step, a hover lift, a directional or hard
-offset shadow, or a shadow on anything smaller than a plate.
+**The One Elevation Rule.** There is one shadow token and it is ambient. No
+second elevation step, no hover lift, no directional or hard-offset shadow.
+
+**The Ring, Not Lift Rule.** Any `box-shadow` beyond the token is a hairline ring
+denoting live state, drawn with zero blur and zero offset. If it has a y-offset
+or a blur, it is elevation and it is not allowed.
 
 ## Shapes
 
-Corners are effectively square: 3px on plates, controls and tabs; 2px on chips,
-tags, image frames and ledger cells; 1px inside a framed image; 5px only on the
-bar track, its fill, and the scrollbar thumb. Nothing is a circle except the
-9px status lamp, the chart end-dots, and the crosshair swatches.
+Rectangles with a small, consistent softening, and a strict correspondence
+between a fill and the well it sits in. Plates, rail groups, buttons, fields,
+badges, tooltips, and the banner are 3px. Anything nested inside them — image
+slots, meter cells, ledger cells, chips, tags, key swatches, tracks — is 2px, and
+an image inside a 2px slot is 1px. The one exception is the per-satellite score
+bar, whose 10px track and fill are 5px, a true pill at exactly half its height.
+Fully round (50%) is reserved for status lamps and chart end dots.
 
-Borders are the primary form device: 1px `rule-soft` around plates, controls and
-image frames; 1px `rule` under table heads and along the chart baseline; 1px
-`currentColor` around a chip, so a chip's outline is always its own meaning.
-Recurring silhouettes are the plate (bordered rectangle, heading row, content,
-optional caption), the track-and-fill bar, and the row of equal cells — the
-ledger lane and the window meter are the same geometry at two scales, which is
-the sheet's strongest repeated shape. Compared photos are locked square with
-`aspect-ratio: 1` and rendered `image-rendering: pixelated`, because they are
-data, not photography.
+Borders are always 1px and always a rule token; there is no 2px border anywhere.
+Photographs are always square (`aspect-ratio: 1`, `object-fit: cover`) and
+rendered with `image-rendering: pixelated`, because they are low-resolution
+frames and pretending otherwise would be a lie about the data. Curves are 2px
+with round caps and joins; a dashed curve is `7 5`, a dashed constraint rule is
+`4 4`.
 
-**The Matched Radius Rule.** A fill takes the radius of the well it sits in: the
-score-bar fill is 5px because its track is 5px, not because 4px looked close
-enough. Never invent a radius step for an inner element.
+**The Matched Radius Rule.** A fill takes the radius of the well it sits in, one
+step smaller if it is inset. Never round an inner element more than its
+container.
 
 ## Components
 
 ### Plate
-The sheet's only container. White fill, 1px soft-rule border, 3px corners, 12px
-padding, the single ambient shadow, and a column flex body. The heading is a
-micro-caps label carrying a figure number in Ink at wdth 118%, then a
-sentence-case plain-language descriptor at 500/11.5px, then optionally a
-provenance chip pushed to the far end. An optional caption sits below the body at
-11.5px Ink Two with its key noun bolded.
+The unit of the whole page. A white panel with a hairline border, 3px corners,
+15px padding, the one ambient shadow, and a column flex layout with `min-height:
+0` so charts and lists inside it can actually shrink. Its `h2` is a 10/11px
+uppercase letter-spaced heading in second ink, with the figure or table number
+(`FIG 1`, `TABLE 3`) picked out in ink at wdth 118 and an optional sentence-case
+`.thin` tail carrying the explanatory phrase. A plate never has a hover state.
 
-### Chips (provenance)
-Character: a stamp, not a badge. 9.5px caps, 2px corners, 2×6px padding, 1px
-`currentColor` border so the outline is the meaning.
-- **hw** — green outline: a real board.
-- **sim** — amber outline: a simulated satellite or a modelled figure.
-- **bad** — red on a 10% red wash, borderless: a fault.
-- **plain** — Ink Two on the stronger rule: neutral state.
-- **solid** — white on solid red, borderless: happening right now ("Sending now").
-
-### Tags (honesty vocabulary)
-Bare uppercase micro type, no box, inline in a table cell or caption, immediately
-followed by the provenance in Ink Two.
-- **measured** (green) — followed by where it was measured.
-- **estimate / modelled / not measured yet** (amber) — including the literal
-  fallback `not measured yet` used wherever a number does not exist.
-- **failed** (red) — a test that did not pass, stated as loudly as one that did.
-
-### Controls
-- **Control group:** white plate-let, soft-rule border, 3px corners, 36px min
-  height, holding a micro-caps label plus its inputs. All controls live in one rail.
-- **Transport button:** sunk fill, soft-rule border, 12.5px/600 Ink, 5×11px
-  padding. Hover strengthens the border and takes the stock fill; the active
-  state inverts to Ink fill with plate text; disabled drops to 40% opacity.
-- **Fields:** sunk fill, soft-rule border, 3px corners, 12.5px; number inputs are
-  52px wide and centred; ranges take blue as their accent colour.
-- **Focus:** a 2px Result Blue outline at 2px offset, globally, on `:focus-visible`.
+### Buttons
+- **Shape:** 3px corners, 1px `rule-soft` border, no shadow.
+- **Transport / default** (`.transport button`, `.btn`): sunk plate ground,
+  ink text, 13px/600, 5px × 11px padding.
+- **Hover:** border firms to `rule`, ground cools to the stock colour. No lift,
+  no shadow change. 140ms on the standard ease.
+- **Pressed / active** (`aria-pressed="true"`): inverts to solid ink with plate
+  text.
+- **Disabled:** 40% opacity, default cursor. No colour change.
 
 ### Navigation (sheets)
-Three tab buttons plus a theme toggle in the title block, at 11px/600 caps with
-.085em tracking. Rest is Ink Two on transparent; hover takes Ink on a plate fill;
-the selected tab inverts fully to Ink fill with plate text. No underline, no
-indicator bar — the inversion is the indicator.
+Three numbered tabs plus the theme toggle, right-aligned in the title block.
+12px/600 uppercase at .085em tracking in second ink, transparent ground.
+Hover fills with the plate white; the selected tab (`aria-selected="true"`)
+inverts to ink with plate text. Each tab is titled with its keyboard shortcut.
+
+### Chips (provenance)
+A chip says what a *thing* is. 10px/700 uppercase at .07em, 2px corners, 2px × 6px
+padding, `border: 1px solid currentColor` so the outline is always the chip's own
+ink: `hw` green for a real board, `sim` amber for a simulated one, `plain` second
+ink with a `rule` border for neutral state. Two chips break the outline pattern
+because they are events, not classifications: `bad` (red on red wash, no border)
+and `solid` (white on solid red, for `Sending now`).
+
+### Tags (honesty vocabulary)
+A tag says how a *number* is known. 10px/700 uppercase at .07em, no border, no
+ground — pure ink inline in a sentence or a table cell: `m` green `measured`,
+`e` amber `estimate` / `modelled` / `not measured yet`, `x` red for a failure.
+A table row that needs marking as modelled gets an `amber-wash` ground and bold
+cells rather than a coloured border.
+
+### Inputs / Fields
+Selects and number inputs take the same shape as a default button: sunk plate
+ground, `rule-soft` border, 3px corners, 13px text, 5px × 7px padding. Number
+inputs are 52px wide and centred; the range slider is 92px with `accent-color`
+set to blue. Focus is global, not per-component: a 2px blue outline offset 2px,
+with a 2px radius, on `:focus-visible` only.
+
+### Cards / Containers
+There are no cards. There are plates (see above) and rail groups — the same
+material at a smaller scale: plate ground, `rule-soft` border, 3px corners, the
+one shadow, 4px × 9px padding and a 36px minimum height, each opened by a 10px
+uppercase label.
+
+### Tables
+Column heads are 10px uppercase labels in second ink over a `rule` hairline; body
+cells are 13px with a `rule-soft` divider that the last row drops. Numeric cells
+are right-aligned and 600 weight; unit and provenance cells fall back to second
+ink. Table body cells never get a background except the amber wash marking a
+modelled row.
 
 ### Slot ledger (signature)
-The sheet's clearest borrowing from a drum-machine step row: one right-aligned
-74px lane name per satellite at 11px/700, then a flex row of equal cells at 17px
-tall with 2px gaps. An empty cell is soft rule; a won slot is Result Blue; a
-forced fairness switch is Live Red; the slot happening now carries the
-plate-then-red ring. New cells land with a 450ms `scaleY` from .25. Above three
-satellites the lane names drop to the 9.5px caps tier; the shape never changes.
+The arbitration record. One row per satellite: a 74px right-aligned name in
+second ink (10px when there are many lanes), then a flush row of equal-flex
+cells, 2px gaps, 17px tall, 2px corners. An unwon slot is `rule-soft`; a slot
+this satellite won is blue; a slot the ground forced through the fairness guard
+is red; the slot being transmitted right now carries the live ring. A newly
+landed cell animates in from `scaleY(.25)` over 450ms. The axis beneath repeats
+the 74px gutter so its range labels line up with the cells.
 
 ### Contact-window meter
-The same geometry rotated into a single 20px trough: equal segments, 2px gaps,
-2px padding, sunk fill. Used capacity fills blue; the current slot is an unfilled
-segment with a 2px inset red ring. A two-part caption underneath states what is
-used and what is left.
+A 20px track of equal-flex cells representing the pass's capacity. Spent cells
+fill blue, the cell being spent carries the inset red ring, unspent cells stay
+`rule-soft`. Below it a caption row puts the spent and total figures at opposite
+ends. It is a capacity ledger, not a progress bar: the cells are countable.
 
-### Charts (Fig 1 and the scaling sweep)
-The SVG `viewBox` is set to the box's own pixel size, so one SVG unit is one CSS
-pixel: axis text is never stretched and the plot is never letterboxed. Gridlines
-are 1px soft rule with the zero baseline at full rule strength; axis values are
-11px tabular Ink Two, direct labels the same size at 700. The Orbit curve is a
-2px round-capped Result Blue polyline; the counterfactual is 2px Counterfactual
-Pencil dashed `7 5`; the area between them is filled with the 10% blue wash,
-because that gap is the argument. Each curve ends in a 4–4.5px dot filled with
-its own colour and stroked 2px in the plate colour, and is labelled directly at
-its end in its own colour, nudged apart only when the two labels would collide.
-The sweep chart adds a dashed amber vertical where the contact window saturates,
-labelled in words. The hover crosshair tooltip is Ink-filled with plate text and
-repeats the values that are already on the axis.
+### Statistics row
+Three large figures across (`repeat(3, minmax(0,1fr))`, 10px/24px gaps) leading
+sheets 2 and 3: the figure at clamp 23–31px/800/wdth 106, and a 12px supporting
+line under it in second ink with the load-bearing words picked out in ink. It
+states what the sheet is about before the sheet argues it.
+
+### Sweep run indicator
+For a run that takes the better part of a minute: a 6px sunk track with a blue
+fill driven by `scaleX()` over 400ms, and a status line beneath splitting the
+current step and the elapsed/remaining figures to opposite ends. It exists so a
+long computation looks alive without a spinner.
+
+### Charts
+Two families, one grammar. Fig 1 (live) and Figs 4–5 (scaling sweep, built from
+the shared `sweepFrame` / `crossRule` / `line` / `dots` / `empty` helpers) both
+draw two series in one unit on one axis, shade the gap between them in
+`blue-wash`, run the baseline in dashed pencil and the Orbit series in solid
+blue, mark the last point with a plate-stroked dot, and label both ends directly
+rather than with a legend. Gridlines are `rule-soft`, the zero line is `rule`,
+axis text is 12px second ink. Sheets 3's figures add one amber dashed vertical
+rule marking where the contact window fills — the constraint binding — labelled
+in place. An empty chart says what it is waiting for in a centred sentence; it
+never renders an empty frame.
+
+### Tooltips
+Solid ink ground, plate text, 12px, 3px corners, 6px × 9px padding, translated
+above the pointer, fading in over 120ms and never taking pointer events. It
+carries an 8px rounded swatch of the series it describes. Everything in a tooltip
+is also on the axis or in a direct label; it is a convenience, not a channel.
 
 ### Named Rules
 
-**The Round Number Rule.** `niceScale` picks the axis step from
-0.1/0.2/0.25/0.5/1/2/2.5/5 × a power of ten, keeps 3–7 steps, and among the
-candidates keeps the one clearing the peak with the *least* headroom — an axis
-towering over the data flattens the very gap the figure exists to show. Then it
-labels every ⌈ticks/4⌉th line so labels breathe. Never hand-pick an axis maximum.
+**The Stroked Label Rule.** A direct label that sits over its own plot carries
+`paint-order: stroke` with a 4px plate-coloured stroke, so it stays readable
+wherever the curve happens to run under it. This applies to every direct label in
+the system, not just the two it was first needed for.
 
-**The Built Once Rule.** The DOM is constructed once and updated in place on the
-10 Hz tick — text content, attributes, and `transform: scaleX()` on a bar fill
-with a .3s ease. Never re-render a live region with `innerHTML` on tick, and
-never create an `<img>` before a real corpus frame exists for it. This is why the
-display does not flicker while a judge is reading it.
+**The Round Number Rule.** An axis label is a number a person would write down,
+and the axis must not tower over the data: `niceScale` tries the round steps,
+keeps the one that clears the peak with the least headroom, and labels every
+k-th line so labels breathe. A fifth of the plot left empty flattens the very gap
+the figure exists to show.
+
+**The Built Once Rule.** The DOM is built once and updated in place — text,
+attributes, and `scaleX()` — on the 10 Hz tick. A live region is never rebuilt
+with `innerHTML`, and an image element is never created for a frame that does
+not exist yet.
 
 ## Do's and Don'ts
 
@@ -567,30 +616,36 @@ display does not flicker while a judge is reading it.
 - **Do** give every pen exactly one job: blue = Orbit's result, pencil = the
   baseline, red = live or forced, green = measured on hardware, amber = modelled
   or not yet measured.
-- **Do** identify satellites by numbered lane and position, so the display scales
-  to twelve without inventing hues.
+- **Do** identify satellites by numbered lane and row position, so the display
+  scales to twelve without inventing hues.
 - **Do** pair a provenance tag with every figure — `measured` (green) with where
   it was measured, `estimate` / `modelled` (amber) with what the model assumed,
   and the literal `not measured yet` where no number exists.
 - **Do** carry any distinction in a second channel besides colour: the baseline
-  is dashed as well as grey, the live slot is ringed as well as red.
-- **Do** pick the nearest existing step on the ramp — 9.5, 10, 11, 11.5, 12.5, 14,
-  19px, or one of the four `--t-` tokens.
+  is dashed as well as pencil, the live slot is ringed as well as red.
+- **Do** pick the nearest existing step on the ramp — 10, 11, 12, 13, 14.5 or
+  20px, or one of the five `--t-` tokens.
 - **Do** give a role that resizes at a breakpoint a `:root` token and one
   `font-size` declaration, and override the token in the media query.
-- **Do** keep 9.5 and 10px for uppercase letter-spaced type and 11 and 11.5px for
-  sentence case; the caps tiers read larger than their number.
-- **Do** keep the live sheet on one screen above 1180×759 — clip inside panels,
-  with a mask fade, and let the page scroll only below 759px tall.
+- **Do** keep 10 and 11px for uppercase letter-spaced type and 12 and 13px for
+  sentence case; the caps tiers read optically larger than their number.
+- **Do** keep the live sheet on one screen above 1180×759 — clip inside plates,
+  with a mask fade — and let the page scroll only below 759px tall.
+- **Do** drop whole secondary elements in the stated order when height runs
+  short: the sent-photo strip first, the teaching caption last.
+- **Do** give a scrolling sheet `max-content` rows, and make any inner `.scroll`
+  inside it `overflow: visible`.
+- **Do** give every direct chart label `paint-order: stroke` with a 4px
+  plate-coloured stroke.
 - **Do** write mask gradients with the `black` keyword, so an alpha stop is never
   mistaken for a colour token.
 - **Do** set the SVG `viewBox` to the box's pixel size so one unit is one pixel.
 - **Do** build the DOM once and update text, attributes and `scaleX()` in place
   on the 10 Hz tick.
-- **Do** self-host every asset under `viz/static/` — `tools/offline_check.py`
+- **Do** self-host every asset under `viz/static/`; `tools/offline_check.py`
   fails the build on any `https://` reference from `index.html`.
-- **Do** set plate headings and large figures on the width axis (106–118%) and
-  leave everything else at the default width.
+- **Do** set plate headings, the wordmark and large figures on the width axis
+  (106–118%) and leave everything else at the default width.
 
 ### Don't:
 - **Don't** invent a sixth pen, or reuse one of the five for a meaning it does
@@ -602,15 +657,22 @@ display does not flicker while a judge is reading it.
   step doing the same job, it *is* that step.
 - **Don't** put a `font-size` on a component inside a media query; override the
   role's `--t-` token instead.
-- **Don't** add a second elevation step, a hover lift, or a directional or hard
-  offset shadow; there is one ambient shadow token and it applies to plates.
-- **Don't** reach for a second typeface, an icon font, or a glyph icon; Archivo
-  and drawn SVG marks are the whole vocabulary.
-- **Don't** solve a height squeeze by shrinking the gain figure or the queue —
-  drop a secondary element instead.
+- **Don't** add a second elevation step, a hover lift, or a directional or
+  hard-offset shadow; there is one ambient shadow token and it applies to plates,
+  rail groups and the banner.
+- **Don't** use `box-shadow` for anything but that token and zero-offset,
+  zero-blur live-state rings.
+- **Don't** reach for a second typeface for display or UI text; Archivo and drawn
+  SVG marks are the whole vocabulary, and the monospace stack is the log's alone.
+- **Don't** use a glyph, emoji, or icon-font character as an icon.
+- **Don't** solve a height squeeze by shrinking the gain figure, the chart, or
+  the compared photographs — drop a secondary element instead.
+- **Don't** nest a scroller inside a scrolling sheet, or leave `auto` rows in a
+  definite-height one.
 - **Don't** give an inner fill a different radius from the well it sits in.
 - **Don't** rebuild a live region with `innerHTML` on the tick, or create image
   elements for frames that do not exist yet.
 - **Don't** link a font, script, or image from a CDN.
-- **Don't** round a corner past 3px (5px on bar tracks) or introduce a gradient,
-  glow, or green-on-black telemetry styling; this is a test report, not a console.
+- **Don't** round a corner past 3px (5px on the half-height bar track) or
+  introduce a gradient, glow, or green-on-black telemetry styling; this is a test
+  report, not a console.
