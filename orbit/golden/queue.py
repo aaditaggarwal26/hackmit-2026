@@ -2,7 +2,7 @@
 Head first, score descending, earlier insert first among equals."""
 from __future__ import annotations
 
-from orbit import params
+from orbit import config as params
 
 NO_FRAME = 0xFFFF
 
@@ -13,7 +13,7 @@ class PriorityQueue:
         self.cells: list[tuple[int, int]] = []     # (score, frame_id)
         self.evicted = 0
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.cells)
 
     @property

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from orbit import params
+from orbit import config as params
 
 H, W = params.FRAME_H, params.FRAME_W
 
@@ -26,7 +26,7 @@ def awkward_frames(seed: int = 1) -> list[tuple[str, np.ndarray, np.ndarray]]:
     noise2 = rng.integers(0, 256, (H, W), dtype=np.uint8)
     thr = np.full((H, W), params.CLOUD_THRESHOLD, np.uint8)                # exactly at the threshold: not cloud
     thr1 = thr + 1                                                          # one above: all cloud
-    delta = (noise.astype(np.int16) + params.CHANGE_THRESHOLD).clip(0, 255).astype(np.uint8)   # |diff| == thr: unchanged
+    delta = (noise.astype(np.int16) + params.CHANGE_THRESHOLD).clip(0, 255).astype(np.uint8)  # |diff| == thr: unchanged
     delta1 = (noise.astype(np.int16) + params.CHANGE_THRESHOLD + 1).clip(0, 255).astype(np.uint8)
     return [
         ("all_black", z, z), ("all_white", full, z), ("white_on_white_ref", full, full),

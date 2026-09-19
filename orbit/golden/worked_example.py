@@ -9,7 +9,8 @@ import sys
 
 import numpy as np
 
-from orbit import params
+from orbit import config as params
+
 from .queue import NO_FRAME, PriorityQueue
 from .score import Config, score_frame, score_frame_ref
 
@@ -33,7 +34,7 @@ def render(md: bool = False) -> str:
     frame, ref = example_frame()
     s = score_frame(frame, ref, cfg)
     assert s == score_frame_ref(frame, ref, cfg)
-    o = []
+    o: list[str] = []
     p = o.append
     p("# Worked example — one frame through the scoring kernel (protocol.md §5.2)")
     p("")
@@ -87,7 +88,7 @@ def render(md: bool = False) -> str:
     return "\n".join(o) + "\n"
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     text = render()
     if len(argv) == 2 and argv[0] == "--md":
