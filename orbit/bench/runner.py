@@ -242,12 +242,14 @@ def _marginal(mean_w: Measure, idle_w: Measure, wall_s: float, frames: int, base
         why = str(mean_w.get("reason") or idle_w.get("reason") or "idle power missing")
         return unavailable(why, METHOD_NONE, scope), unavailable(why, METHOD_NONE, scope)
     marginal = value_of(mean_w) - value_of(idle_w)
+    # A negative marginal is a real measurement of noise, not a saving: say so where the number is quoted.
+    note = "" if marginal >= 0 else " [NOTE: load measured below the idle baseline; difference is within noise]"
     return (
-        measured(marginal, "W", f"rep mean W - {baseline} mean W; {mean_w['method']}", scope),
+        measured(marginal, "W", f"rep mean W - {baseline} mean W; {mean_w['method']}{note}", scope),
         measured(
             j_per_1000(marginal * wall_s, frames),
             "J",
-            f"(rep mean W - {baseline} mean W) * wall s * 1000 / frames",
+            f"(rep mean W - {baseline} mean W) * wall s * 1000 / frames{note}",
             scope,
         ),
     )
