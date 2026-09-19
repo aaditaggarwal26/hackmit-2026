@@ -1,0 +1,31 @@
+[project]
+name = "orbit"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "cocotb>=2.1.0",
+    "fastapi>=0.141.1",
+    "hypothesis>=6.168.0",
+    "numpy>=2.5.3",
+    "pyserial>=3.5",
+    "pytest>=9.1.1",
+    "requests>=2.34.2",
+    "uvicorn[standard]>=0.52.4",
+    "websockets>=17.1",
+]
+
+[project.optional-dependencies]
+corpus = [
+    "pillow>=12.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "tb"]
+addopts = "-q -m 'not slow'"   # slow = Verilator full-size runs; `uv run pytest -m slow` runs them
+markers = ["slow: full-size RTL regressions (minutes under Verilator)"]
