@@ -38,8 +38,14 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
     hostname = local_hostname(settings)
     run_id = run_id or new_run_id()
     telemetry = Telemetry(settings, hostname, network=telemetry_network)
-    run_file = RunFile(settings.runs_dir, run_id)
-    stream = EventStream(settings, run_id, writers=[run_file])
+    writers: list[Any] = []
+    run_file: RunFile | None = None
+    try:
+        run_file = RunFile(settings.runs_dir, run_id)
+        writers.append(run_file)
+    except OSError as e:  # unwritable runs/: the arbiter still runs, the display still gets the socket
+        log(lg, logging.ERROR, "run_file_unavailable", error=str(e), runs_dir=settings.runs_dir)
+    stream = EventStream(settings, run_id, writers=writers)
     server = StreamServer(stream, settings.stream_host, settings.stream_port, settings.stream_queue_max) \
         if stream_server else None
 
@@ -59,15 +65,19 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
     def periodic(now: float) -> None:
         snap = ground.snapshot(now)
         telemetry.emit("snapshot", {"t": now, **snap})
-        telemetry.emit("flags", {"t": now, "sats": {h: s["flags"] for h, s in snap["sats"].items()}})
+        sink("flags", {"t": now, "sats": {h: s["flags"] for h, s in snap["sats"].items()}})  # stream needs it too
         telemetry.emit("bus_stats", {"t": now, **bus.stats.as_dict()})
         telemetry.emit("telemetry_stats", {"t": now, **telemetry.stats.as_dict()})
 
-    log(lg, logging.INFO, "ground_start", hostname=hostname, run_id=run_id, run_file=str(run_file.path),
-        settings=settings.as_dict())
+    log(lg, logging.INFO, "ground_start", hostname=hostname, run_id=run_id,
+        run_file=str(run_file.path) if run_file else None, settings=settings.as_dict())
     await bus.start()
     if server is not None:
-        await server.start()
+        try:
+            await server.start()
+        except OSError as e:  # port held by a stale ground: log, run without the socket (file still written)
+            log(lg, logging.ERROR, "stream_server_unavailable", error=str(e), port=settings.stream_port)
+            server = None
     if telemetry_network:
         telemetry.start()
     stream.start(clock())
@@ -79,9 +89,10 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
         if server is not None:
             await server.stop()
         await bus.stop()
-        run_file.close()
+        if run_file is not None:
+            run_file.close()
         log(lg, logging.INFO, "ground_stop", counters=ground.counters.as_dict(), window=ground.window.snapshot(),
-            run_file=str(run_file.path), stream_events=stream.seq)
+            run_file=str(run_file.path) if run_file else None, stream_events=stream.seq)
 
 
 def install_signal_stop(stop: asyncio.Event) -> None:

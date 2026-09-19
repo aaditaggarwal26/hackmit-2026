@@ -82,7 +82,7 @@ class Telemetry:
         if not self.network:
             return
         try:
-            data = json.dumps(event, default=_json_default, separators=(",", ":")).encode()
+            data = json.dumps(event, default=_json_default, separators=(",", ":"), allow_nan=False).encode()
         except (TypeError, ValueError):
             lg.exception("unserialisable telemetry event %s", kind)
             return

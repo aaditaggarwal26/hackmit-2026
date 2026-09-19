@@ -174,8 +174,8 @@ class EventStream:
 
     def on_bus(self, msg: M.Message, now: float, outbound: bool) -> None:
         """Bus traffic as the ground saw it. Only satellite messages carry display-relevant state."""
-        if outbound or msg.TYPE in M.GROUND_TYPES:
-            return
+        if self.ended or outbound or msg.TYPE in M.GROUND_TYPES:
+            return  # run_end is the last event of a run: heartbeats after the window closed stay off the stream
         v = self._node(msg.sender, now)
         v.last_seen = now
         match msg:
@@ -198,6 +198,8 @@ class EventStream:
 
     def on_event(self, kind: str, p: dict[str, Any]) -> None:
         """The ground's internal events (GroundStation._emit)."""
+        if self.ended:
+            return
         now = float(p.get("t", 0.0))
         match kind:
             case "sat_seen":
@@ -300,7 +302,7 @@ class EventStream:
         self.orbit_bytes_used += self.s.frame_bytes
         self._emit("frame_arrived", now, slot_id=int(p["round_id"]), node_id=v.node_id, frame_id=fid,
                    score=p.get("score"), bytes=nbytes, duration_s=round(now - float(p.get("granted_at", now)), 3),
-                   cloud_frac=cloud, usable=usable)
+                   cloud_frac=cloud, usable=usable, sha256=p.get("sha256"))
         # the baseline gets the same slot: one frame of budget, FIFO, round-robin, no scoring
         w = dict(p["window"])
         remaining_for_baseline = int(w["capacity_bytes"]) - self.baseline.bytes_used
@@ -355,7 +357,13 @@ class EventStream:
         if self.wall:
             doc["wall"] = datetime.now(UTC).isoformat(timespec="milliseconds")
         doc.update(fields)
-        line = json.dumps(doc, separators=(",", ":"), default=_default)
+        try:
+            line = json.dumps(doc, separators=(",", ":"), default=_default, allow_nan=False)
+        except ValueError:  # a non-finite number got in somewhere: keep the stream valid JSON, burn the seq
+            lg.error("non-finite value in %s event; emitting a placeholder", type_)
+            doc = {"seq": self.seq, "t": round(now, 3), "type": "node_event", "node_id": None, "level": "error",
+                   "message": f"{type_} event dropped: non-finite value"}
+            line = json.dumps(doc, separators=(",", ":"))
         self.lines.append(line)
         for w in self.writers:
             try:
@@ -374,12 +382,20 @@ def _default(o: Any) -> Any:
 
 
 class RunFile:
-    """runs/<run_id>.jsonl, one line per event, flushed per line so a demo hiccup loses nothing."""
+    """runs/<run_id>.jsonl, one line per event, flushed per line so a demo hiccup loses nothing.
+
+    A run file is never appended to by a second run: seq would restart mid-file and the display would
+    read it as a ground restart. If the name is taken, this one becomes <run_id>-2, -3, ..."""
 
     def __init__(self, runs_dir: str, run_id: str) -> None:
-        self.path = Path(runs_dir) / f"{run_id}.jsonl"
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._f = self.path.open("a", encoding="utf-8")
+        base = Path(runs_dir)
+        base.mkdir(parents=True, exist_ok=True)
+        self.path = base / f"{run_id}.jsonl"
+        n = 1
+        while self.path.exists():
+            n += 1
+            self.path = base / f"{run_id}-{n}.jsonl"
+        self._f = self.path.open("x", encoding="utf-8")
 
     def __call__(self, line: str) -> None:
         self._f.write(line + "\n")
@@ -396,36 +412,36 @@ class StreamServer:
     def __init__(self, stream: EventStream, host: str, port: int, queue_max: int) -> None:
         self.stream = stream
         self.host, self.port, self.queue_max = host, port, queue_max
-        self._clients: set[asyncio.Queue[str | None]] = set()
+        self._clients: dict[asyncio.Queue[str], asyncio.Task[Any] | None] = {}
         self._server: Any = None
+        self.dropped_clients = 0
         stream.writers.append(self.publish)
 
     def publish(self, line: str) -> None:
-        for q in list(self._clients):
+        for q, task in list(self._clients.items()):
             try:
                 q.put_nowait(line)
-            except asyncio.QueueFull:
-                self._clients.discard(q)
-                with contextlib.suppress(asyncio.QueueFull):
-                    q.put_nowait(None)  # tells the handler to close
+            except asyncio.QueueFull:  # this client is queue_max lines behind: close it rather than wait for it
+                self._clients.pop(q, None)
+                self.dropped_clients += 1
+                if task is not None:
+                    task.cancel()
                 log(lg, logging.WARNING, "stream_client_dropped", queued=q.qsize())
 
     async def _handler(self, ws: Any) -> None:
-        q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=self.queue_max)
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=self.queue_max)
         backlog = list(self.stream.lines)  # snapshot before subscribing so nothing is skipped or doubled
-        self._clients.add(q)
+        self._clients[q] = asyncio.current_task()
         try:
             for line in backlog:
                 await ws.send(line)
             while True:
-                item = await q.get()
-                if item is None:
-                    break
-                await ws.send(item)
-        except Exception:  # client went away
-            pass
+                await ws.send(await q.get())
+        except (asyncio.CancelledError, Exception):  # dropped by publish(), or the client went away
+            with contextlib.suppress(Exception):
+                await ws.close(code=1013, reason="display too slow")
         finally:
-            self._clients.discard(q)
+            self._clients.pop(q, None)
 
     async def start(self) -> None:
         from websockets.asyncio.server import serve

@@ -172,7 +172,9 @@ aging terms, not the raw score, decided the slot), `only_ready`.
 
 ## `frame_arrived`
 
-A transmission completed and was confirmed. One per downlinked frame.
+A transmission completed and was confirmed. One per downlinked frame — the ground keeps the set of
+`(node_id, frame_id)` it has confirmed and re-acks a re-offered frame instead of granting it, so a frame
+never appears here twice and `run_end` counts distinct frames.
 
 ```json
 {

@@ -171,10 +171,31 @@ def test_slow_client_is_dropped_not_waited_for():
     async def go():
         stream = EventStream(S, "slow", wall=False)
         server = StreamServer(stream, "127.0.0.1", 0, queue_max=3)
-        q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=3)
-        server._clients.add(q)
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=3)
+        async def fake_handler():
+            await asyncio.sleep(3600)
+        task = asyncio.create_task(fake_handler())
+        server._clients[q] = task
         for i in range(10):
             stream._emit("node_event", float(i), node_id=None, level="info", message="x")
+        await asyncio.sleep(0)
         assert q not in server._clients and stream.seq == 10  # every event still burned its number
+        assert task.cancelled() or task.done()  # the client is closed, not stranded
+        assert server.dropped_clients == 1
 
     asyncio.run(go())
+
+
+def test_run_end_is_the_last_event_even_if_the_bus_keeps_talking(tmp_path):
+    """After the window closes satellites still heartbeat; the contract says run_end is last, so the stream goes quiet."""
+    from orbit.protocol import messages as M
+    sim = run_scenario("nominal", 500, seed=1, settings=S.with_overrides(window_duration_s=10.0, runs_dir=str(tmp_path)))
+    ev = [json.loads(x) for x in sim.stream.lines]
+    assert ev[-1]["type"] == "run_end" and ev[-1]["reason"] == "window_closed"
+    n = len(ev)
+    buf = M.BufferStats(8, 8 * config.FRAME_BYTES, 1, 7, 12.5)
+    sim.stream.on_bus(M.Heartbeat("sat-a", 999, 0, buffer=buf, eviction_count=0, queue_len=1, top_score=50.0,
+                                  top_item_id=1, uptime_s=1.0, frames_scored=1, frames_sent=0), sim.now + 1, False)
+    sim.stream.on_event("no_bids", {"t": sim.now + 1, "round_id": 999, "excluded": []})
+    sim.stream.end(sim.now + 2, reason="stopped")
+    assert len(sim.stream.lines) == n and sim.stream.seq == n
