@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — downlink prioritization</title>
+<style>
+  :root { --bg:#fcfcfb; --panel:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --line:#e6e5e1; --grid:#ececea;
+          --filtered:#4a3aa7; --fifo:#8a8983; --warn:#c98500; --bad:#e34948; --good:#008300;
+          --c0:#2a78d6; --c1:#eb6834; --c2:#1baf7a; --c3:#eda100; --c4:#e87ba4; --c5:#008300; --c6:#4a3aa7; --c7:#e34948; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1a19; --panel:#232322; --ink:#ffffff; --ink2:#c3c2b7; --line:#3a3a38; --grid:#2e2e2c;
+            --filtered:#9085e9; --fifo:#9b9a93; --c0:#3987e5; --c1:#d95926; --c2:#199e70; --c3:#c98500; --c4:#d55181; --c6:#9085e9; --c7:#e66767; }
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.35 -apple-system,Segoe UI,Helvetica,Arial,sans-serif; padding:12px 16px 24px }
+  header { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin-bottom:8px }
+  h1 { font-size:20px; margin:0 12px 0 0 }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink2); margin:0 0 8px }
+  button, select, input { font:inherit; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 10px }
+  button:hover { border-color:var(--ink2); cursor:pointer }
+  .strip { font-size:12px; color:var(--ink2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; margin:6px 0 12px; display:flex; flex-wrap:wrap; gap:6px 18px }
+  .strip b { color:var(--ink) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:12px }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0 }
+  .wide { grid-column:1 / -1 }
+  .big { font-size:40px; font-weight:600; line-height:1; letter-spacing:-.02em }
+  .num { font-variant-numeric:tabular-nums }
+  .muted { color:var(--ink2) }
+  .sat { border-left:6px solid var(--c0) }
+  .row { display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap }
+  .thumb { width:128px; height:128px; image-rendering:pixelated; border:1px solid var(--line); background:#000; border-radius:4px }
+  .thumb.small { width:48px; height:48px }
+  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; border:1px solid var(--line); color:var(--ink2); margin-left:6px; vertical-align:middle }
+  .badge.hw { border-color:var(--good); color:var(--good) }
+  .badge.sim { border-color:var(--warn); color:var(--warn) }
+  .badge.bad { border-color:var(--bad); color:var(--bad) }
+  .bars { display:flex; flex-direction:column; gap:2px; margin-top:6px }
+  .bar { display:flex; align-items:center; gap:8px; font-size:12px }
+  .bar i { display:block; height:10px; border-radius:2px; background:var(--c0); min-width:2px }
+  .bar.head i { outline:2px solid var(--ink); outline-offset:1px }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px }
+  .kv span:nth-child(odd) { color:var(--ink2) }
+  .slots { display:flex; flex-wrap:wrap; gap:3px; margin-top:6px }
+  .slots i { display:block; width:14px; height:22px; border-radius:3px; background:var(--c0); position:relative }
+  .slots i.starv::after { content:"↺"; position:absolute; top:-15px; left:1px; font-size:11px; color:var(--ink); font-style:normal }
+  .meter { height:18px; border:1px solid var(--line); border-radius:4px; overflow:hidden; background:var(--grid); margin:6px 0 }
+  .meter i { display:block; height:100%; background:var(--filtered) }
+  .downlinked { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px }
+  .downlinked figure { margin:0; text-align:center; font-size:10px; color:var(--ink2) }
+  table { border-collapse:collapse; font-size:12px; width:100% }
+  td, th { text-align:left; padding:3px 8px 3px 0; border-bottom:1px solid var(--grid); font-variant-numeric:tabular-nums }
+  th { color:var(--ink2); font-weight:500 }
+  svg text { fill:var(--ink2); font-size:11px }
+  .legend { display:flex; gap:14px; font-size:12px; color:var(--ink2); margin-top:4px }
+  .legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:5px; background:var(--filtered) }
+  .legend i.fifo { background:var(--fifo); height:0; border-top:3px dashed var(--fifo) }
+  .log { font:11px/1.4 ui-monospace,Menlo,monospace; max-height:180px; overflow:auto; white-space:pre; color:var(--ink2) }
+  .tbd { color:var(--warn) }
+  .measured { color:var(--good) }
+</style>
+</head>
+<body>
+<header>
+  <h1>Orbit</h1>
+  <span class="muted">score onboard · queue by value · spend the pass on the best frames</span>
+  <label>scenario <select id="scenario"></select></label>
+  <button id="play">play</button><button id="pause">pause</button><button id="step">step</button>
+  <label>speed <input id="speed" type="range" min="0.25" max="16" step="0.25" style="width:110px"> <span id="speedv" class="num"></span>×</label>
+  <label>starvation N <input id="starv" type="number" min="1" max="20" style="width:56px"></label>
+  <label>+ simulated sats <input id="simn" type="number" min="0" max="12" style="width:56px"></label>
+  <span id="phase" class="badge"></span>
+</header>
+<div class="strip" id="prov"></div>
+
+<div class="grid">
+  <section class="panel wide">
+    <h2>Delivered value through the same window — filtered (FPGA priority queue) vs unfiltered FIFO</h2>
+    <div class="row" style="align-items:center">
+      <div><div class="big num" id="vf" style="color:var(--filtered)">0</div><div class="muted">filtered, sum of scores of transmitted frames</div></div>
+      <div><div class="big num" id="vq" style="color:var(--fifo)">0</div><div class="muted">unfiltered FIFO, same captures, same window</div></div>
+      <div><div class="big num" id="gain">—</div><div class="muted">gain</div></div>
+    </div>
+    <svg id="chart" width="100%" height="220" viewBox="0 0 900 220" preserveAspectRatio="none"></svg>
+    <div class="legend"><span><i></i>filtered</span><span><i class="fifo"></i>unfiltered FIFO (computed on the ground from the same frames)</span><span id="chartnote"></span></div>
+  </section>
+
+  <div id="sats" class="wide" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:12px"></div>
+
+  <section class="panel">
+    <h2>Arbitration — per slot</h2>
+    <div id="arb"></div>
+    <div class="slots" id="slotstrip"></div>
+    <div class="muted" style="font-size:12px;margin-top:4px">one block per granted slot, coloured by satellite; ↺ = starvation guard forced the switch</div>
+  </section>
+
+  <section class="panel">
+    <h2>Contact window (modelled — bytes debited, never sent)</h2>
+    <div class="meter"><i id="wbar" style="width:0"></i></div>
+    <div class="kv" id="win"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Links</h2>
+    <div class="kv" id="wire"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Efficiency</h2>
+    <div class="kv" id="eff"></div>
+  </section>
+
+  <section class="panel wide">
+    <h2>Scaling — simulated satellites on the same window <button id="sweep" style="margin-left:8px">run sweep</button></h2>
+    <div id="scaling" class="muted">not run</div>
+  </section>
+
+  <section class="panel wide">
+    <h2>Wire log (last frames, both directions)</h2>
+    <div class="log" id="log"></div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const COLORS = ['var(--c0)','var(--c1)','var(--c2)','var(--c3)','var(--c4)','var(--c5)','var(--c6)','var(--c7)'];
+const col = i => i < 8 ? COLORS[i] : 'var(--fifo)';
+const pct = v => (v * 100 / 65535).toFixed(1);
+const fmt = v => v == null ? '—' : Number(v).toLocaleString();
+let ws, snap;
+
+function send(cmd, value) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({cmd, value})); }
+function connect() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onmessage = e => { const m = JSON.parse(e.data); if (m.type === 'snapshot') { snap = m; render(m); } };
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+$('play').onclick = () => send('play'); $('pause').onclick = () => send('pause'); $('step').onclick = () => send('step');
+$('speed').oninput = e => { $('speedv').textContent = e.target.value; send('speed', +e.target.value); };
+$('starv').onchange = e => send('starvation', +e.target.value);
+$('simn').onchange = e => send('sim_nodes', +e.target.value);
+$('scenario').onchange = e => send('scenario', e.target.value);
+$('sweep').onclick = () => send('scaling_sweep');
+
+function render(s) {
+  const sel = $('scenario');
+  if (sel.options.length !== Object.keys(s.scenarios).length) {
+    sel.innerHTML = Object.entries(s.scenarios).map(([k, v]) => `<option value="${k}" title="${v}">${k}</option>`).join('');
+  }
+  if (document.activeElement !== sel) sel.value = s.scenario;
+  if (document.activeElement !== $('speed')) { $('speed').value = s.speed; $('speedv').textContent = s.speed; }
+  if (document.activeElement !== $('starv')) $('starv').value = s.starvation_n;
+  if (document.activeElement !== $('simn')) $('simn').value = s.sim_extra;
+  $('phase').textContent = `${s.phase} · pass ${s.pass_idx + 1}/${s.n_passes}${s.paused ? ' · paused' : ''}${s.done ? ' · done' : ''}`;
+
+  const p = s.provenance, phys = s.physical_nodes.length, sim = s.nodes.length - phys;
+  $('prov').innerHTML = `<span>corpus <b>${p.frames} frames</b> ${p.layer} via ${p.source}</span>` +
+    `<span>synthetic: <b>${p.synthetic ? 'YES' : 'no'}</b></span>` +
+    `<span>satellites: <b>${phys} hardware</b>, <b>${sim} simulated</b> (golden model in-process)</span>` +
+    `<span>window: <b>${s.window.scaled ? 'SCALED for the demo' : 'unscaled'}</b> (${s.pacing_source})</span>` +
+    `<span>board vs golden mismatches: <b>${s.nodes.reduce((a, n) => a + n.mismatches, 0)}</b></span>`;
+
+  // headline
+  $('vf').textContent = fmt(s.value.filtered); $('vq').textContent = fmt(s.value.fifo);
+  $('gain').textContent = s.value.fifo ? (s.value.filtered / s.value.fifo).toFixed(2) + '×' : '—';
+  drawChart(s.slots, s.n_slots);
+  $('chartnote').textContent = `${s.n_slots} slots granted · ${s.value.fifo_dropped} frames the FIFO satellite dropped`;
+
+  // satellites
+  const sats = $('sats');
+  s.nodes.forEach((n, i) => {
+    let el = sats.children[i];
+    if (!el) { el = document.createElement('section'); el.className = 'panel sat'; sats.appendChild(el); }
+    el.style.borderLeftColor = col(i);
+    const lc = n.last_capture, st = n.status || {};
+    const comp = n.scored.length ? n.scored[n.scored.length - 1] : null;
+    const maxq = Math.max(1, ...n.queue.map(q => q.score));
+    el.innerHTML = `
+      <h2 style="color:var(--ink)">satellite ${i} <span class="muted">${n.path}</span>
+        <span class="badge ${n.simulated ? 'sim' : 'hw'}">${n.simulated ? 'SIMULATED' : 'HARDWARE'}</span>
+        <span class="badge">${n.state}</span>${n.link_ok ? '' : '<span class="badge bad">no link</span>'}${n.mismatches ? `<span class="badge bad">${n.mismatches} mismatches</span>` : ''}</h2>
+      <div class="row">
+        <div>${lc ? `<img class="thumb" src="/corpus/${String(lc.frame_id).padStart(4, '0')}.png" alt="frame ${lc.frame_id}">` : '<div class="thumb"></div>'}
+          <div class="muted" style="font-size:11px">${lc ? `frame ${lc.frame_id} · ${lc.scene} · ref ${lc.ref_id}` : 'no capture yet'}</div></div>
+        <div class="kv">
+          <span>score</span><span class="num"><b>${comp ? pct(comp.score) : '—'}</b> / 100</span>
+          <span>clear</span><span class="num">${comp ? pct(comp.clear) : '—'}</span>
+          <span>sharp</span><span class="num">${comp ? pct(comp.sharp) : '—'}</span>
+          <span>change</span><span class="num">${comp ? pct(comp.change) : '—'}</span>
+          <span>scored / captured</span><span class="num">${n.scored.length ? st.frames_scored ?? n.scored.length : 0} / ${n.captures}</span>
+          <span>evicted (lost onboard)</span><span class="num">${n.evicted}</span>
+          <span>slots won (window / total)</span><span class="num">${n.slots_won} / ${n.slots_won_total}</span>
+          <span>top of queue</span><span class="num">${n.has_data ? `${pct(n.top_score)} (frame ${n.top_frame_id})` : 'empty'}</span>
+          <span>kernel cycles / frame</span><span class="num">${st.cycles_last_frame ? st.cycles_last_frame : '<span class="tbd">TBD (board)</span>'}</span>
+        </div>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:6px">priority queue, ${n.queue_depth ?? 0} / ${s.config.queue_limit} (mirrored from FRAME_SCORED / TX_FRAME)</div>
+      <div class="bars">${n.queue.slice(0, 12).map((q, k) => `<div class="bar ${k === 0 ? 'head' : ''}"><i style="width:${Math.max(2, q.score / 65535 * 160)}px;background:${col(i)}"></i><span class="num">${pct(q.score)}</span><span class="muted">#${q.frame_id}</span></div>`).join('')}${n.queue.length > 12 ? `<div class="muted" style="font-size:11px">… ${n.queue.length - 12} more</div>` : ''}</div>
+      <div class="muted" style="font-size:12px;margin-top:6px">downlinked (accounting only; pixels never crossed the wire)</div>
+      <div class="downlinked">${n.sent.slice(-10).map(t => `<figure><img class="thumb small" src="/corpus/${String(t.frame_id).padStart(4, '0')}.png"><figcaption>${pct(t.score)}</figcaption></figure>`).join('')}</div>`;
+  });
+  while (sats.children.length > s.nodes.length) sats.lastChild.remove();
+
+  // arbitration
+  const a = s.arbitration;
+  $('arb').innerHTML = a ? `<div class="kv">
+      <span>candidates</span><span>${a.candidates.map(c => `<span style="color:${col(c.node)}">sat ${c.node}: ${c.has_data ? pct(c.top_score) : 'empty'}</span>`).join(' · ')}</span>
+      <span>winner</span><span><b style="color:${col(a.winner)}">${a.winner == null ? 'none' : 'satellite ' + a.winner}</b> — ${a.reason === 'starvation' ? `starvation guard: satellite ${a.runner_up} had won ${s.starvation_n} in a row` : a.reason === 'highest' ? 'highest top score' : 'no satellite has data'}</span>
+      <span>streak</span><span class="num">${a.streak} / ${s.starvation_n}</span>
+      <span>guard fired</span><span class="num">${s.starvation_switches} times</span></div>` : '<span class="muted">no slot yet</span>';
+  $('slotstrip').innerHTML = s.slots.slice(-60).map(t => `<i class="${t.reason === 'starvation' ? 'starv' : ''}" style="background:${col(t.node)}" title="slot ${t.slot_id}: sat ${t.node} frame ${t.frame_id} score ${pct(t.score)} (${t.reason})"></i>`).join('');
+
+  // window
+  const w = s.window;
+  $('wbar').style.width = (w.used_bytes / w.capacity_bytes * 100) + '%';
+  $('win').innerHTML = `<span>used</span><span class="num">${fmt(w.used_bytes)} / ${fmt(w.capacity_bytes)} bytes</span>
+    <span>slots</span><span class="num">${w.slots_used} used · ${w.slots_remaining} remaining of ${w.slots_total}</span>
+    <span>model</span><span class="num">${w.duration_s} s × ${fmt(Math.round(w.rate_bps))} bit/s${w.scaled ? ' <b class="tbd">(scaled down for the demo)</b>' : ''}</span>
+    <span>unscaled default</span><span class="num">${s.params.WINDOW_DURATION_S} s × ${fmt(s.params.LINK_RATE_BPS)} bit/s = ${fmt(Math.floor(s.params.WINDOW_DURATION_S * s.params.LINK_RATE_BPS / 8 / s.params.FRAME_BYTES))} frames</span>
+    <span>frame</span><span class="num">${s.params.FRAME_W}×${s.params.FRAME_H} × 8 bit = ${fmt(s.params.FRAME_BYTES)} bytes</span>`;
+
+  // wire
+  $('wire').innerHTML = `<span>UART (real cable)</span><span class="num">${Math.round(s.wire.tx_bps)} bit/s down · ${Math.round(s.wire.rx_bps)} bit/s up · line rate ${fmt(s.wire.baud)} baud</span>
+    <span>carries</span><span>frame rows (the stand-in camera), scores, grants, accounting — never downlink pixels</span>
+    <span>modelled downlink</span><span class="num">${fmt(Math.round(w.rate_bps))} bit/s for ${w.duration_s} s per pass, enforced by accounting</span>
+    <span>availability</span><span>line of sight (the pass), not cloud — cloud only lowers a frame's score</span>`;
+
+  // efficiency
+  const v = s.vivado || {}, b = s.bench, cyc = (s.nodes.find(n => n.status && n.status.cycles_last_frame) || {status: {}}).status.cycles_last_frame;
+  const rows = [];
+  rows.push(['kernel cycles per frame', cyc ? `<span class="measured">${cyc} (board counter)</span>` : '<span class="tbd">TBD — pending board measurement</span>']);
+  rows.push(['frames / s at 100 MHz', cyc ? `<span class="measured">${fmt(Math.round(1e8 / cyc))}</span>` : `<span class="tbd">TBD</span> <span class="muted">(estimate at ${s.params.PIXELS_PER_CYCLE} px/clk: ${fmt(Math.round(1e8 / (s.params.FRAME_BYTES / s.params.PIXELS_PER_CYCLE)))}, unmeasured)</span>`]);
+  const u = v.utilization || {}, tm = v.timing || {}, pw = v.power_w || {};
+  const util = (r, label) => [label, v.measured && r && typeof r === 'object' ? `<span class="measured">${fmt(r.used)} / ${fmt(r.available)} (${r.pct}%)</span> <span class="muted">Vivado report_utilization</span>` : '<span class="tbd">TBD — pending Vivado build</span>'];
+  rows.push(util(u.dsps, 'DSP48E1 used (Sobel uses none by design)'));
+  rows.push(util(u.slice_luts, 'slice LUTs used'));
+  rows.push(util(u.bram_tiles, 'BRAM tiles used'));
+  rows.push(['timing at 100 MHz', v.measured ? `<span class="${tm.met ? 'measured' : 'tbd'}">${tm.met ? 'met' : 'NOT met'} · WNS ${tm.wns_ns} ns</span> <span class="muted">Vivado report_timing_summary</span>` : '<span class="tbd">TBD — pending Vivado build</span>']);
+  rows.push(['on-chip power', v.measured ? `<span class="measured">${pw.total} W</span> <span class="muted">${pw.label} — an estimate, not a measurement; device-level, not whole-board</span>` : '<span class="tbd">TBD — pending Vivado build</span>']);
+  if (b && b.entries) for (const e of b.entries) rows.push([`energy / 1000 frames — ${e.platform}`, e.j_per_thousand == null ? '<span class="tbd">TBD</span>' : `<span class="measured">${e.j_per_thousand.toFixed(3)} J</span> <span class="muted">${e.provenance}, ${e.stamp || b.stamp}</span>`]);
+  else rows.push(['energy / 1000 frames', '<span class="tbd">TBD — no bench run yet (bench/results/)</span>']);
+  $('eff').innerHTML = rows.map(([k, val]) => `<span>${k}</span><span class="num">${val}</span>`).join('');
+
+  // scaling
+  const sc = s.scaling;
+  if (sc.state === 'idle') $('scaling').textContent = 'not run — press run sweep (all simulated, golden model, same scaled window)';
+  else if (sc.state === 'running') $('scaling').textContent = 'running headless sweep…';
+  else if (sc.state === 'error') $('scaling').textContent = 'sweep failed: ' + sc.note;
+  else {
+    const cross = sc.rows.find(r => r.demand_frames > r.capacity_frames);
+    $('scaling').innerHTML = `<table><tr><th>satellites (all simulated)</th><th>captured</th><th>capacity (frames)</th><th>slots</th><th>filtered value</th><th>FIFO value</th><th>gain</th><th>evicted onboard</th><th>guard fired</th></tr>` +
+      sc.rows.map(r => `<tr${cross && r.n === cross.n ? ' style="font-weight:600"' : ''}><td>${r.n}</td><td>${r.captured}</td><td>${r.capacity_frames}</td><td>${r.slots}</td><td>${fmt(r.filtered)}</td><td>${fmt(r.fifo)}</td><td>${(r.filtered / r.fifo).toFixed(2)}×</td><td>${r.evicted}</td><td>${r.starvation_switches}</td></tr>`).join('') +
+      `</table><div class="muted" style="margin-top:6px">${sc.note}. Demand crosses capacity at <b>${cross ? cross.n : '> ' + sc.rows.at(-1).n}</b> satellites: beyond it, added satellites add captures the window cannot carry; the queue still picks the best of what it can.</div>`;
+  }
+
+  // log
+  const fr = [...s.frames.notable_tx, ...s.frames.notable_rx].sort((x, y) => x.t_ms - y.t_ms).slice(-40);
+  $('log').textContent = fr.map(f => `${String(f.t_ms).padStart(8)} ${f.way} sat${f.node} ${f.type.padEnd(12)} ${Object.entries(f).filter(([k]) => !['t_ms', 'way', 'node', 'type', 'hex', 'pixels'].includes(k)).map(([k, v]) => `${k}=${v}`).join(' ')}`).join('\n');
+}
+
+function drawChart(slots, total) {
+  const svg = $('chart'); const W = 900, H = 220, L = 50, R = 10, T = 10, B = 26;
+  const pts = slots.map((t, k) => ({ x: total - slots.length + k + 1, f: t.value_filtered, q: t.value_fifo }));
+  const maxY = Math.max(1, ...pts.map(p => Math.max(p.f, p.q)));
+  const x0 = pts.length ? pts[0].x : 1, x1 = pts.length ? pts[pts.length - 1].x : 1;
+  const sx = x => L + (x1 > x0 ? (x - x0) / (x1 - x0) : 0) * (W - L - R), sy = y => T + (1 - y / maxY) * (H - T - B);
+  const path = key => pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p[key]).toFixed(1)}`).join(' ');
+  let g = '';
+  for (let k = 0; k <= 4; k++) { const y = sy(maxY * k / 4); g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${Math.round(maxY * k / 4 / 655.35)}</text>`; }
+  g += `<text x="${L}" y="${H - 6}">slot ${x0}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">slot ${x1}</text><text x="${W - R}" y="${T + 10}" text-anchor="end">cumulative delivered score (/100 units)</text>`;
+  if (pts.length) {
+    g += `<path d="${path('q')}" fill="none" stroke="var(--fifo)" stroke-width="2" stroke-dasharray="6 4"/>`;
+    g += `<path d="${path('f')}" fill="none" stroke="var(--filtered)" stroke-width="2"/>`;
+    const last = pts[pts.length - 1];
+    g += `<circle cx="${sx(last.x)}" cy="${sy(last.f)}" r="4" fill="var(--filtered)" stroke="var(--panel)" stroke-width="2"/><circle cx="${sx(last.x)}" cy="${sy(last.q)}" r="4" fill="var(--fifo)" stroke="var(--panel)" stroke-width="2"/>`;
+  }
+  svg.innerHTML = g;
+}
+connect();
+</script>
+</body>
+</html>
