@@ -50,6 +50,7 @@ class MessageType(StrEnum):
     TX_DONE = "tx_done"
     HEARTBEAT = "heartbeat"  # buffer/queue state while no round is open
     EVICTION = "eviction"  # a frame was lost to onboard storage limits (never to arbitration)
+    SCORED = "scored"  # a frame was scored onboard: score parts + cloud fraction, whether it was kept
 
 
 class DecodeError(Exception):
@@ -225,6 +226,7 @@ class TxDone(Message):
     item_id: int
     total_bytes: int
     score: float
+    cloud_frac: float  # repeated here so "usable" can be judged even if the earlier `scored` was lost
 
 
 @dataclass(frozen=True)
@@ -264,6 +266,8 @@ class Heartbeat(Message):
     top_score: float  # -1 when the queue is empty
     top_item_id: int  # -1 when the queue is empty
     uptime_s: float
+    frames_scored: int  # since boot
+    frames_sent: int  # since boot, confirmed by tx_ack
 
 
 @dataclass(frozen=True)
@@ -285,8 +289,37 @@ class Eviction(Message):
     displaced_by_score: float
 
 
+@dataclass(frozen=True)
+class ScoreParts:
+    """The three normalised components, 0..100 each, as the display shows them."""
+
+    clear: float
+    sharp: float
+    change: float
+
+
+@dataclass(frozen=True)
+class Scored(Message):
+    """Satellite → all. One frame went through the onboard kernel.
+
+    The ground does not need this to arbitrate — it prices bids — but it is what lets the
+    ground run the no-scoring FIFO baseline over the same byte budget and judge frames as
+    usable from cloud fraction alone, which is the pitch's headline comparison.
+    """
+
+    TYPE = MessageType.SCORED
+    item_id: int
+    score: float
+    parts: ScoreParts
+    cloud_frac: float  # fraction of pixels above CLOUD_THRESHOLD
+    queued: bool  # False = rejected on arrival (pool full, did not beat the worst held)
+    evicted_item_id: int  # -1 when nothing was displaced
+    queue_depth: int
+
+
 MESSAGE_TYPES: dict[MessageType, type[Message]] = {
-    m.TYPE: m for m in (OffersOpen, Bid, Grant, Revoke, TxBegin, TxChunk, TxDone, TxAck, State, Heartbeat, Eviction)
+    m.TYPE: m for m in (OffersOpen, Bid, Grant, Revoke, TxBegin, TxChunk, TxDone, TxAck, State, Heartbeat, Eviction,
+                        Scored)
 }
 
 GROUND_TYPES = frozenset({MessageType.OFFERS_OPEN, MessageType.GRANT, MessageType.REVOKE, MessageType.TX_ACK,
@@ -411,14 +444,17 @@ def examples() -> list[tuple[str, Message]]:
         ("revoke", Revoke(g, 3, 2200, round_id=1, to=s, item_id=14, reason="grant_timeout")),
         ("tx_begin", TxBegin(s, 8, 5200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, chunks=16)),
         ("tx_chunk", TxChunk(s, 9, 5210, round_id=1, item_id=14, idx=0, n=16, data=bytes(range(8)))),
-        ("tx_done", TxDone(s, 10, 7200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, score=91.0)),
+        ("tx_done", TxDone(s, 10, 7200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, score=91.0,
+                           cloud_frac=0.08)),
         ("tx_ack", TxAck(g, 4, 3210, round_id=1, to=s, item_id=14, ok=True, bytes_received=config.FRAME_BYTES,
                          reason="")),
         ("state", State(g, 5, 3211, state=config.STATE_READY, round_id=2, granted_to="", window=ws)),
         ("heartbeat", Heartbeat(s, 11, 8000, buffer=buf, eviction_count=2, queue_len=2, top_score=88.0,
-                                top_item_id=12, uptime_s=8.0)),
+                                top_item_id=12, uptime_s=8.0, frames_scored=9, frames_sent=4)),
         ("eviction", Eviction(s, 12, 8100, item_id=3, score=41.0, kind="evicted", displaced_by=15,
                               displaced_by_score=77.5)),
+        ("scored", Scored(s, 13, 8100, item_id=15, score=77.5, parts=ScoreParts(clear=92.0, sharp=61.5, change=79.0),
+                          cloud_frac=0.08, queued=True, evicted_item_id=3, queue_depth=5)),
     ]
 
 
@@ -428,7 +464,8 @@ def vectors() -> list[dict[str, Any]]:
 
 __all__ = [
     "GROUND_TYPES", "MESSAGE_TYPES", "SATELLITE_TYPES", "Bid", "Breakdown", "BufferStats", "DecodeError",
-    "Eviction", "Grant", "Heartbeat", "Message", "MessageType", "OffersOpen", "QueueEntry", "Revoke", "State",
-    "TxAck", "TxBegin", "TxChunk", "TxDone", "WindowStatus", "decode", "examples", "spec_markdown", "vectors",
+    "Eviction", "Grant", "Heartbeat", "Message", "MessageType", "OffersOpen", "QueueEntry", "Revoke", "ScoreParts",
+    "Scored", "State", "TxAck", "TxBegin", "TxChunk", "TxDone", "WindowStatus", "decode", "examples", "spec_markdown",
+    "vectors",
 ]
 

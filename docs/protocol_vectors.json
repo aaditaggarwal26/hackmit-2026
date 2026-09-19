@@ -25,7 +25,7 @@
  },
  {
   "name": "tx_done",
-  "wire": "{\"v\":1,\"type\":\"tx_done\",\"from\":\"sat-a\",\"seq\":10,\"t_ms\":7200,\"round_id\":1,\"item_id\":14,\"total_bytes\":16384,\"score\":91.0}"
+  "wire": "{\"v\":1,\"type\":\"tx_done\",\"from\":\"sat-a\",\"seq\":10,\"t_ms\":7200,\"round_id\":1,\"item_id\":14,\"total_bytes\":16384,\"score\":91.0,\"cloud_frac\":0.08}"
  },
  {
   "name": "tx_ack",
@@ -37,10 +37,14 @@
  },
  {
   "name": "heartbeat",
-  "wire": "{\"v\":1,\"type\":\"heartbeat\",\"from\":\"sat-a\",\"seq\":11,\"t_ms\":8000,\"buffer\":{\"slots\":8,\"capacity_bytes\":131072,\"used\":5,\"free\":3,\"occupancy_pct\":62.5},\"eviction_count\":2,\"queue_len\":2,\"top_score\":88.0,\"top_item_id\":12,\"uptime_s\":8.0}"
+  "wire": "{\"v\":1,\"type\":\"heartbeat\",\"from\":\"sat-a\",\"seq\":11,\"t_ms\":8000,\"buffer\":{\"slots\":8,\"capacity_bytes\":131072,\"used\":5,\"free\":3,\"occupancy_pct\":62.5},\"eviction_count\":2,\"queue_len\":2,\"top_score\":88.0,\"top_item_id\":12,\"uptime_s\":8.0,\"frames_scored\":9,\"frames_sent\":4}"
  },
  {
   "name": "eviction",
   "wire": "{\"v\":1,\"type\":\"eviction\",\"from\":\"sat-a\",\"seq\":12,\"t_ms\":8100,\"item_id\":3,\"score\":41.0,\"kind\":\"evicted\",\"displaced_by\":15,\"displaced_by_score\":77.5}"
+ },
+ {
+  "name": "scored",
+  "wire": "{\"v\":1,\"type\":\"scored\",\"from\":\"sat-a\",\"seq\":13,\"t_ms\":8100,\"item_id\":15,\"score\":77.5,\"parts\":{\"clear\":92.0,\"sharp\":61.5,\"change\":79.0},\"cloud_frac\":0.08,\"queued\":true,\"evicted_item_id\":3,\"queue_depth\":5}"
  }
 ]

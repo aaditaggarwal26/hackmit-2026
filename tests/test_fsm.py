@@ -39,7 +39,7 @@ def transmit(g, host, item_id, rid, now, chunks=4, skip=()):
         out += g.on_message(M.TxChunk(host, 11 + i, 0, round_id=rid, item_id=item_id, idx=i, n=chunks,
                                       data=b"x" * (config.FRAME_BYTES // chunks)), now)
     out += g.on_message(M.TxDone(host, 20, 0, round_id=rid, item_id=item_id, total_bytes=config.FRAME_BYTES,
-                                 score=50.0), now)
+                                 score=50.0, cloud_frac=0.1), now)
     return out
 
 
@@ -161,7 +161,7 @@ def test_eviction_and_heartbeat_update_records():
     g = GroundStation(S, G)
     g.start(0.0)
     g.on_message(M.Heartbeat("sat-a", 1, 0, buffer=BUF, eviction_count=3, queue_len=0, top_score=-1.0, top_item_id=-1,
-                             uptime_s=1.0), 1.0)
+                             uptime_s=1.0, frames_scored=3, frames_sent=0), 1.0)
     assert g.sats["sat-a"].queue_len == 0 and g.sats["sat-a"].eviction_count == 3
     for i in range(7):
         g.on_message(M.Eviction("sat-a", 2 + i, 0, item_id=i, score=10.0, kind="rejected", displaced_by=-1,

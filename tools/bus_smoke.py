@@ -60,7 +60,7 @@ def send(s: Settings, iface: str, count: int, interval: float, hostname: str, un
     print(f"sending {count} heartbeats to {dest[0]}:{dest[1]} via {iface} as {hostname}", file=sys.stderr)
     for i in range(count):
         m = M.Heartbeat(hostname, i + 1, int(time.monotonic() * 1000), buffer=buf, eviction_count=0, queue_len=0,
-                        top_score=-1.0, top_item_id=-1, uptime_s=float(i))
+                        top_score=-1.0, top_item_id=-1, uptime_s=float(i), frames_scored=0, frames_sent=0)
         sock.sendto(m.encode(), dest)
         print(f"sent {i + 1}/{count}")
         time.sleep(interval)

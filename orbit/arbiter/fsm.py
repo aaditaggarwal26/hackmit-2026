@@ -47,6 +47,7 @@ class GrantState:
     to: str
     item_id: int
     deadline: float  # grant_timeout until tx_begin, then tx_timeout until tx_done
+    granted_at: float = 0.0
     began: bool = False
     chunks_expected: int = 0
     chunks_seen: set[int] = field(default_factory=set)
@@ -184,7 +185,7 @@ class GroundStation:
         rec.grants += 1
         self.counters.grants += 1
         self.grant = GrantState(round_id=self.round_id, to=w.hostname, item_id=w.item_id,
-                                deadline=now + self.s.grant_timeout_ms / 1000.0)
+                                deadline=now + self.s.grant_timeout_ms / 1000.0, granted_at=now)
         self.state = config.STATE_BUSY
         self._emit("decision", now, round_id=self.round_id, winner=w.hostname, item_id=w.item_id,
                    margin=decision.margin, excluded=sorted(decision.excluded),
@@ -217,7 +218,8 @@ class GroundStation:
         g.began = True
         g.chunks_expected = msg.chunks
         g.deadline = now + self.s.tx_timeout_ms / 1000.0
-        self._emit("tx_begin", now, sat=msg.sender, item_id=msg.item_id, chunks=msg.chunks, bytes=msg.total_bytes)
+        self._emit("tx_begin", now, round_id=g.round_id, sat=msg.sender, item_id=msg.item_id, chunks=msg.chunks,
+                   bytes=msg.total_bytes)
         return []
 
     def _on_tx_chunk(self, msg: M.TxChunk, now: float) -> list[M.Message]:
@@ -238,7 +240,7 @@ class GroundStation:
             rec.failed_tx += 1
             self.counters.failed_tx += 1
             reason = f"received {len(g.chunks_seen)}/{g.chunks_expected} chunks"
-            self._emit("tx_failed", now, sat=g.to, item_id=g.item_id, reason=reason)
+            self._emit("tx_failed", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, reason=reason)
             log(lg, logging.WARNING, "tx_failed", sat=g.to, item_id=g.item_id, reason=reason)
             ack = self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=False,
                            bytes_received=g.bytes_seen, reason=reason)
@@ -250,7 +252,8 @@ class GroundStation:
         rec.transmissions += 1
         rec.queue_len = max(0, rec.queue_len - 1)
         self.counters.completed += 1
-        self._emit("complete", now, sat=g.to, item_id=g.item_id, score=msg.score, bytes=g.bytes_seen,
+        self._emit("complete", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, score=msg.score,
+                   cloud_frac=msg.cloud_frac, bytes=g.bytes_seen, granted_at=g.granted_at,
                    window=self.window.snapshot())
         log(lg, logging.INFO, "complete", sat=g.to, item_id=g.item_id, slots_remaining=self.window.slots_remaining)
         out: list[M.Message] = [self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=True,

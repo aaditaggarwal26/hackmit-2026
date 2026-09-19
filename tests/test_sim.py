@@ -4,9 +4,13 @@ reproducible from its seed. Each scenario checks the claim it exists to make vis
 import pytest
 
 from orbit import config
-from orbit.sim.run import run_scenario
+from orbit.sim.run import run_scenario as _run
 
 S = config.Settings()
+
+
+def run_scenario(*a, **kw):
+    return _run(*a, write_run=False, **kw)
 
 
 def test_nominal_delivers_frames_and_is_deterministic():

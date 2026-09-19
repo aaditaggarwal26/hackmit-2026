@@ -65,6 +65,8 @@ class Item:
     corpus_id: int
     raw_score: int  # 0..65535 as the kernel produces it
     captured_at: float
+    cloud_frac: float = 0.0
+    parts: tuple[float, float, float] = (0.0, 0.0, 0.0)  # clear, sharp, change on 0..100
 
     def score(self, bias: float) -> float:
         return min(100.0, max(0.0, display(self.raw_score) + bias))
@@ -144,7 +146,10 @@ class FakeSatellite:
         self.hostname = profile.hostname
         self.corpus = corp
         self.rng = random.Random(seed * 7919 + profile.seq_seed)
-        self.sequence = corp.sequence(profile.seq_seed, seed)
+        # A scene's reference frame is a stored prior the satellite already carries, not something it captures
+        # again: it is excluded from the capture order. (References are the clearest frames in the corpus; feeding
+        # them as captures handed the no-scoring FIFO baseline the cleanest frames first, for free.)
+        self.sequence = [i for i in corp.sequence(profile.seq_seed, seed) if i != corp.reference_for(i)]
         self.seq_pos = 0
         self.buffer = FrameBuffer(profile.buffer_slots, settings.frame_bytes)
         self.queue = PriorityQueue(profile.buffer_slots)  # one queue cell per buffer slot
@@ -229,11 +234,20 @@ class FakeSatellite:
         frame = self.corpus.by_id(cid)
         ref_id = self.corpus.reference_for(cid)
         ref = self.references.setdefault(ref_id, self.corpus.by_id(ref_id))
-        raw = score_frame(frame, ref, self.cfg).score
-        item = Item(item_id=self._next_item_id, corpus_id=cid, raw_score=raw, captured_at=now)
+        s = score_frame(frame, ref, self.cfg)
+        item = Item(item_id=self._next_item_id, corpus_id=cid, raw_score=s.score, captured_at=now,
+                    cloud_frac=round(s.cloud_px / config.FRAME_BYTES, 4),
+                    parts=(round(display(s.clear), 2), round(display(s.sharp), 2), round(display(s.change), 2)))
         self._next_item_id += 1
         self.counters.captured += 1
-        return self._admit(item, frame.tobytes(), now)
+        out = self._admit(item, frame.tobytes(), now)
+        lost = out[0] if out else None
+        queued = not (isinstance(lost, M.Eviction) and lost.item_id == item.item_id)
+        evicted = lost.item_id if (isinstance(lost, M.Eviction) and queued) else -1
+        out.append(self._mk(M.Scored, now, item_id=item.item_id, score=item.score(self.p.score_bias),
+                            parts=M.ScoreParts(*item.parts), cloud_frac=item.cloud_frac, queued=queued,
+                            evicted_item_id=evicted, queue_depth=len(self.queue)))
+        return out
 
     def _admit(self, item: Item, data: bytes, now: float) -> list[M.Message]:
         key = self._queue_key(item)
@@ -320,7 +334,8 @@ class FakeSatellite:
             tx.done_sent = True
             item = self.items[tx.item_id]
             out.append(self._mk(M.TxDone, now, round_id=tx.round_id, item_id=tx.item_id,
-                                total_bytes=sum(map(len, tx.chunks)), score=item.score(self.p.score_bias)))
+                                total_bytes=sum(map(len, tx.chunks)), score=item.score(self.p.score_bias),
+                                cloud_frac=item.cloud_frac))
             self.awaiting_ack = tx.item_id
             self.awaiting_since = now
             self.awaiting_round = tx.round_id
@@ -357,7 +372,8 @@ class FakeSatellite:
         return self._mk(M.Heartbeat, now, buffer=self.buffer.stats(),
                         eviction_count=self.counters.evicted + self.counters.rejected, queue_len=len(self.queue),
                         top_score=top.score(self.p.score_bias) if top else -1.0,
-                        top_item_id=top.item_id if top else -1, uptime_s=round(self.uptime_ms(now) / 1000.0, 3))
+                        top_item_id=top.item_id if top else -1, uptime_s=round(self.uptime_ms(now) / 1000.0, 3),
+                        frames_scored=self.counters.captured, frames_sent=self.counters.transmitted)
 
     def _period(self) -> float:
         j = self.p.capture_jitter

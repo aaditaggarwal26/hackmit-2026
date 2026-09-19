@@ -49,9 +49,10 @@ encoded example per type and `tests/test_messages.py` pins both.
 | `bid` | satellite → all | `round_id`, `item_id`, `score`, `item_age_s`, `window`, `buffer`, `eviction_count`, `queue_len` |
 | `tx_begin` | satellite → all | `round_id`, `item_id`, `total_bytes`, `chunks` |
 | `tx_chunk` | satellite → all | `round_id`, `item_id`, `idx`, `n`, `data` (base64) |
-| `tx_done` | satellite → all | `round_id`, `item_id`, `total_bytes`, `score` |
-| `heartbeat` | satellite → all | `buffer`, `eviction_count`, `queue_len`, `top_score`, `top_item_id`, `uptime_s` |
+| `tx_done` | satellite → all | `round_id`, `item_id`, `total_bytes`, `score`, `cloud_frac` |
+| `heartbeat` | satellite → all | `buffer`, `eviction_count`, `queue_len`, `top_score`, `top_item_id`, `uptime_s`, `frames_scored`, `frames_sent` |
 | `eviction` | satellite → all | `item_id`, `score`, `kind`, `displaced_by`, `displaced_by_score` |
+| `scored` | satellite → all | `item_id`, `score`, `parts{clear,sharp,change}`, `cloud_frac`, `queued`, `evicted_item_id`, `queue_depth` |
 
 Nested records:
 
@@ -112,6 +113,9 @@ ground                                   satellite (granted)          other sate
    whether it was counted; never lose data on uncertainty) and resume bidding. At worst the ground
    receives the frame twice.
 7. Send `heartbeat` every `sat_heartbeat_ms` so the ground can tell idle from starved between rounds.
+   Send `scored` for every frame that goes through the kernel (kept or rejected), with the three score
+   parts and the cloud fraction: the ground does not arbitrate on it, but it is what feeds the display's
+   `frame_scored`, the FIFO baseline and the `usable` verdict (see `docs/event_stream.md`).
 8. Drop your own echoes and duplicates by `(from, seq)`.
 
 ## Failure modes and what the bus does about them
