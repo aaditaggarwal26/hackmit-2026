@@ -21,6 +21,7 @@ The point of a scenario is to make one question visible in a 50-round table:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from orbit.bus.loopback import Faults
 from orbit.sim.satellite import SatelliteProfile
@@ -35,8 +36,8 @@ class Scenario:
     settings_overrides: dict[str, float | int] = field(default_factory=dict)
 
 
-def _sat(host: str, seq: int, **kw: object) -> SatelliteProfile:
-    return SatelliteProfile(hostname=host, seq_seed=seq, **kw)  # type: ignore[arg-type]
+def _sat(host: str, seq: int, **kw: Any) -> SatelliteProfile:
+    return SatelliteProfile(hostname=host, seq_seed=seq, **kw)
 
 
 SCENARIOS: dict[str, Scenario] = {

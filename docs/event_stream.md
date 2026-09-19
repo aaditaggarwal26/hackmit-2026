@@ -97,7 +97,8 @@ rejected), never frames that lost arbitration.
 ## `queue_window`
 
 The top few entries of a node's queue. Not the whole queue. Emitted with every
-bid (once per round per node). Capped at 5 entries; the first is the item being bid.
+bid a node makes (normally once per round per node). Capped at 5 entries; the first
+is the item being bid.
 
 ```json
 {
