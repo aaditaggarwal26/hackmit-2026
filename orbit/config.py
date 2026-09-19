@@ -99,6 +99,7 @@ class Settings:
     stream_host: str = "0.0.0.0"
     stream_port: int = 8766
     stream_queue_max: int = 5000  # per WebSocket client; a client that falls this far behind is dropped
+    stream_backlog_max: int = 200_000  # events kept in memory to catch up a late display; the run file has all
     runs_dir: str = "runs"
     expected_sats: str = "sat-a,sat-b,sat-c"  # node_id order for run_start; late joiners get the next id
     nodes_real: bool = False  # True once the ESP32s replace the simulated satellites

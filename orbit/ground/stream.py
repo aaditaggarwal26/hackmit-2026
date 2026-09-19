@@ -123,7 +123,10 @@ class EventStream:
         self.mode = mode
         self.writers: list[Writer] = list(writers or [])
         self.wall = wall
-        self.lines: list[str] = []  # everything emitted, for late-connecting displays
+        # Backlog for late-connecting displays. Bounded: a day-long run must not grow without limit; the run file
+        # on disk is the complete record, this is only what a new WebSocket client is caught up with.
+        self.lines: deque[str] = deque(maxlen=settings.stream_backlog_max)
+        self.backlog_dropped = 0
         self.seq = 0
         self.nodes: dict[str, NodeView] = {}
         for i, name in enumerate(n for n in settings.expected_sats.split(",") if n):
@@ -364,6 +367,8 @@ class EventStream:
             doc = {"seq": self.seq, "t": round(now, 3), "type": "node_event", "node_id": None, "level": "error",
                    "message": f"{type_} event dropped: non-finite value"}
             line = json.dumps(doc, separators=(",", ":"))
+        if len(self.lines) == self.lines.maxlen:
+            self.backlog_dropped += 1
         self.lines.append(line)
         for w in self.writers:
             try:
