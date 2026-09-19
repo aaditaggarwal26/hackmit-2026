@@ -55,6 +55,10 @@ def cmd_sim(a: argparse.Namespace) -> int:
         argv.append("--digest")
     if a.events:
         argv += ["--events", a.events]
+    if a.run_id:
+        argv += ["--run-id", a.run_id]
+    if a.no_runs:
+        argv.append("--no-runs")
     for k in ("item_aging_rate", "sat_aging_rate"):
         v = getattr(a, k)
         if v is not None:
@@ -66,7 +70,7 @@ def cmd_sim(a: argparse.Namespace) -> int:
 
 def cmd_ground(a: argparse.Namespace) -> int:
     from orbit.ground.station import main_async
-    asyncio.run(main_async(_settings(a), telemetry_network=not a.no_telemetry))
+    asyncio.run(main_async(_settings(a), telemetry_network=not a.no_telemetry, run_id=a.run_id))
     return 0
 
 
@@ -155,12 +159,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sat-aging-rate", type=float, default=None)
     p.add_argument("--events", default=None)
     p.add_argument("--digest", action="store_true")
+    p.add_argument("--run-id", default=None, help="name of runs/<run_id>.jsonl (default: sim-<scenario>-<seed>)")
+    p.add_argument("--no-runs", action="store_true", help="do not write runs/<run_id>.jsonl")
     p.set_defaults(fn=cmd_sim)
 
     p = sub.add_parser("ground", help="live arbiter on the multicast bus")
     p.add_argument("--telemetry-host", default=None)
     p.add_argument("--hostname", default=None)
     p.add_argument("--no-telemetry", action="store_true")
+    p.add_argument("--run-id", default=None, help="name of runs/<run_id>.jsonl (default: UTC timestamp)")
     p.set_defaults(fn=cmd_ground)
 
     p = sub.add_parser("sat", help="one simulated satellite, live")

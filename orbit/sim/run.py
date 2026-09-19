@@ -20,6 +20,7 @@ from orbit import config, corpus
 from orbit.arbiter.fsm import GroundStation
 from orbit.bus.loopback import LoopbackBus, LoopbackHub
 from orbit.config import Settings
+from orbit.ground.stream import EventStream, RunFile
 from orbit.ground.telemetry import Telemetry, bus_summary
 from orbit.log import log
 from orbit.protocol import messages as M
@@ -56,16 +57,21 @@ class SlotRow:
 
 
 class Simulation:
-    def __init__(self, scenario: Scenario, settings: Settings, seed: int) -> None:
+    def __init__(self, scenario: Scenario, settings: Settings, seed: int, run_id: str | None = None,
+                 write_run: bool = True) -> None:
         self.scenario = scenario
         self.s = settings.with_overrides(**scenario.settings_overrides, seed=seed)
         self.seed = seed
+        self.run_id = run_id or f"sim-{scenario.name}-{seed}"
+        self.run_file = RunFile(self.s.runs_dir, self.run_id) if write_run else None
+        self.stream = EventStream(self.s, self.run_id, writers=[self.run_file] if self.run_file else [], wall=False)
         self.hub = LoopbackHub(seed=seed, faults=scenario.faults)
         self.now = 0.0
         self.events: list[dict[str, Any]] = []
         self.bus_log: list[dict[str, Any]] = []
         self.telemetry = Telemetry(self.s, GROUND, network=False)
         self.telemetry.attach(self.events.append)
+        self.telemetry.attach(lambda e: self.stream.on_event(str(e["kind"]), e))
         self.ground = GroundStation(self.s, GROUND, sink=self.telemetry.emit)
         self.ground_bus = LoopbackBus(self.hub, GROUND, self.s.dedup_window, self.s.bus_max_datagram)
         corp = corpus.load()
@@ -79,6 +85,7 @@ class Simulation:
     # ------------------------------------------------------------------ stepping
 
     def run(self, rounds: int, max_virtual_s: float = 3600.0) -> None:
+        self.stream.start(self.now)
         self._send(self.ground_bus, self.ground.start(self.now))
         for sat in self.sats:
             self._send(self.sat_bus[sat.hostname], sat.start(self.now))
@@ -91,6 +98,9 @@ class Simulation:
             if len(self.rows) >= rounds and self.ground.state != config.STATE_BUSY:
                 break
         self._drain()
+        self.stream.end(self.now, reason="window_closed" if not self.ground.window.open else "rounds_done")
+        if self.run_file is not None:
+            self.run_file.close()
         log(lg, logging.INFO, "sim_done", steps=steps, virtual_s=round(self.now, 2), rounds=len(self.rows),
             state=self.ground.state)
 
@@ -134,6 +144,7 @@ class Simulation:
                 self._observe(m)
 
     def _log_bus(self, msg: M.Message) -> None:
+        self.stream.on_bus(msg, self.now, outbound=msg.sender == GROUND)
         entry = {"t": self.now, "dir": "out" if msg.sender == GROUND else "in", **bus_summary(msg)}
         if len(self.bus_log) < BUS_LOG_MAX:
             self.bus_log.append(entry)
@@ -231,6 +242,11 @@ class Simulation:
           f"malformed={b.dropped_malformed} own={b.dropped_own}  hub datagrams={self.hub.datagrams}\n")
         w(f"telemetry events: {len(self.events)}  bus log entries: {len(self.bus_log)}  "
           f"virtual time: {self.now:.1f}s\n")
+        st = self.stream
+        w(f"event stream: {st.seq} events → {self.run_file.path if self.run_file else '(not written)'}  "
+          f"orbit usable {st.orbit_usable_down}/{st.orbit_frames_down}  "
+          f"FIFO baseline usable {st.baseline.usable_down}/{st.baseline.frames_down} "
+          f"(dropped full {st.baseline.dropped})\n")
         # value delivered: sum of scores of transmitted frames, the number the pitch compares
         delivered = sum(r.score for r in self.rows if r.outcome == "complete")
         n_ok = sum(r.outcome == "complete" for r in self.rows)
@@ -253,8 +269,9 @@ def _flag_str(kind: object, level: object, pressured: bool) -> str:
     return base + ("+MEM" if pressured else "")
 
 
-def run_scenario(name: str, rounds: int, seed: int, settings: Settings | None = None) -> Simulation:
-    sim = Simulation(SCENARIOS[name], settings or config.Settings.from_env(), seed)
+def run_scenario(name: str, rounds: int, seed: int, settings: Settings | None = None, run_id: str | None = None,
+                 write_run: bool = True) -> Simulation:
+    sim = Simulation(SCENARIOS[name], settings or config.Settings.from_env(), seed, run_id=run_id, write_run=write_run)
     sim.run(rounds)
     return sim
 
@@ -269,9 +286,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sat-aging-rate", type=float, default=None)
     ap.add_argument("--events", default=None, help="write all telemetry events as JSON lines to this path")
     ap.add_argument("--digest", action="store_true", help="print only the run digest (determinism check)")
+    ap.add_argument("--run-id", default=None)
+    ap.add_argument("--no-runs", action="store_true")
     a = ap.parse_args(argv)
     s = config.Settings.from_env().with_overrides(item_aging_rate=a.item_aging_rate, sat_aging_rate=a.sat_aging_rate)
-    sim = run_scenario(a.scenario, a.rounds, a.seed, s)
+    sim = run_scenario(a.scenario, a.rounds, a.seed, s, run_id=a.run_id, write_run=not a.no_runs)
     if a.events:
         with open(a.events, "w") as f:
             for e in sim.events:

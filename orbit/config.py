@@ -93,6 +93,15 @@ class Settings:
     telemetry_queue_max: int = 2000  # bounded; oldest dropped when the display cannot keep up
     telemetry_resolve_s: float = 5.0  # how often an unresolved display hostname is retried
 
+    # --- event stream (docs/event_stream.md): JSONL to the display over WebSocket + runs/<run_id>.jsonl ---
+    stream_host: str = "0.0.0.0"
+    stream_port: int = 8766
+    stream_queue_max: int = 5000  # per WebSocket client; a client that falls this far behind is dropped
+    runs_dir: str = "runs"
+    expected_sats: str = "sat-a,sat-b,sat-c"  # node_id order for run_start; late joiners get the next id
+    nodes_real: bool = False  # True once the ESP32s replace the simulated satellites
+    usable_cloud_max: float = 0.35  # a downlinked frame is "usable" iff cloud_frac <= this; never from score
+
     # --- satellites (simulated; the ESP32 will report its own real figures) -------------
     sat_buffer_slots: int = 8  # fixed pool allocated once at boot
     sat_heartbeat_ms: int = 1000
