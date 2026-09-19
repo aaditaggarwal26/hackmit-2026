@@ -20,3 +20,4 @@ vivado/.Xil/
 tb/*.result.xml
 .coverage
 !corpus/png/*.png
+results/raw/
