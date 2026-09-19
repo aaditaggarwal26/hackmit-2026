@@ -24,6 +24,7 @@ drive the same code from asyncio.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 from dataclasses import dataclass
@@ -120,6 +121,7 @@ class Transmission:
     item_id: int
     pace_bps: float
     chunks: list[bytes]
+    sha256: str = ""
     next_idx: int = 0
     next_at: float = 0.0
     done_sent: bool = False
@@ -136,6 +138,7 @@ class SatCounters:
     failed: int = 0
     revoked: int = 0
     ack_lost: int = 0  # tx_done sent, no tx_ack heard: frame kept, bidding resumed
+    late_acks: int = 0  # a positive ack arrived after we had given up (or on a re-offer): popped, not resent
     peer_grants_seen: int = 0  # what a relay would build on: we hear who else is granted
 
 
@@ -314,7 +317,8 @@ class FakeSatellite:
         data = bytes(self.buffer.read(g.item_id))
         n = self.s.chunk_bytes
         chunks = [data[i:i + n] for i in range(0, len(data), n)]
-        self.tx = Transmission(round_id=g.round_id, item_id=g.item_id, pace_bps=g.pace_bps, chunks=chunks, next_at=now)
+        self.tx = Transmission(round_id=g.round_id, item_id=g.item_id, pace_bps=g.pace_bps, chunks=chunks,
+                               sha256=hashlib.sha256(data).hexdigest(), next_at=now)
         return [self._mk(M.TxBegin, now, round_id=g.round_id, item_id=g.item_id, total_bytes=len(data),
                          chunks=len(chunks))]
 
@@ -335,7 +339,7 @@ class FakeSatellite:
             item = self.items[tx.item_id]
             out.append(self._mk(M.TxDone, now, round_id=tx.round_id, item_id=tx.item_id,
                                 total_bytes=sum(map(len, tx.chunks)), score=item.score(self.p.score_bias),
-                                cloud_frac=item.cloud_frac))
+                                cloud_frac=item.cloud_frac, sha256=tx.sha256))
             self.awaiting_ack = tx.item_id
             self.awaiting_since = now
             self.awaiting_round = tx.round_id
@@ -344,18 +348,26 @@ class FakeSatellite:
 
     def _acked(self, ack: M.TxAck, now: float) -> list[M.Message]:
         if ack.item_id != self.awaiting_ack:
+            # Not the ack we are waiting for. If it is a positive ack for an item we still hold, the ground has
+            # the frame (our earlier ack was lost or reordered, or we re-offered it): pop it now, never resend.
+            if ack.ok and ack.item_id in self.items and not (self.tx and self.tx.item_id == ack.item_id):
+                self.counters.late_acks += 1
+                self._pop(ack.item_id)
+                log(lg, logging.INFO, "late_ack_pop", sat=self.hostname, item_id=ack.item_id, reason=ack.reason)
             return []
         self.awaiting_ack = None
         if not ack.ok:
             self.counters.failed += 1  # keep the frame: a failed transmission must not lose data
             log(lg, logging.WARNING, "tx_nack", sat=self.hostname, item_id=ack.item_id, reason=ack.reason)
             return []
-        # Confirmed: only now does the item leave the queue and the buffer.
-        self.queue.cells = [c for c in self.queue.cells if c[1] != ack.item_id]
-        self.items.pop(ack.item_id)
-        self.buffer.release(ack.item_id)
-        self.counters.transmitted += 1
+        self._pop(ack.item_id)  # confirmed: only now does the item leave the queue and the buffer
         return []
+
+    def _pop(self, item_id: int) -> None:
+        self.queue.cells = [c for c in self.queue.cells if c[1] != item_id]
+        self.items.pop(item_id)
+        self.buffer.release(item_id)
+        self.counters.transmitted += 1
 
     def _give_up_ack(self, reason: str) -> None:
         """A lost tx_ack must not wedge the satellite. We cannot know whether the ground counted the frame, so

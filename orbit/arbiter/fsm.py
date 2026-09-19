@@ -20,6 +20,7 @@ never diverge because neither owns a timer.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -51,7 +52,16 @@ class GrantState:
     began: bool = False
     chunks_expected: int = 0
     chunks_seen: set[int] = field(default_factory=set)
+    chunks: dict[int, bytes] = field(default_factory=dict)  # kept until tx_done so the digest can be checked
     bytes_seen: int = 0
+    done_pending: M.TxDone | None = None  # tx_done arrived before the last chunk: wait a little for stragglers
+    done_deadline: float = 0.0
+
+    def digest(self) -> str:
+        h = hashlib.sha256()
+        for i in sorted(self.chunks):
+            h.update(self.chunks[i])
+        return h.hexdigest()
 
 
 @dataclass
@@ -61,6 +71,8 @@ class Counters:
     completed: int = 0
     revoked: int = 0
     failed_tx: int = 0
+    corrupt_tx: int = 0  # all chunks arrived, digest did not match: counted inside failed_tx too
+    duplicate_offers: int = 0  # a satellite offered an item the ground already holds (its ack was lost): re-acked
     no_bid_rounds: int = 0
     late_bids: int = 0
     ignored_while_busy: int = 0
@@ -84,8 +96,10 @@ class GroundStation:
         self.reopen_at: float | None = None
         self.grant: GrantState | None = None
         self.decisions: list[Decision] = []
+        self.delivered: set[tuple[str, int]] = set()  # (hostname, item_id) confirmed this pass: never counted twice
         self.counters = Counters()
         self._seq = 0
+        self._epoch = 0.0  # t_ms on the wire is uptime: seconds since start(), not the caller's absolute clock
         self._last_state_at = -1e9
         self._sink = sink or (lambda kind, payload: None)
 
@@ -93,6 +107,7 @@ class GroundStation:
 
     def start(self, now: float) -> list[M.Message]:
         """Open the first round."""
+        self._epoch = now
         return self._open_round(now)
 
     def on_message(self, msg: M.Message, now: float) -> list[M.Message]:
@@ -125,8 +140,14 @@ class GroundStation:
                 out += self._arbitrate(now)
             elif self.reopen_at is not None and now >= self.reopen_at:
                 out += self._open_round(now)
-        elif self.state == config.STATE_BUSY and self.grant is not None and now >= self.grant.deadline:
-            out += self._revoke(now, "grant_timeout" if not self.grant.began else "tx_timeout")
+        elif self.state == config.STATE_BUSY and self.grant is not None:
+            g = self.grant
+            if g.done_pending is not None and (self._all_chunks(g) or now >= g.done_deadline):
+                out += self._finish(g, self.sats[g.to], g.done_pending, now)
+            elif now >= g.deadline:
+                out += self._revoke(now, "grant_timeout" if not g.began else "tx_timeout")
+        elif self.state == config.STATE_COMPLETE:  # transient; only reachable if a sink raised mid-transition
+            out += self._open_round(now)
         if now - self._last_state_at >= self.s.state_period_ms / 1000.0:
             out.append(self._state_msg(now))
         return out
@@ -160,6 +181,13 @@ class GroundStation:
         rec.buffer = bid.buffer
         rec.eviction_count = bid.eviction_count
         rec.last_window = tuple((e.item_id, e.score, e.item_age_s) for e in bid.window)
+        if (bid.sender, bid.item_id) in self.delivered:
+            # We already have this frame; the satellite never heard the ack. Re-ack instead of spending a slot on
+            # it: the satellite pops it and offers its next item in the next round.
+            self.counters.duplicate_offers += 1
+            self._emit("duplicate_offer", now, sat=bid.sender, item_id=bid.item_id, round_id=bid.round_id)
+            return [self._mk(M.TxAck, now, round_id=bid.round_id, to=bid.sender, item_id=bid.item_id, ok=True,
+                             bytes_received=0, reason="already delivered")]
         if self.state != config.STATE_READY:
             self.counters.ignored_while_busy += 1
             return []
@@ -226,20 +254,47 @@ class GroundStation:
         g = self._holder(msg, now)
         if g is None:
             return []
+        if not g.began:  # tx_begin was lost; every chunk says how many there are
+            g.began = True
+            g.chunks_expected = msg.n
+            g.deadline = now + self.s.tx_timeout_ms / 1000.0
+        if not 0 <= msg.idx < g.chunks_expected:
+            self.counters.unexpected += 1
+            return []
         if msg.idx not in g.chunks_seen:
             g.chunks_seen.add(msg.idx)
+            g.chunks[msg.idx] = msg.data
             g.bytes_seen += len(msg.data)
+        if g.done_pending is not None and self._all_chunks(g):  # the straggler arrived
+            return self._finish(g, self.sats[g.to], g.done_pending, now)
         return []
+
+    @staticmethod
+    def _all_chunks(g: GrantState) -> bool:
+        return g.began and g.chunks_expected > 0 and len(g.chunks_seen) == g.chunks_expected
 
     def _on_tx_done(self, msg: M.TxDone, rec: SatelliteRecord, now: float) -> list[M.Message]:
         g = self._holder(msg, now)
         if g is None:
             return []
-        complete = g.began and g.chunks_expected > 0 and len(g.chunks_seen) == g.chunks_expected
+        if not self._all_chunks(g) and g.began and g.done_pending is None:
+            # tx_done overtook a chunk (reordering): give stragglers a moment before failing 2 s of airtime
+            g.done_pending = msg
+            g.done_deadline = now + self.s.tx_straggler_ms / 1000.0
+            return []
+        return self._finish(g, rec, msg, now)
+
+    def _finish(self, g: GrantState, rec: SatelliteRecord, msg: M.TxDone, now: float) -> list[M.Message]:
+        g.done_pending = None
+        complete = self._all_chunks(g)
+        reason = f"received {len(g.chunks_seen)}/{g.chunks_expected} chunks"
+        if complete and g.digest() != msg.sha256:
+            complete = False  # every chunk arrived but the bytes are not the frame the satellite scored
+            reason = "digest mismatch"
+            self.counters.corrupt_tx += 1
         if not complete:
             rec.failed_tx += 1
             self.counters.failed_tx += 1
-            reason = f"received {len(g.chunks_seen)}/{g.chunks_expected} chunks"
             self._emit("tx_failed", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, reason=reason)
             log(lg, logging.WARNING, "tx_failed", sat=g.to, item_id=g.item_id, reason=reason)
             ack = self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=False,
@@ -248,12 +303,13 @@ class GroundStation:
         # COMPLETE: debit the window, record the transmission, confirm to the satellite
         self.state = config.STATE_COMPLETE
         self.window.debit()
+        self.delivered.add((g.to, g.item_id))
         rec.last_tx_complete_s = now
         rec.transmissions += 1
         rec.queue_len = max(0, rec.queue_len - 1)
         self.counters.completed += 1
         self._emit("complete", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, score=msg.score,
-                   cloud_frac=msg.cloud_frac, bytes=g.bytes_seen, granted_at=g.granted_at,
+                   cloud_frac=msg.cloud_frac, bytes=g.bytes_seen, granted_at=g.granted_at, sha256=msg.sha256,
                    window=self.window.snapshot())
         log(lg, logging.INFO, "complete", sat=g.to, item_id=g.item_id, slots_remaining=self.window.slots_remaining)
         out: list[M.Message] = [self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=True,
@@ -314,10 +370,13 @@ class GroundStation:
 
     def _mk(self, cls: type[TMsg], now: float, **body: Any) -> TMsg:
         self._seq += 1
-        return cls(sender=self.hostname, seq=self._seq, t_ms=int(now * 1000), **body)
+        return cls(sender=self.hostname, seq=self._seq, t_ms=int((now - self._epoch) * 1000), **body)
 
     def _emit(self, kind: str, now: float, **payload: Any) -> None:
-        self._sink(kind, {"t": now, **payload})
+        try:
+            self._sink(kind, {"t": now, **payload})
+        except Exception:  # telemetry/stream are observers; a bug there must not cost a slot
+            lg.exception("event sink failed on %s", kind)
 
     def snapshot(self, now: float) -> dict[str, Any]:
         return dict(state=self.state, round_id=self.round_id, granted_to=self.grant.to if self.grant else "",

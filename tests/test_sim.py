@@ -75,6 +75,10 @@ def test_lossy_bus_never_loses_a_frame():
     assert lost > 0  # the scenario really did drop acks
     for sat in sim.sats:  # everything not confirmed is still on board
         assert sat.buffer.used == len(sat.queue) == len(sat.items)
+    # and no frame is ever counted twice, whatever the bus did to the acks
+    import json
+    arrived = [(e["node_id"], e["frame_id"]) for e in map(json.loads, sim.stream.lines) if e["type"] == "frame_arrived"]
+    assert len(arrived) == len(set(arrived)) == g.counters.completed
 
 
 def test_late_joiner_needs_no_configuration():
@@ -98,3 +102,24 @@ def test_aging_rates_are_tunable_and_change_outcomes(item_rate, sat_rate):
     assert tuned.digest() != base or (item_rate, sat_rate) == (S.item_aging_rate, S.sat_aging_rate)
     if sat_rate == 0.0 and item_rate == 0.0:
         assert all(r.item_age_term == 0.0 and r.sat_wait_term == 0.0 for r in tuned.rows)
+
+
+def test_restarting_the_ground_mid_pass_resumes_arbitration():
+    """Operator restarts `orbit ground`; the satellites keep running. The new ground's seq starts over and
+    must not be mistaken for duplicates (review finding: minutes of silence otherwise)."""
+    from orbit.arbiter.fsm import GroundStation
+    from orbit.bus.loopback import LoopbackBus
+    from orbit.sim.run import GROUND, Simulation
+    from orbit.sim.scenarios import SCENARIOS
+    sim = Simulation(SCENARIOS["nominal"], S, seed=4, write_run=False)
+    sim.run(8)
+    before = sim.ground.counters.completed
+    sim.ground = GroundStation(sim.s, GROUND, sink=sim.telemetry.emit)
+    sim.ground_bus = LoopbackBus(sim.hub, GROUND, sim.s.dedup_window, sim.s.bus_max_datagram)
+    sim._send(sim.ground_bus, sim.ground.start(sim.now))
+    t0 = sim.now
+    while sim.now - t0 < 30.0:
+        sim.step()
+    assert sim.ground.counters.completed >= 5, sim.ground.counters
+    assert all(b.stats.dropped_dup == 0 for b in sim.sat_bus.values())
+    assert before > 0

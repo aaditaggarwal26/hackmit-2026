@@ -26,6 +26,8 @@ from typing import Any
 from orbit import config, log
 from orbit.config import Settings
 
+PASSTHROUGH = ("bench", "bus-smoke")
+
 
 def _apply_sets(s: Settings, sets: list[str]) -> Settings:
     kw: dict[str, Any] = {}
@@ -185,12 +187,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--display-port", type=int, default=8765)
     p.set_defaults(fn=cmd_demo)
 
-    p = sub.add_parser("bench", help="energy/efficiency baseline (args passed through)")
-    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p = sub.add_parser("bench", help="energy/efficiency baseline (all following args passed through)")
     p.set_defaults(fn=cmd_bench)
 
-    p = sub.add_parser("bus-smoke", help="multicast reachability test (args passed through)")
-    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p = sub.add_parser("bus-smoke", help="multicast reachability test (all following args passed through)")
     p.set_defaults(fn=cmd_bus_smoke)
 
     p = sub.add_parser("display", help="dashboard server")
@@ -199,8 +199,32 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _hoist_sets(argv: list[str]) -> tuple[list[str], list[str]]:
+    """`--set name=value` is accepted anywhere on the command line (before or after the subcommand)."""
+    sets: list[str] = []
+    rest: list[str] = []
+    it = iter(argv)
+    for tok in it:
+        if tok == "--set":
+            sets.append(next(it, ""))
+        elif tok.startswith("--set="):
+            sets.append(tok[len("--set="):])
+        else:
+            rest.append(tok)
+    return rest, sets
+
+
 def main(argv: list[str] | None = None) -> int:
-    a = build_parser().parse_args(argv)
+    rest, sets = _hoist_sets(sys.argv[1:] if argv is None else list(argv))
+    parser = build_parser()
+    passthrough: list[str] = []
+    for i, tok in enumerate(rest):  # bench/bus-smoke own everything after their name; argparse never sees it
+        if tok in PASSTHROUGH:
+            rest, passthrough = rest[: i + 1], rest[i + 1:]
+            break
+    a = parser.parse_args(rest)
+    a.rest = passthrough
+    a.set = (a.set or []) + sets
     log.setup(a.log_level)
     fn: Any = a.fn
     return int(fn(a))

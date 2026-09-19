@@ -1,5 +1,7 @@
 """The ground state machine driven by hand-built messages under a hand-held clock."""
 
+import hashlib
+
 import pytest
 
 from orbit import config
@@ -30,16 +32,18 @@ def open_and_collect(g, now, bids):
     return rid, out
 
 
-def transmit(g, host, item_id, rid, now, chunks=4, skip=()):
+def transmit(g, host, item_id, rid, now, chunks=4, skip=(), corrupt=False):
     out = g.on_message(M.TxBegin(host, 10, 0, round_id=rid, item_id=item_id, total_bytes=config.FRAME_BYTES,
                                  chunks=chunks), now)
+    parts = [bytes([i]) * (config.FRAME_BYTES // chunks) for i in range(chunks)]
+    digest = hashlib.sha256(b"".join(parts)).hexdigest()
     for i in range(chunks):
         if i in skip:
             continue
-        out += g.on_message(M.TxChunk(host, 11 + i, 0, round_id=rid, item_id=item_id, idx=i, n=chunks,
-                                      data=b"x" * (config.FRAME_BYTES // chunks)), now)
+        data = parts[i] if not (corrupt and i == 1) else b"\xff" * len(parts[i])
+        out += g.on_message(M.TxChunk(host, 11 + i, 0, round_id=rid, item_id=item_id, idx=i, n=chunks, data=data), now)
     out += g.on_message(M.TxDone(host, 20, 0, round_id=rid, item_id=item_id, total_bytes=config.FRAME_BYTES,
-                                 score=50.0, cloud_frac=0.1), now)
+                                 score=50.0, cloud_frac=0.1, sha256=digest), now)
     return out
 
 
@@ -87,11 +91,23 @@ def test_missing_chunks_nack_keeps_frame_and_rearbitrates():
     g = GroundStation(S, G)
     rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0), ("sat-b", 70.0)])
     g.on_tick(0.1)
-    out = transmit(g, "sat-b", 1, rid, 0.5, skip=(2,))
+    assert transmit(g, "sat-b", 1, rid, 0.5, skip=(2,)) == []  # tx_done before the last chunk: stragglers get a grace
+    out = g.on_tick(0.5 + S.tx_straggler_ms / 1000.0 + 0.01)
     assert isinstance(out[0], M.TxAck) and not out[0].ok and "3/4" in out[0].reason
     assert g.window.slots_used == 0 and g.counters.failed_tx == 1
     assert isinstance(out[1], M.Grant) and out[1].to == "sat-a" and out[1].round_id == rid  # same round, sat-b excluded
     assert g.excluded == {"sat-b"}
+
+
+def test_corrupted_frame_is_nacked_and_frame_kept():
+    """Every chunk arrives but one is not what the satellite scored: the digest catches it, nothing is debited."""
+    g = GroundStation(S, G)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0), ("sat-b", 70.0)])
+    g.on_tick(0.1)
+    out = transmit(g, "sat-b", 1, rid, 0.5, corrupt=True)
+    assert isinstance(out[0], M.TxAck) and not out[0].ok and out[0].reason == "digest mismatch"
+    assert g.window.slots_used == 0 and g.counters.failed_tx == 1 and g.counters.corrupt_tx == 1
+    assert isinstance(out[1], M.Grant) and out[1].to == "sat-a"
 
 
 def test_grant_timeout_revokes_and_rearbitrates():
@@ -141,9 +157,9 @@ def test_late_bid_and_no_bids_reopen():
 def test_window_exhaustion_closes():
     g = GroundStation(S, G)
     for n in range(3):
-        rid, _ = open_and_collect(g, float(n), [("sat-a", 60.0)])
+        rid, _ = open_and_collect(g, float(n), [("sat-a", 60.0, 0.0, n + 1)])
         g.on_tick(n + 0.1)
-        out = transmit(g, "sat-a", 1, rid, n + 0.5)
+        out = transmit(g, "sat-a", n + 1, rid, n + 0.5)
     assert g.window.slots_used == 3 and not g.window.open
     assert g.state == config.STATE_CLOSED and out[-1].state == config.STATE_CLOSED
     assert g.on_tick(10.0) == [] or all(isinstance(m, M.State) for m in g.on_tick(10.0))
@@ -168,3 +184,79 @@ def test_eviction_and_heartbeat_update_records():
                                 displaced_by_score=-1.0), 2.0)
     a = g.assessments(2.0)["sat-a"]
     assert a.memory_pressured and str(a.kind) == "idle"
+
+
+def test_duplicate_offer_is_reacked_without_a_slot():
+    """The satellite never heard tx_ack{ok}; it offers the same frame again. Re-ack it, spend no airtime."""
+    g = GroundStation(S, G)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0)])
+    g.on_tick(0.1)
+    transmit(g, "sat-a", 1, rid, 0.5)
+    assert g.window.slots_used == 1 and ("sat-a", 1) in g.delivered
+    rid2 = g.round_id
+    out = g.on_message(bid("sat-a", 60.0, rid2, item_id=1, seq=9), 1.0)
+    assert len(out) == 1 and isinstance(out[0], M.TxAck) and out[0].ok and out[0].reason == "already delivered"
+    assert g.bids == {} and g.counters.duplicate_offers == 1
+    g.on_message(bid("sat-a", 55.0, rid2, item_id=2, seq=10), 1.0)
+    assert g.on_tick(1.1)[0].item_id == 2 and g.window.slots_used == 1  # nothing counted twice
+
+
+def test_lost_tx_begin_is_recovered_from_the_chunks():
+    g = GroundStation(S, G)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0)])
+    g.on_tick(0.1)
+    parts = [bytes([i]) * (config.FRAME_BYTES // 4) for i in range(4)]
+    for i in range(4):  # no tx_begin at all
+        g.on_message(M.TxChunk("sat-a", 11 + i, 0, round_id=rid, item_id=1, idx=i, n=4, data=parts[i]), 0.5)
+    out = g.on_message(M.TxDone("sat-a", 20, 0, round_id=rid, item_id=1, total_bytes=config.FRAME_BYTES, score=1.0,
+                                cloud_frac=0.1, sha256=hashlib.sha256(b"".join(parts)).hexdigest()), 0.6)
+    assert isinstance(out[0], M.TxAck) and out[0].ok and g.window.slots_used == 1
+
+
+def test_out_of_range_chunk_index_is_ignored():
+    g = GroundStation(S, G)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0)])
+    g.on_tick(0.1)
+    g.on_message(M.TxBegin("sat-a", 10, 0, round_id=rid, item_id=1, total_bytes=config.FRAME_BYTES, chunks=4), 0.2)
+    for idx in (0, 1, 7, -3):
+        g.on_message(M.TxChunk("sat-a", 20 + idx, 0, round_id=rid, item_id=1, idx=idx, n=4, data=b"x" * 4096), 0.3)
+    assert g.grant is not None and g.grant.chunks_seen == {0, 1} and g.counters.unexpected == 2
+
+
+def test_tx_done_overtaking_last_chunk_waits_for_the_straggler():
+    g = GroundStation(S, G)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0)])
+    g.on_tick(0.1)
+    parts = [bytes([i]) * (config.FRAME_BYTES // 4) for i in range(4)]
+    digest = hashlib.sha256(b"".join(parts)).hexdigest()
+    g.on_message(M.TxBegin("sat-a", 10, 0, round_id=rid, item_id=1, total_bytes=config.FRAME_BYTES, chunks=4), 0.2)
+    for i in (0, 1, 2):
+        g.on_message(M.TxChunk("sat-a", 11 + i, 0, round_id=rid, item_id=1, idx=i, n=4, data=parts[i]), 0.3)
+    done = M.TxDone("sat-a", 20, 0, round_id=rid, item_id=1, total_bytes=config.FRAME_BYTES, score=1.0, cloud_frac=0.1,
+                    sha256=digest)
+    assert g.on_message(done, 0.4) == [] and g.grant is not None and g.grant.done_pending is not None
+    assert g.on_tick(0.5) == []  # still within the grace
+    out = g.on_message(M.TxChunk("sat-a", 14, 0, round_id=rid, item_id=1, idx=3, n=4, data=parts[3]), 0.6)
+    assert isinstance(out[0], M.TxAck) and out[0].ok and g.window.slots_used == 1
+    # and when the straggler never comes, the grace expires into a nack
+    g2 = GroundStation(S, G)
+    rid, _ = open_and_collect(g2, 0.0, [("sat-a", 60.0)])
+    g2.on_tick(0.1)
+    g2.on_message(M.TxBegin("sat-a", 10, 0, round_id=rid, item_id=1, total_bytes=config.FRAME_BYTES, chunks=4), 0.2)
+    g2.on_message(M.TxChunk("sat-a", 11, 0, round_id=rid, item_id=1, idx=0, n=4, data=parts[0]), 0.3)
+    g2.on_message(done, 0.4)
+    assert g2.on_tick(0.6) == []
+    out = g2.on_tick(0.4 + S.tx_straggler_ms / 1000.0 + 0.01)
+    assert isinstance(out[0], M.TxAck) and not out[0].ok and g2.window.slots_used == 0
+
+
+def test_a_raising_sink_cannot_wedge_the_arbiter():
+    """Telemetry and the stream are observers. A bug there must cost a log line, never a slot."""
+    def bad_sink(kind, payload):
+        if kind == "complete":
+            raise KeyError("renamed field")
+    g = GroundStation(S, G, sink=bad_sink)
+    rid, _ = open_and_collect(g, 0.0, [("sat-a", 60.0)])
+    g.on_tick(0.1)
+    out = transmit(g, "sat-a", 1, rid, 0.5)
+    assert isinstance(out[0], M.TxAck) and out[0].ok and g.state == config.STATE_READY and g.round_id == rid + 1

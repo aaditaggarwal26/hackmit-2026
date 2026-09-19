@@ -61,7 +61,8 @@ class Settings:
     mcast_ttl: int = 1  # never leaves the link
     bus_iface_ip: str = ""  # "" = the interface that carries the default route; docker0/tailscale0 are never it
     bus_max_datagram: int = 1400  # one message per datagram, under the WiFi MTU with headroom
-    dedup_window: int = 4096  # (sender, seq) pairs remembered for duplicate suppression
+    dedup_window: int = 4096  # sequence numbers remembered per sender for duplicate suppression
+    restart_slack_ms: int = 5000  # a sender whose uptime goes back further than this has rebooted: forget its seqs
     hostname: str = ""  # "" = socket.gethostname(); every message carries it
 
     # --- arbitration (Section 9) -------------------------------------------------------
@@ -71,6 +72,7 @@ class Settings:
     bid_collect_ms: int = 200  # how long READY collects bids after "offers open"
     grant_timeout_ms: int = 1000  # granted but no tx_begin → revoke, re-arbitrate excluding that bid
     tx_timeout_ms: int = 8000  # tx_begin but no tx_done → revoke likewise
+    tx_straggler_ms: int = 300  # tx_done arrived before the last chunk: wait this long for it before failing
     idle_reopen_ms: int = 500  # nobody bid: wait this long before opening offers again
     state_period_ms: int = 1000  # periodic STATE broadcast between transitions (display heartbeat)
 
@@ -135,7 +137,7 @@ class Settings:
             raw = source.get(ENV_PREFIX + f.name.upper())
             if raw is None:
                 continue
-            out[f.name] = _coerce(raw, f.type if isinstance(f.type, type) else type(getattr(cls, f.name)))
+            out[f.name] = _coerce(raw, type(getattr(cls, f.name)))  # every field has a typed default
         return cls().with_overrides(**out)
 
     def as_dict(self) -> dict[str, Any]:
@@ -145,7 +147,12 @@ class Settings:
 def _coerce(raw: str, typ: type) -> Any:
     if typ is bool:
         return raw.strip().lower() in ("1", "true", "yes", "on")
-    return typ(raw)
+    if typ is str and raw.strip().lower() in ("none", "null"):
+        return ""
+    try:
+        return typ(raw)
+    except ValueError as e:
+        raise ValueError(f"cannot read {raw!r} as {typ.__name__}") from e
 
 
 DEFAULTS = Settings()

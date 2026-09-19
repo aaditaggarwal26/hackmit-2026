@@ -82,6 +82,8 @@ def test_grant_transmit_ack_pops_only_on_ok(corp):
     chunks = [m for m in out if isinstance(m, M.TxChunk)]
     assert len(chunks) == 4 and b"".join(c.data for c in chunks) == bytes(s.buffer.read(b.item_id))
     assert isinstance(out[-1], M.TxDone) and s.awaiting_ack == b.item_id
+    import hashlib
+    assert out[-1].sha256 == hashlib.sha256(bytes(s.buffer.read(b.item_id))).hexdigest()  # what the ground checks
     # while awaiting the ack the satellite neither bids nor pops (a re-sent offer for the same round proves nothing)
     assert s.on_message(M.OffersOpen("g", 3, 0, round_id=1, window_remaining_bytes=1, collect_ms=1), 1.3) == []
     s.on_message(M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=False, bytes_received=0, reason="x"), 1.4)
@@ -161,3 +163,17 @@ def test_lost_ack_does_not_wedge_the_satellite(corp):
     assert s.awaiting_ack == b.item_id
     s.on_tick(1.7 + S.sat_ack_timeout_ms / 1000.0 + 0.01)
     assert s.awaiting_ack is None and s.counters.ack_lost == 2 and b.item_id in s.items
+
+
+def test_late_positive_ack_pops_without_resending(corp):
+    """We gave up waiting (ground moved on), then the ok-ack arrives after all: the ground has the frame."""
+    s = sat(corp)
+    s.on_tick(1.0)
+    [b] = s.on_message(M.OffersOpen("g", 1, 0, round_id=1, window_remaining_bytes=1, collect_ms=1), 1.0)
+    bd = M.Breakdown(b.score, 0, 0, 0, 0, b.score)
+    s.on_message(M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.0)
+    s.on_tick(1.1)
+    s.on_message(M.OffersOpen("g", 3, 0, round_id=2, window_remaining_bytes=1, collect_ms=1), 1.2)  # gives up, re-bids
+    assert s.awaiting_ack is None and b.item_id in s.items
+    s.on_message(M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=True, bytes_received=1, reason=""), 1.21)
+    assert b.item_id not in s.items and s.counters.late_acks == 1 and s.counters.transmitted == 1 and s.buffer.free == 4

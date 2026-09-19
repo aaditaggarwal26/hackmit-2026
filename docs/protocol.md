@@ -49,7 +49,7 @@ encoded example per type and `tests/test_messages.py` pins both.
 | `bid` | satellite → all | `round_id`, `item_id`, `score`, `item_age_s`, `window`, `buffer`, `eviction_count`, `queue_len` |
 | `tx_begin` | satellite → all | `round_id`, `item_id`, `total_bytes`, `chunks` |
 | `tx_chunk` | satellite → all | `round_id`, `item_id`, `idx`, `n`, `data` (base64) |
-| `tx_done` | satellite → all | `round_id`, `item_id`, `total_bytes`, `score`, `cloud_frac` |
+| `tx_done` | satellite → all | `round_id`, `item_id`, `total_bytes`, `score`, `cloud_frac`, `sha256` |
 | `heartbeat` | satellite → all | `buffer`, `eviction_count`, `queue_len`, `top_score`, `top_item_id`, `uptime_s`, `frames_scored`, `frames_sent` |
 | `eviction` | satellite → all | `item_id`, `score`, `kind`, `displaced_by`, `displaced_by_score` |
 | `scored` | satellite → all | `item_id`, `score`, `parts{clear,sharp,change}`, `cloud_frac`, `queued`, `evicted_item_id`, `queue_depth` |
@@ -89,9 +89,9 @@ ground                                   satellite (granted)          other sate
 * Grant but no `tx_begin` within `grant_timeout_ms`, or `tx_begin` but no `tx_done` within
   `tx_timeout_ms` → `revoke`, and arbitration re-runs **on the same round's bids** with that
   satellite excluded. If nobody is left, a fresh round opens.
-* `tx_done` with every chunk seen → `tx_ack{ok=true}`, the window is debited one frame, `COMPLETE`,
+* `tx_done` with every chunk seen and the reassembled bytes matching `tx_done.sha256` → `tx_ack{ok=true}`, the window is debited one frame, `COMPLETE`,
   then `READY` (or `CLOSED` when the next frame no longer fits). Chunks missing → `tx_ack{ok=false}`,
-  nothing debited, re-arbitrate as for a revoke.
+  nothing debited, re-arbitrate as for a revoke. A digest mismatch is treated the same way (`tx_ack{ok:false, reason:"digest mismatch"}`).
 * Only the granted hostname's `tx_*` for the granted `item_id` and `round_id` count; anything else
   is counted as `unexpected` and ignored.
 * `state` is broadcast on every transition and every `state_period_ms`.
@@ -110,8 +110,9 @@ ground                                   satellite (granted)          other sate
 5. **Pop the item only on `tx_ack{ok: true}`.** `ok: false` or `revoke` → keep the item and bid again.
 6. **A lost `tx_ack` must not wedge you.** If no `tx_ack` arrives within `sat_ack_timeout_ms`, or an
    `offers_open` with a *later* `round_id` arrives first, stop waiting: keep the frame (you cannot know
-   whether it was counted; never lose data on uncertainty) and resume bidding. At worst the ground
-   receives the frame twice.
+   whether it was counted; never lose data on uncertainty) and resume bidding. If the ground already has
+   the frame it answers the re-offer with `tx_ack{ok}` instead of a grant, and a late `tx_ack{ok}` for an item
+   you still hold means the same thing: pop it, never resend it. No frame is counted twice.
 7. Send `heartbeat` every `sat_heartbeat_ms` so the ground can tell idle from starved between rounds.
    Send `scored` for every frame that goes through the kernel (kept or rejected), with the three score
    parts and the cloud fraction: the ground does not arbitrate on it, but it is what feeds the display's
@@ -132,6 +133,11 @@ ground                                   satellite (granted)          other sate
 | satellite vanishes | no bids from it; after `peer_stale_s` it is flagged `silent` |
 | display vanishes | telemetry drops; arbitration unaffected (telemetry is unicast UDP off the bus) |
 | a fourth satellite appears | it bids with its own hostname; nothing to configure anywhere |
+| a node reboots (ground or satellite) | its seq restarts at 1 and its `t_ms` collapses; receivers forget that sender's old seqs (`restart_slack_ms`) and hear it immediately |
+| a satellite re-offers a frame the ground already has | the ground re-acks `tx_ack{ok, reason:"already delivered"}` without a grant; nothing is counted twice |
+| `tx_done` overtakes the last chunk | the ground waits `tx_straggler_ms` for it before failing the slot |
+| `tx_begin` is lost | the first `tx_chunk` (which carries `n`) stands in for it |
+| a datagram carries `NaN`/`Infinity`/`1e999` | rejected as malformed; it never reaches the arbiter or the JSON outputs |
 
 ## Telemetry (not on the bus)
 
