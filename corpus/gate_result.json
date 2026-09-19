@@ -1,0 +1,412 @@
+{
+ "date": "2026-09-14",
+ "rule": "filtered/FIFO >= 1.2 at window = half of each pass's captures",
+ "passed": true,
+ "half_window_min_ratio": 1.258322671410585,
+ "sharp_shift": 5,
+ "stats": {
+  "n": 194,
+  "min": 33.94979781795987,
+  "p10": 36.75028610666056,
+  "median": 64.38467994201572,
+  "p90": 83.8789959563592,
+  "max": 98.30014496070802,
+  "spread": 64.35034714274815,
+  "components": {
+   "clear": {
+    "min": 0.0,
+    "median": 87.97436484321355,
+    "max": 100.0
+   },
+   "sharp": {
+    "min": 1.855497062638285,
+    "median": 43.30128938735027,
+    "max": 100.0
+   },
+   "change": {
+    "min": 0.0,
+    "median": 81.4923323414969,
+    "max": 100.0
+   }
+  },
+  "cloudy_frames": 56,
+  "changed_frames": 163
+ },
+ "histogram": [
+  {
+   "lo": 0.0,
+   "hi": 9.999237048905165,
+   "n": 0
+  },
+  {
+   "lo": 9.999237048905165,
+   "hi": 20.0,
+   "n": 0
+  },
+  {
+   "lo": 20.0,
+   "hi": 29.999237048905165,
+   "n": 0
+  },
+  {
+   "lo": 29.999237048905165,
+   "hi": 40.0,
+   "n": 32
+  },
+  {
+   "lo": 40.0,
+   "hi": 49.999237048905165,
+   "n": 24
+  },
+  {
+   "lo": 49.999237048905165,
+   "hi": 60.0,
+   "n": 24
+  },
+  {
+   "lo": 60.0,
+   "hi": 69.99923704890516,
+   "n": 44
+  },
+  {
+   "lo": 69.99923704890516,
+   "hi": 80.0,
+   "n": 43
+  },
+  {
+   "lo": 80.0,
+   "hi": 89.99923704890516,
+   "n": 21
+  },
+  {
+   "lo": 89.99923704890516,
+   "hi": 100.0,
+   "n": 6
+  }
+ ],
+ "per_scene": {
+  "tokyo": {
+   "n": 15,
+   "min": 33.94979781795987,
+   "max": 89.92294193942168
+  },
+  "cairo": {
+   "n": 16,
+   "min": 51.369497215228506,
+   "max": 92.76417181658655
+  },
+  "sahara": {
+   "n": 16,
+   "min": 35.594720378423744,
+   "max": 46.72770275425345
+  },
+  "atacama": {
+   "n": 12,
+   "min": 42.824444953078505,
+   "max": 67.18242160677501
+  },
+  "pacific": {
+   "n": 9,
+   "min": 34.978255893797204,
+   "max": 86.8665598535134
+  },
+  "amazon": {
+   "n": 10,
+   "min": 36.006713969634546,
+   "max": 98.30014496070802
+  },
+  "iowa": {
+   "n": 15,
+   "min": 34.24277103837644,
+   "max": 90.18081940947586
+  },
+  "netherlands": {
+   "n": 16,
+   "min": 36.7177843900206,
+   "max": 93.66750591287098
+  },
+  "alps": {
+   "n": 16,
+   "min": 35.14152742809186,
+   "max": 88.11322194247349
+  },
+  "himalaya": {
+   "n": 15,
+   "min": 37.473105973907074,
+   "max": 83.20439459830625
+  },
+  "greenland": {
+   "n": 14,
+   "min": 36.179140917067215,
+   "max": 81.6937514305333
+  },
+  "ganges": {
+   "n": 12,
+   "min": 34.467078660257876,
+   "max": 88.56031128404669
+  },
+  "great_lakes": {
+   "n": 15,
+   "min": 35.048447394522015,
+   "max": 90.12130922407874
+  },
+  "hawaii": {
+   "n": 13,
+   "min": 40.21515220874342,
+   "max": 88.90821698329137
+  }
+ },
+ "sweep": [
+  {
+   "frames_per_pass": 6,
+   "slots_per_pass": 2,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 273115,
+   "fifo": 198719,
+   "ratio": 1.3743778903879347,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 6
+  },
+  {
+   "frames_per_pass": 6,
+   "slots_per_pass": 3,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 398906,
+   "fifo": 291585,
+   "ratio": 1.3680607713016788,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 9
+  },
+  {
+   "frames_per_pass": 6,
+   "slots_per_pass": 4,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 520143,
+   "fifo": 389693,
+   "ratio": 1.3347506883623776,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 12
+  },
+  {
+   "frames_per_pass": 6,
+   "slots_per_pass": 6,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 740577,
+   "fifo": 588543,
+   "ratio": 1.258322671410585,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 18
+  },
+  {
+   "frames_per_pass": 6,
+   "slots_per_pass": 8,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 947846,
+   "fifo": 808563,
+   "ratio": 1.172259922850786,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 24
+  },
+  {
+   "frames_per_pass": 8,
+   "slots_per_pass": 2,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 299078,
+   "fifo": 198719,
+   "ratio": 1.5050297153266674,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 6
+  },
+  {
+   "frames_per_pass": 8,
+   "slots_per_pass": 3,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 434431,
+   "fifo": 291585,
+   "ratio": 1.4898948848534732,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 9
+  },
+  {
+   "frames_per_pass": 8,
+   "slots_per_pass": 4,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 557259,
+   "fifo": 389693,
+   "ratio": 1.4299948934160993,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 12
+  },
+  {
+   "frames_per_pass": 8,
+   "slots_per_pass": 6,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 809353,
+   "fifo": 588543,
+   "ratio": 1.3751807429533611,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 18
+  },
+  {
+   "frames_per_pass": 8,
+   "slots_per_pass": 8,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 1038676,
+   "fifo": 808563,
+   "ratio": 1.2845950160964574,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 24
+  },
+  {
+   "frames_per_pass": 12,
+   "slots_per_pass": 2,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 321522,
+   "fifo": 198719,
+   "ratio": 1.6179731178196348,
+   "evicted": 4,
+   "fifo_dropped": 4,
+   "slots": 6
+  },
+  {
+   "frames_per_pass": 12,
+   "slots_per_pass": 3,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 473318,
+   "fifo": 291585,
+   "ratio": 1.6232590839720835,
+   "evicted": 2,
+   "fifo_dropped": 2,
+   "slots": 9
+  },
+  {
+   "frames_per_pass": 12,
+   "slots_per_pass": 4,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 623628,
+   "fifo": 389693,
+   "ratio": 1.600305881809527,
+   "evicted": 1,
+   "fifo_dropped": 0,
+   "slots": 12
+  },
+  {
+   "frames_per_pass": 12,
+   "slots_per_pass": 6,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 904652,
+   "fifo": 588543,
+   "ratio": 1.5371043407193696,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 18
+  },
+  {
+   "frames_per_pass": 12,
+   "slots_per_pass": 8,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 1171314,
+   "fifo": 808563,
+   "ratio": 1.4486366553997647,
+   "evicted": 0,
+   "fifo_dropped": 0,
+   "slots": 24
+  },
+  {
+   "frames_per_pass": 16,
+   "slots_per_pass": 2,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 343433,
+   "fifo": 198719,
+   "ratio": 1.7282343409538092,
+   "evicted": 28,
+   "fifo_dropped": 28,
+   "slots": 6
+  },
+  {
+   "frames_per_pass": 16,
+   "slots_per_pass": 3,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 500056,
+   "fifo": 291585,
+   "ratio": 1.7149579024984138,
+   "evicted": 26,
+   "fifo_dropped": 26,
+   "slots": 9
+  },
+  {
+   "frames_per_pass": 16,
+   "slots_per_pass": 4,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 654657,
+   "fifo": 389693,
+   "ratio": 1.67993009882138,
+   "evicted": 24,
+   "fifo_dropped": 24,
+   "slots": 12
+  },
+  {
+   "frames_per_pass": 16,
+   "slots_per_pass": 6,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 955181,
+   "fifo": 588543,
+   "ratio": 1.6229587302881863,
+   "evicted": 20,
+   "fifo_dropped": 20,
+   "slots": 18
+  },
+  {
+   "frames_per_pass": 16,
+   "slots_per_pass": 8,
+   "passes": 3,
+   "seed": 0,
+   "filtered": 1252948,
+   "fifo": 808563,
+   "ratio": 1.5495984852138918,
+   "evicted": 16,
+   "fifo_dropped": 16,
+   "slots": 24
+  }
+ ],
+ "frames_per_pass": 12,
+ "slots_per_pass": 3,
+ "window_s": 10.0,
+ "passes": 4,
+ "demo_ratio": 1.6232590839720835,
+ "link_bps_scaled": 39321.6,
+ "unscaled": {
+  "window_s": 600,
+  "link_bps": 10000000,
+  "slots": 45776
+ }
+}
