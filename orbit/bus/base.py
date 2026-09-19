@@ -41,34 +41,68 @@ class BusStats:
         return dict(vars(self))
 
 
+@dataclass
+class _Sender:
+    seen: set[int] = field(default_factory=set)
+    order: deque[int] = field(default_factory=deque)
+    max_seq: int = -1
+    last_t_ms: int = -1
+    restarts: int = 0
+
+
 class Deduper:
-    """Remembers the last ``window`` (sender, seq) pairs. UDP may duplicate; multicast on WiFi
-    frequently does. Sequence numbers are per sender, so reordering is tolerated too: a
-    message is new if we have not seen exactly that pair, regardless of arrival order."""
+    """Remembers, per sender, the last ``window`` sequence numbers. UDP may duplicate; multicast on
+    WiFi frequently does. Sequence numbers are per sender, so reordering is tolerated too: a message
+    is new if that sender has not used exactly that number, regardless of arrival order.
 
-    def __init__(self, window: int) -> None:
+    A node that reboots starts again at seq 1 with its uptime (``t_ms``) back near zero. Without
+    noticing that, every message it sends for the next few thousand would be "a duplicate" and the
+    node would be deaf and invisible for minutes (an operator restarting the ground mid-demo is the
+    realistic case). So a sender is forgotten and re-learned when its uptime goes backwards by more
+    than ``restart_slack_ms`` (reordering only moves it back by milliseconds) or its seq falls far
+    below the highest one seen."""
+
+    def __init__(self, window: int, restart_slack_ms: int = 5000) -> None:
         self.window = window
-        self._seen: set[tuple[str, int]] = set()
-        self._order: deque[tuple[str, int]] = deque()
+        self.restart_slack_ms = restart_slack_ms
+        self._senders: dict[str, _Sender] = {}
+        self.restarts = 0
 
-    def is_new(self, sender: str, seq: int) -> bool:
-        key = (sender, seq)
-        if key in self._seen:
+    def is_new(self, sender: str, seq: int, t_ms: int = 0) -> bool:
+        st = self._senders.get(sender)
+        if st is None:
+            st = self._senders[sender] = _Sender()
+        elif (st.last_t_ms - t_ms > self.restart_slack_ms) or (st.max_seq - seq > self.window):
+            log(lg, logging.INFO, "sender_restart", sender=sender, seq=seq, t_ms=t_ms, previous_t_ms=st.last_t_ms,
+                previous_max_seq=st.max_seq)
+            st.seen.clear()
+            st.order.clear()
+            st.max_seq = -1
+            st.last_t_ms = -1  # the reference clock is the new incarnation's from here on
+            st.restarts += 1
+            self.restarts += 1
+        if seq in st.seen:
             return False
-        self._seen.add(key)
-        self._order.append(key)
-        if len(self._order) > self.window:
-            self._seen.discard(self._order.popleft())
+        st.seen.add(seq)
+        st.order.append(seq)
+        if len(st.order) > self.window:
+            st.seen.discard(st.order.popleft())
+        st.max_seq = max(st.max_seq, seq)
+        st.last_t_ms = max(st.last_t_ms, t_ms)
         return True
+
+    def forget(self, sender: str) -> None:
+        self._senders.pop(sender, None)
 
 
 class Bus(ABC):
-    def __init__(self, hostname: str, dedup_window: int, max_datagram: int, drop_own: bool = True) -> None:
+    def __init__(self, hostname: str, dedup_window: int, max_datagram: int, drop_own: bool = True,
+                 restart_slack_ms: int = 5000) -> None:
         self.hostname = hostname
         self.max_datagram = max_datagram
         self.drop_own = drop_own
         self.stats = BusStats()
-        self._dedup = Deduper(dedup_window)
+        self._dedup = Deduper(dedup_window, restart_slack_ms)
         self._inbox: deque[M.Message] = deque()
         self._wakeup: asyncio.Event | None = None
         self.taps: list[M.Message] = []  # every accepted message incl. our own sends, for the bus log
@@ -126,7 +160,7 @@ class Bus(ABC):
         if self.drop_own and decoded.sender == self.hostname:
             self.stats.dropped_own += 1
             return
-        if not self._dedup.is_new(decoded.sender, decoded.seq):
+        if not self._dedup.is_new(decoded.sender, decoded.seq, decoded.t_ms):
             self.stats.dropped_dup += 1
             return
         self.stats.delivered += 1

@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 from dataclasses import dataclass, fields, is_dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Self, TypeVar, get_args, get_origin, get_type_hints
@@ -227,6 +228,7 @@ class TxDone(Message):
     total_bytes: int
     score: float
     cloud_frac: float  # repeated here so "usable" can be judged even if the earlier `scored` was lost
+    sha256: str  # hex digest of the frame bytes; the ground reassembles the chunks and must match it
 
 
 @dataclass(frozen=True)
@@ -332,7 +334,7 @@ def decode(data: bytes, max_len: int = 65535) -> Message | DecodeError:
     if len(data) > max_len:
         return DecodeError(f"datagram too long ({len(data)} bytes)")
     try:
-        doc = json.loads(data.decode("utf-8"))
+        doc = json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
     except (UnicodeDecodeError, ValueError) as e:
         return DecodeError(f"not JSON: {e}")
     if not isinstance(doc, dict):
@@ -353,6 +355,11 @@ def decode(data: bytes, max_len: int = 65535) -> Message | DecodeError:
 
 
 # --- (de)serialisation helpers --------------------------------------------------------
+
+
+def _reject_constant(name: str) -> Any:
+    """json.loads would happily turn NaN/Infinity/-Infinity into floats; on this bus they are hostile."""
+    raise ValueError(f"non-finite constant {name}")
 
 
 def _to_json(v: Any) -> Any:
@@ -396,8 +403,8 @@ def _from_json(v: Any, typ: Any, name: str) -> Any:
             raise DecodeError(f"{name}: expected int")
         return v
     if typ is float:
-        if isinstance(v, bool) or not isinstance(v, int | float):
-            raise DecodeError(f"{name}: expected number")
+        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+            raise DecodeError(f"{name}: expected finite number")
         return float(v)
     if typ is str:
         if not isinstance(v, str):
@@ -445,7 +452,7 @@ def examples() -> list[tuple[str, Message]]:
         ("tx_begin", TxBegin(s, 8, 5200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, chunks=16)),
         ("tx_chunk", TxChunk(s, 9, 5210, round_id=1, item_id=14, idx=0, n=16, data=bytes(range(8)))),
         ("tx_done", TxDone(s, 10, 7200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, score=91.0,
-                           cloud_frac=0.08)),
+                           cloud_frac=0.08, sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")),
         ("tx_ack", TxAck(g, 4, 3210, round_id=1, to=s, item_id=14, ok=True, bytes_received=config.FRAME_BYTES,
                          reason="")),
         ("state", State(g, 5, 3211, state=config.STATE_READY, round_id=2, granted_to="", window=ws)),

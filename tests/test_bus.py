@@ -6,16 +6,16 @@ from orbit.protocol import messages as M
 
 
 def offers(sender, seq):
-    return M.OffersOpen(sender, seq, 0, round_id=seq, window_remaining_bytes=1, collect_ms=1)
+    return M.OffersOpen(sender, seq, seq * 1000, round_id=seq, window_remaining_bytes=1, collect_ms=1)
 
 
 def test_deduper_window():
     d = Deduper(3)
     assert d.is_new("a", 1) and not d.is_new("a", 1)
     assert d.is_new("b", 1)  # per sender
-    assert d.is_new("a", 2) and d.is_new("a", 3)  # window now (b1, a2, a3): a1 forgotten
-    assert d.is_new("a", 1)
-    assert d.is_new("a", 5) and d.is_new("a", 4) and not d.is_new("a", 5)  # out of order is fine
+    assert d.is_new("a", 2) and d.is_new("a", 3) and not d.is_new("a", 1)  # a's window: 1,2,3
+    assert d.is_new("a", 4) and d.is_new("a", 1)  # 1 slid out of a's window (no restart: gap 3 is not > window)
+    assert d.is_new("a", 6) and d.is_new("a", 5) and not d.is_new("a", 6)  # out of order is fine
 
 
 def test_loopback_broadcast_and_own_echo_dropped():
@@ -68,3 +68,31 @@ def test_reorder_and_drop_do_not_break_delivery():
     seqs = [m.seq for m in got]
     assert len(seqs) == len(set(seqs)) and 100 < len(seqs) < 200
     assert b.stats.dropped_dup == 0
+
+
+def test_sender_restart_is_forgotten_not_deduplicated():
+    """A rebooted node starts at seq 1 with uptime near 0. Its old numbers must not make it deaf for minutes."""
+    d = Deduper(4096, restart_slack_ms=5000)
+    for i in range(1, 501):
+        assert d.is_new("sat-a", i, t_ms=i * 1000)
+    assert not d.is_new("sat-a", 3, t_ms=499_000)  # a genuine late duplicate: small backward t, known seq
+    assert d.is_new("sat-a", 1, t_ms=200)  # reboot: uptime collapsed by far more than the slack
+    assert d.restarts == 1 and d.is_new("sat-a", 2, t_ms=1200) and not d.is_new("sat-a", 2, t_ms=1300)
+    # a seq far below the max with no uptime signal (e.g. t_ms not trusted) also counts as a restart
+    d2 = Deduper(100)
+    for i in range(1, 1001):
+        d2.is_new("g", i, t_ms=i)
+    assert d2.is_new("g", 1, t_ms=1001) and d2.restarts == 1
+
+
+def test_restarted_ground_is_heard_on_the_loopback_bus():
+    hub = LoopbackHub()
+    ground, sat = LoopbackBus(hub, "ground"), LoopbackBus(hub, "sat-a")
+    for i in range(1, 51):
+        ground.send(offers("ground", i))
+    hub.deliver()
+    assert len(sat.poll()) == 50
+    ground2 = LoopbackBus(hub, "ground")  # the process was restarted: seq and uptime start over
+    ground2.send(M.OffersOpen("ground", 1, 5, round_id=1, window_remaining_bytes=1, collect_ms=1))
+    hub.deliver()
+    assert len(sat.poll()) == 1 and sat.stats.dropped_dup == 0

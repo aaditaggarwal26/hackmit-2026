@@ -31,11 +31,23 @@ from orbit.log import log
 lg = logging.getLogger("orbit.bus.mcast")
 
 
+OFFLINE_IP = "127.0.0.1"
+
+
 def default_route_ip() -> str:
-    """The local IPv4 address the kernel would use to reach the internet; no packet is sent."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("10.255.255.255", 1))
-        return str(s.getsockname()[0])
+    """The local IPv4 address the kernel would use to reach the network; no packet is sent.
+
+    With no default route at all (network unplugged, demo still expected to run) this falls back
+    to loopback: Linux delivers multicast between local processes on 127.0.0.1, so the ground and
+    simulated satellites on one box keep working. Real satellites obviously will not be reachable
+    then, and the log says so."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return str(s.getsockname()[0])
+    except OSError as e:
+        log(lg, logging.WARNING, "no_default_route", error=str(e), using=OFFLINE_IP)
+        return OFFLINE_IP
 
 
 def open_socket(group: str, port: int, iface_ip: str, ttl: int) -> socket.socket:
@@ -55,7 +67,8 @@ def open_socket(group: str, port: int, iface_ip: str, ttl: int) -> socket.socket
 
 class MulticastBus(Bus):
     def __init__(self, settings: Settings, hostname: str) -> None:
-        super().__init__(hostname, settings.dedup_window, settings.bus_max_datagram)
+        super().__init__(hostname, settings.dedup_window, settings.bus_max_datagram,
+                         restart_slack_ms=settings.restart_slack_ms)
         self.s = settings
         self.group = (settings.mcast_group, settings.mcast_port)
         self.iface_ip = settings.bus_iface_ip or default_route_ip()

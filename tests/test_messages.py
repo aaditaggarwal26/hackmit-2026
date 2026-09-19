@@ -93,3 +93,14 @@ def test_spec_markdown_lists_every_type():
     md = M.spec_markdown()
     for t in M.MessageType:
         assert f"`{t}`" in md
+
+
+@pytest.mark.parametrize("raw", [
+    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":NaN,"cloud_frac":0,"sha256":""}',
+    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":Infinity,"cloud_frac":0,"sha256":""}',
+    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":1e999,"cloud_frac":0,"sha256":""}',
+    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":-1e999,"cloud_frac":0,"sha256":""}',
+])
+def test_non_finite_numbers_are_hostile(raw):
+    """A bid with score=1e999 would win every round and then break every JSON encoder downstream."""
+    assert isinstance(M.decode(raw), M.DecodeError)
