@@ -1,246 +1,319 @@
-"""FastAPI + WebSocket view over the orchestrator.
+"""The monitoring display: a UDP telemetry sink with a browser view. Never in the control path.
 
-    uv run python -m viz.server --scenario nominal      # http://localhost:8000
+    uv run python -m viz.server --port 8765 --telemetry-port 50010
 
-WebSocket /ws  (10 Hz state stream)
-  server -> client   {"type":"snapshot", ...Orchestrator.snapshot()}      every SNAPSHOT_MS and after each command
-                     {"type":"event","event":"capture"|"scored"|"slot"|"window_open"|"window_close"|"pass"|
-                                     "status"|"config"|"ref"|"pass_start"|"done", "t_ms":..., ...payload}
-  client -> server   {"cmd":"play"|"pause"|"step"}
-                     {"cmd":"speed","value":0.25..16}   {"cmd":"starvation","value":n}
-                     {"cmd":"scenario","value":name}    -> restarts the orchestrator on fresh nodes
-                     {"cmd":"sim_nodes","value":n}      -> restarts with n extra simulated satellites
-                     {"cmd":"scaling_sweep"}            -> headless runs for N = 2..MAX_SWEEP simulated satellites
-REST mirrors of the controls (JSON body {"value": ...} where a value is needed):
-  POST /api/<cmd>   GET /api/state -> the same snapshot the socket carries
-  GET  /corpus/<id>.png -> the frame the node scored (the ground holds the corpus; §6)
-The browser is a view: every number it shows arrives on this socket.
-
-Every snapshot also carries the two off-board result files, so the efficiency
-panel flips from TBD to measured by itself:
-  "vivado": tools.vivado_reports.load_summary(vivado/reports/summary.json) or all-TBD;
-  "bench":  newest bench/results/<stamp>.json (orbit.bench.report.BenchReport.save) or null.
-Paths: create_app(vivado_summary=..., bench_dir=...) or ORBIT_VIVADO_SUMMARY / ORBIT_BENCH_DIR.
+The ground fire-and-forgets one JSON datagram per event (``orbit/ground/telemetry.py``).
+This process listens for them, keeps a bounded memory of what it has seen, and serves
+``viz/static/index.html`` plus ``GET /api/state`` and ``WS /ws``. Nothing here talks back
+to the ground: if this process is slow or dead the ground drops telemetry and carries on,
+so every structure is bounded and every event is treated as possibly missing, duplicated
+or out of order. The page holds no logic that a judge could mistake for arbitration; the
+one derived thing computed here — joining a decision to its later outcome — is done from
+the same events and is unit-tested.
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import contextlib
-import glob
 import json
-import os
+import logging
+import time
+from collections import Counter, deque
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
-from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 
-from orbit import corpus as C, params
-from orbit.orchestrator import scenarios
-from tools import vivado_reports
+from orbit.config import DEFAULTS
+from orbit.log import log
 
+lg = logging.getLogger("orbit.display")
 STATIC = Path(__file__).parent / "static"
-REPO = Path(__file__).resolve().parent.parent
-VIVADO_SUMMARY = str(REPO / "vivado" / "reports" / "summary.json")
-BENCH_DIR = str(REPO / "bench" / "results")
-SNAPSHOT_MS = 100   # 10 Hz
-COMMANDS = ("scenario", "speed", "play", "pause", "step", "starvation", "sim_nodes", "scaling_sweep")
-MAX_SWEEP = 12
-PARAMS_SHOWN = ("FRAME_W", "FRAME_H", "FRAME_BYTES", "PIXELS_PER_CYCLE", "QUEUE_DEPTH", "CLK_HZ", "BAUD",
-                "STARVATION_N", "WINDOW_DURATION_S", "LINK_RATE_BPS")
+DECISIONS_KEPT = 50
+RECENT_KEPT = 200
+BUS_KEPT = 100
+CHUNK_LOOKBACK = 8  # bus lines to search for the running tx_chunk aggregate of the same item
+CLIENT_QUEUE = 512  # pushes a browser may fall behind by before it is dropped rather than slowing ingest
+RATE_KEYS = ("item_aging_rate", "sat_aging_rate")
+
+Event = dict[str, Any]
 
 
-def load_bench(directory: str) -> dict | None:
-    """Newest bench/results/<stamp>.json (stamps are YYYYMMDD-HHMMSS, so lexical
-    order is chronological); None when there is no run yet."""
-    paths = sorted(glob.glob(os.path.join(directory, "*.json")))
-    if not paths:
-        return None
-    try:
-        with open(paths[-1], encoding="utf-8") as f:
-            entries = json.load(f)
-    except (OSError, ValueError):          # half-written file: absent, not a dead ticker
-        return None
-    return {"stamp": Path(paths[-1]).stem, "path": paths[-1], "entries": entries}
+class Store:
+    """Everything the display remembers. Pure and synchronous so it can be unit-tested by calling
+    ``ingest`` with bytes; the network layers below only feed it and read from it."""
 
+    def __init__(self, backlog: int = 2000) -> None:
+        self.events: deque[Event] = deque(maxlen=backlog)
+        self.recent: deque[Event] = deque(maxlen=RECENT_KEPT)
+        self.bus: deque[Event] = deque(maxlen=BUS_KEPT)
+        self.decisions: deque[Event] = deque(maxlen=DECISIONS_KEPT)
+        self.snapshot: Event | None = None
+        self.flags: dict[str, Any] = {}
+        self.rates: dict[str, float] | None = None
+        self.telemetry_stats: Event | None = None
+        self.bus_stats: Event | None = None
+        self.by_kind: Counter[str] = Counter()
+        self.datagrams = 0
+        self.bad_datagrams = 0
+        self.restarts = 0
+        self.max_round = -1
+        self.last_event_t: float | None = None
+        self.last_rx_wall: float | None = None
+        self.subscribers: set[asyncio.Queue[str]] = set()
 
-def scaling_sweep(base_nodes: list[str], n_max: int = MAX_SWEEP, passes: int = 2, seed: int = 0) -> list[dict]:
-    """Delivered value vs number of satellites, all simulated, same window each: where demand
-    (N x frames per pass) crosses capacity (slots per pass) the curve flattens. Headless, virtual clock."""
-    out = []
-    for n in range(2, n_max + 1):
-        nodes = [f"sim://{k}" for k in range(n)]
-        o = scenarios.build("scaling", nodes=nodes, passes=passes, seed=seed, virtual=True)
-        asyncio.run(o.run())
-        o.close()
-        out.append(dict(n=n, physical=0, simulated=n, slots=len(o.slots), filtered=o.value_filtered, fifo=o.value_fifo,
-                        captured=sum(x.captures for x in o.nodes), evicted=sum(x.mirror.evicted for x in o.nodes),
-                        demand_frames=n * o.frames_per_pass * passes, capacity_frames=o.window.slots_total * passes,
-                        starvation_switches=o.arbiter.starvation_switches))
-    return out
+    # --- ingest -------------------------------------------------------------------------
 
-
-class Session:
-    def __init__(self, scenario: str, nodes: list[str], speed: float, virtual: bool = False, paused: bool = False,
-                 seed: int = 0, vivado_summary: str | None = None, bench_dir: str | None = None):
-        self.base_nodes, self.speed, self.virtual, self.paused, self.seed = list(nodes), speed, virtual, paused, seed
-        self.sim_extra = 0
-        self.vivado_summary = vivado_summary or os.environ.get("ORBIT_VIVADO_SUMMARY", VIVADO_SUMMARY)
-        self.bench_dir = bench_dir or os.environ.get("ORBIT_BENCH_DIR", BENCH_DIR)
-        self.scenario = scenario
-        self.orch = None
-        self.tasks: list[asyncio.Task] = []
-        self.clients: set[WebSocket] = set()
-        self.scaling: dict = dict(state="idle", rows=[])
-        self.provenance = C.provenance()
-
-    @property
-    def nodes(self) -> list[str]:
-        k0 = len(self.base_nodes)
-        return self.base_nodes + [f"sim://{k}" for k in range(k0, k0 + self.sim_extra)]
-
-    async def start(self, scenario: str) -> None:
-        await self.stop()
-        self.scenario = scenario
-        self.orch = scenarios.build(scenario, nodes=self.nodes, speed=self.speed, virtual=self.virtual, seed=self.seed)
-        if self.paused:
-            self.orch.pause()
-        self.tasks = [asyncio.create_task(self.orch.run()), asyncio.create_task(self._forward()),
-                      asyncio.create_task(self._ticker())]
-
-    async def stop(self) -> None:
-        for t in self.tasks:
-            t.cancel()
-        for t in self.tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await t
-        self.tasks = []
-        if self.orch:
-            self.orch.close()
-
-    def snapshot(self) -> dict:
-        s = self.orch.snapshot()
-        s["scenarios"] = scenarios.SCENARIOS
-        s["params"] = {k: getattr(params, k) for k in PARAMS_SHOWN}
-        s["physical_nodes"] = [n for n in self.nodes if not n.startswith("sim://")]
-        s["sim_extra"] = self.sim_extra
-        s["scaling"] = self.scaling
+    def ingest(self, data: bytes) -> None:
+        """One datagram in. Garbage is counted, never raised: a bad byte from the ground must not
+        take the display down mid-demo."""
+        self.datagrams += 1
         try:
-            s["vivado"] = vivado_reports.load_summary(self.vivado_summary)   # all-TBD, measured=false when absent
-        except (OSError, ValueError):
-            s["vivado"] = vivado_reports.empty_summary()
-        s["bench"] = load_bench(self.bench_dir)
-        return s
+            event = json.loads(data)
+        except (ValueError, UnicodeDecodeError):
+            self.bad_datagrams += 1
+            return
+        if not isinstance(event, dict) or not isinstance(event.get("kind"), str):
+            self.bad_datagrams += 1
+            return
+        self.last_rx_wall = time.monotonic()
+        push = self.apply(event)
+        if self.subscribers:
+            text = json.dumps(push, default=str)
+            for q in list(self.subscribers):
+                try:
+                    q.put_nowait(text)
+                except asyncio.QueueFull:
+                    self.subscribers.discard(q)  # a stalled browser is dropped; ingest never waits
 
-    async def _forward(self) -> None:
-        q = self.orch.subscribe()
-        while True:
-            await self.broadcast(await q.get())
+    def apply(self, e: Event) -> Event:
+        kind = str(e["kind"])
+        self.by_kind[kind] += 1
+        self.events.append(e)
+        reset = self._check_restart(kind, e)
+        t = e.get("t")
+        if isinstance(t, int | float):
+            self.last_event_t = float(t)
+        push: Event = {"type": "event", "event": e}
+        if reset:
+            push["reset"] = True
+        if kind == "bus":
+            self._bus(e)
+        else:
+            self.recent.append(e)
+        if kind == "snapshot":
+            if self.snapshot is None or reset or _t(e) >= _t(self.snapshot):
+                self.snapshot = e  # an older snapshot arriving late must not roll the header back
+                rid = e.get("round_id")
+                if isinstance(rid, int):
+                    self.max_round = max(self.max_round, rid)
+        elif kind == "flags" and isinstance(e.get("sats"), dict):
+            self.flags = e["sats"]
+        elif kind == "telemetry_stats":
+            self.telemetry_stats = e
+        elif kind == "bus_stats":
+            self.bus_stats = e
+        elif kind in ("decision", "complete", "tx_failed", "revoke"):
+            self._decisions(kind, e)
+            push["decisions"] = list(self.decisions)
+        found = {k: e[k] for k in RATE_KEYS if isinstance(e.get(k), int | float)}
+        if found:
+            self.rates = {**(self.rates or {}), **{k: float(v) for k, v in found.items()}}
+            push["rates"] = self.rates
+        return push
 
-    async def _ticker(self) -> None:
-        while True:
-            await asyncio.sleep(SNAPSHOT_MS / 1000)
-            await self.broadcast(self.snapshot())
+    def _check_restart(self, kind: str, e: Event) -> bool:
+        """A ground restart shows up as round_id going backwards on the events that carry the
+        *current* round, and as ground time (seconds since its start) jumping back. One step of
+        UDP reordering is tolerated; more than that is a new ground."""
+        if kind not in ("round_open", "decision", "snapshot"):
+            return False
+        rid = e.get("round_id")
+        if not isinstance(rid, int):
+            return False
+        t_back = self.last_event_t is not None and _t(e) < self.last_event_t - 5.0
+        if rid < self.max_round - 1 or (t_back and rid <= self.max_round):
+            log(lg, logging.WARNING, "ground_restart", seen_round=rid, previous_round=self.max_round)
+            self.restarts += 1
+            self.decisions.clear()
+            self.flags = {}
+            self.snapshot = None
+            self.max_round = rid
+            return True
+        self.max_round = max(self.max_round, rid)
+        return False
 
-    async def broadcast(self, msg: dict) -> None:
-        data = json.dumps(msg)
-        for ws in list(self.clients):
-            try:
-                await ws.send_text(data)
-            except Exception:
-                self.clients.discard(ws)
+    def _bus(self, e: Event) -> None:
+        """tx_chunk arrives ~50/s during a transmission; one line per item keeps the log readable."""
+        if e.get("type") == "tx_chunk":
+            for prev in list(self.bus)[-CHUNK_LOOKBACK:]:  # heartbeats interleave; still one line per item
+                if prev.get("type") == "tx_chunk" and (prev.get("from"), prev.get("item_id")) == (
+                    e.get("from"), e.get("item_id")):
+                    prev["count"] = int(prev.get("count", 1)) + 1
+                    prev["t"] = e.get("t", prev.get("t"))
+                    return
+            e = {**e, "count": 1}
+        else:
+            self.recent.append(e)
+        self.bus.append(e)
 
-    async def _sweep(self) -> None:
-        self.scaling = dict(state="running", rows=[])
+    def _decisions(self, kind: str, e: Event) -> None:
+        """Join each decision to its outcome. ``revoke`` carries the round; ``complete`` and
+        ``tx_failed`` carry only (sat, item_id), so they match the newest pending grant for that pair."""
+        if kind == "decision":
+            raw = e.get("ranked")
+            ranked: list[Any] = [c for c in raw if isinstance(c, dict)] if isinstance(raw, list) else []
+            key = (e.get("round_id"), e.get("t"))
+            if any((d["round_id"], d["t"]) == key for d in self.decisions):
+                return  # duplicate datagram
+            win: dict[str, Any] = ranked[0] if ranked else {}
+            ru: dict[str, Any] | None = ranked[1] if len(ranked) > 1 else None
+            self.decisions.append({
+                "round_id": e.get("round_id"), "t": e.get("t"), "winner": e.get("winner", win.get("sat")),
+                "item_id": e.get("item_id", win.get("item_id")), "score": win.get("score"),
+                "item_age_term": win.get("item_age_term"), "sat_wait_term": win.get("sat_wait_term"),
+                "total": win.get("total"), "runner_up": ru.get("sat") if ru else None,
+                "runner_total": ru.get("total") if ru else None, "margin": e.get("margin"),
+                "excluded": e.get("excluded", []), "ranked": ranked, "outcome": "pending", "reason": "",
+            })
+            return
+        if not isinstance(e.get("sat"), str):
+            return  # an outcome with no satellite cannot be joined to anything
+        for d in reversed(self.decisions):
+            if d["outcome"] != "pending" or d["winner"] != e.get("sat"):
+                continue
+            if kind == "revoke":
+                if d["round_id"] != e.get("round_id"):
+                    continue
+            elif d["item_id"] != e.get("item_id"):
+                continue
+            d["outcome"] = {"complete": "complete", "tx_failed": "failed", "revoke": "revoked"}[kind]
+            d["reason"] = str(e.get("reason", ""))
+            return
+
+    # --- read side ----------------------------------------------------------------------
+
+    def state(self, clients: int = 0) -> Event:
+        age = None if self.last_rx_wall is None else round(time.monotonic() - self.last_rx_wall, 2)
+        return {
+            "snapshot": self.snapshot, "decisions": list(self.decisions), "recent_events": list(self.recent),
+            "bus": list(self.bus), "flags": self.flags, "rates": self.rates,
+            "telemetry_stats": self.telemetry_stats, "bus_stats": self.bus_stats,
+            "stats": {"datagrams": self.datagrams, "bad_datagrams": self.bad_datagrams, "by_kind": dict(self.by_kind),
+                      "connected_clients": clients, "age_s": age, "restarts": self.restarts,
+                      "last_event_t": self.last_event_t},
+        }
+
+    @contextlib.contextmanager
+    def subscribe(self) -> Iterator[asyncio.Queue[str]]:
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=CLIENT_QUEUE)
+        self.subscribers.add(q)
         try:
-            rows = await asyncio.to_thread(scaling_sweep, self.base_nodes)
-            self.scaling = dict(state="done", rows=rows, note="all satellites simulated on the golden model; "
-                                "same scaled window as the live run")
-        except Exception as e:                       # surfaced on the panel, never a dead ticker
-            self.scaling = dict(state="error", rows=[], note=str(e))
-
-    async def handle(self, cmd: dict) -> None:
-        o, c, v = self.orch, cmd.get("cmd"), cmd.get("value")
-        if c == "play":
-            o.play()
-        elif c == "pause":
-            o.pause()
-        elif c == "step":
-            o.step()
-        elif c == "speed":
-            o.set_speed(float(v))
-            self.speed = o.speed
-        elif c == "starvation":
-            o.set_starvation(int(v))
-        elif c == "scenario" and v in scenarios.SCENARIOS:
-            await self.start(v)
-        elif c == "sim_nodes":
-            self.sim_extra = max(0, min(MAX_SWEEP, int(v)))
-            await self.start(self.scenario)
-        elif c == "scaling_sweep" and self.scaling["state"] != "running":
-            asyncio.create_task(self._sweep())
+            yield q
+        finally:
+            self.subscribers.discard(q)
 
 
-def create_app(scenario: str = "nominal", nodes: list[str] = params.NODES, speed: float = 2.0, virtual: bool = False,
-               paused: bool = False, seed: int = 0, vivado_summary: str | None = None,
-               bench_dir: str | None = None) -> FastAPI:
-    session = Session(scenario, nodes, speed, virtual, paused, seed, vivado_summary, bench_dir)
+def _t(e: Event) -> float:
+    t = e.get("t")
+    return float(t) if isinstance(t, int | float) else 0.0
+
+
+class _Listener(asyncio.DatagramProtocol):
+    def __init__(self, store: Store) -> None:
+        self.store = store
+
+    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        self.store.ingest(data)
+
+    def error_received(self, exc: Exception) -> None:
+        log(lg, logging.WARNING, "udp_error", error=str(exc))
+
+
+def create_app(telemetry_port: int = DEFAULTS.telemetry_port, backlog: int = 2000) -> FastAPI:
+    store = Store(backlog)
+    clients: set[WebSocket] = set()
+    loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
 
     @contextlib.asynccontextmanager
-    async def lifespan(app):
-        await session.start(scenario)
-        yield
-        await session.stop()
+    async def lifespan(app: FastAPI) -> Any:
+        loop = asyncio.get_running_loop()
+        loop_holder["loop"] = loop
+        transport, _ = await loop.create_datagram_endpoint(lambda: _Listener(store),
+                                                           local_addr=("0.0.0.0", telemetry_port))
+        app.state.udp_port = transport.get_extra_info("sockname")[1]
+        log(lg, logging.INFO, "display_start", telemetry_port=app.state.udp_port)
+        try:
+            yield
+        finally:
+            transport.close()
+
+    def ingest(data: bytes) -> None:
+        """Thread-safe entry for tests and for anything that already holds the datagram: runs on
+        the app loop when one exists in another thread (the TestClient case), inline otherwise."""
+        loop = loop_holder.get("loop")
+        if loop is None or not loop.is_running() or _current_loop() is loop:
+            store.ingest(data)
+        else:
+            asyncio.run_coroutine_threadsafe(_call(store.ingest, data), loop).result(timeout=5)
 
     app = FastAPI(lifespan=lifespan)
-    app.state.session = session
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
-    app.mount("/corpus", StaticFiles(directory=C.ROOT / "png"), name="corpus")
+    app.state.store = store
+    app.state.ingest = ingest
 
     @app.get("/")
-    async def index():
+    async def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
 
     @app.get("/api/state")
-    async def state():
-        return JSONResponse(session.snapshot())
-
-    @app.post("/api/{cmd}")
-    async def control(cmd: str, body: dict = Body(default={})):
-        if cmd not in COMMANDS:
-            return JSONResponse({"error": f"unknown command {cmd}"}, status_code=404)
-        await session.handle({"cmd": cmd, "value": body.get("value")})
-        return JSONResponse(session.snapshot())
+    async def state() -> JSONResponse:
+        return JSONResponse(json.loads(json.dumps(store.state(len(clients)), default=str)))
 
     @app.websocket("/ws")
-    async def ws(websocket: WebSocket):
+    async def ws(websocket: WebSocket) -> None:
         await websocket.accept()
-        session.clients.add(websocket)
+        clients.add(websocket)
         try:
-            await websocket.send_text(json.dumps(session.snapshot()))
-            while True:
-                cmd = json.loads(await websocket.receive_text())
-                await session.handle(cmd)
-                await websocket.send_text(json.dumps(session.snapshot()))
-        except WebSocketDisconnect:
-            pass
+            with store.subscribe() as q:
+                await websocket.send_text(json.dumps({"type": "state", **store.state(len(clients))}, default=str))
+                while True:
+                    await websocket.send_text(await q.get())
+        except (WebSocketDisconnect, RuntimeError, OSError):
+            pass  # the browser went away or fell too far behind; nothing upstream cares
         finally:
-            session.clients.discard(websocket)
+            clients.discard(websocket)
 
     return app
 
 
-def main(argv=None) -> int:
+async def _call(fn: Any, *args: Any) -> None:
+    fn(*args)
+
+
+def _current_loop() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+def main(argv: list[str] | None = None) -> int:
     import uvicorn
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--scenario", default="nominal", choices=sorted(scenarios.SCENARIOS))
-    ap.add_argument("--nodes", nargs="+", default=params.NODES)
-    ap.add_argument("--speed", type=float, default=2.0)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--port", type=int, default=8000)
-    args = ap.parse_args(argv)
-    uvicorn.run(create_app(args.scenario, args.nodes, args.speed, seed=args.seed), host="127.0.0.1", port=args.port)
+
+    from orbit import log as orbit_log
+
+    ap = argparse.ArgumentParser(description="Orbit monitoring display (telemetry sink + dashboard)")
+    ap.add_argument("--port", type=int, default=8765, help="HTTP port for the dashboard")
+    ap.add_argument("--telemetry-port", type=int, default=DEFAULTS.telemetry_port, help="UDP port the ground sends to")
+    ap.add_argument("--host", default="0.0.0.0", help="bind address; 0.0.0.0 so the laptop is reachable on the LAN")
+    a = ap.parse_args(argv)
+    orbit_log.setup()
+    print(f"display: http://{a.host}:{a.port}/  (telemetry UDP :{a.telemetry_port})", flush=True)
+    uvicorn.run(create_app(a.telemetry_port), host=a.host, port=a.port, log_level="warning")
     return 0
 
 
