@@ -1,7 +1,8 @@
 """The scoring kernel, protocol.md §5.2, as integers. `score_frame` is the fast NumPy
 form used everywhere; `score_frame_ref` is the per-pixel pure-Python transcription of
 the spec that the tests hold NumPy to. Both are pure functions of (frame, ref, config)
-and must match the RTL bit for bit."""
+and must match the ESP32 kernel in firmware/satellite_esp32/orbit_score.h bit for bit.
+tools/check_score_parity.py checks it."""
 
 from __future__ import annotations
 

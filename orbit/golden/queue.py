@@ -1,4 +1,4 @@
-"""Priority queue, protocol.md §5.3: the behaviour of rtl/priority_queue.v as a list.
+"""Priority queue, protocol.md §5.3: the reference model for the satellite's onboard queue.
 Head first, score descending, earlier insert first among equals."""
 
 from __future__ import annotations

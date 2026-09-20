@@ -1,6 +1,6 @@
-"""Awkward frames for pytest and cocotb: the inputs most likely to expose a
-width, border or saturation bug in the kernel or the queue. Seeded, so the
-RTL benches and the golden tests see the same bytes."""
+"""Awkward frames: the inputs most likely to expose a width, border or saturation
+bug in the kernel or the queue. Seeded, so the benchmark and the golden tests see
+the same bytes."""
 
 from __future__ import annotations
 
