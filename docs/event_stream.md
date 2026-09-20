@@ -344,6 +344,10 @@ Last event. The stats screen reads this and nothing else.
 }
 ```
 
+The numbers above illustrate the shape of the event; they are not a measured run. Real
+figures live in the run files: over a full window at seed 42 the gain runs from 1.256x
+under memory pressure down to 1.028x on `nominal`, where nothing is ever evicted.
+
 Both paths get the same byte budget. That is the whole comparison: same window,
 same bandwidth, different architecture. `reason` is `window_closed`, `stopped`
 (operator stopped the ground) or `rounds_done` (simulator). `gain` is null when

@@ -209,7 +209,7 @@ name, a unit, and a provenance tag saying how we know it, and anything nobody
 has measured says `not measured yet` in the same breath rather than going quiet.
 
 The palette is five pens and nothing else. Blue is Orbit's own result, pencil
-grey is the baseline it beats, red is live-right-now or an intervention the
+grey is the baseline it is measured against, red is live-right-now or an intervention the
 ground forced, green is measured on real hardware, amber is modelled or not yet
 measured. A colour never means "satellite 3"; satellites are numbered lanes and
 positions, so the display carries twelve of them without inventing a twelfth
@@ -251,7 +251,7 @@ meaning and each also carried by a second, non-colour channel.
 
 ### Secondary
 - **Pencil Grey** (`{colors.pencil}`): the counterfactual baseline — first-in
-  first-out, no scoring. It is the ink of the line Orbit beats, and it is always
+  first-out, no scoring. It is the ink of the line Orbit is measured against, and it is always
   dashed as well as grey. Also the idle lamp in the pass badge.
 
 ### Tertiary

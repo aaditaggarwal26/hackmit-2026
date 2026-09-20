@@ -170,7 +170,7 @@ on the day.
 | No network at all | The bus falls back to loopback with no default route, so `orbit demo` still runs on one box. |
 | Multicast blocked by the venue AP | `orbit bus-smoke --listen` / `--send`, with `--unicast <ip>` as the control, names the fault in one command. Switch to the phone hotspot. |
 | Nothing will install, or the laptop is not yours | `python3 tools/replay.py runs/sample.jsonl` — stdlib only, no uv, no venv, no network. `--loop` and walk away. |
-| The live run looks wrong and you need to know whether it is | `python3 tools/check_run.py runs/<run_id>.jsonl` holds the file against `docs/event_stream.md` and prints what violated it. |
+| The live run looks wrong and you need to know whether it is | `python3 tools/check_run.py runs/<run_id>.jsonl` holds the file against `docs/event_stream.md` and prints what violated it. Read the errors, not the exit code: a long run currently reports a handful of known `queue_depth` / `frames_sent` divergences where a satellite's heartbeat crosses a `tx_ack` on the wire, which are bookkeeping in `orbit/ground/stream.py` and touch no arrival, byte or `run_end` total. The committed fixtures pass clean. |
 | A judge doubts the numbers | Run `uv run orbit sim --scenario nominal --seed 42 --digest` twice, or `camera/demo.py` for a live score on a photo taken in front of them. |
 | A port is taken, or `runs/` is unwritable | The arbiter keeps going regardless — an unwritable `runs/` or a busy stream port does not stop a decision. Change what you need with `--set` or `ORBIT_<NAME>=…`. |
 | The benchmark has no power numbers | Correct behaviour. CPU-rail and whole-board power read `"unavailable"` with the reason; per-frame energy on the ESP32 has never been measured. Do not estimate one on stage. |

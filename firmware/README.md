@@ -68,8 +68,10 @@ esptool --chip esp32s3 --port /dev/ttyACM0 --baud 921600 \
 ## Checks that run without hardware
 
 ```sh
-# the firmware's scoring kernel, compiled by g++, vs the Python golden model
-cd firmware/test && g++ -O2 -I../satellite_esp32 score_host.cpp -o score_host && cd -
+# the firmware's scoring kernel, compiled by g++, vs the Python golden model.
+# It builds firmware/test/score_host itself, with -Wall -Wextra -Werror, and rebuilds
+# whenever a header is newer than the binary. Do not pre-build one by hand: a binary
+# built with looser flags looks fresh and the strict build never runs.
 uv run --with numpy python tools/check_score_parity.py --n 40
 
 # firmware constants vs orbit/config.py

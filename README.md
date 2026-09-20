@@ -1,9 +1,12 @@
 # Orbit — satellites score their own imagery; the ground decides who downlinks
 
 Earth-observation satellites capture far more than they can send. A satellite only
-downlinks while passing over a ground station, a few minutes at a time, and most
-frames are worthless — cloud, blur, nothing changed. So the scarce contact window gets
-spent on junk while good frames sit unsent.
+downlinks while passing over a ground station, a few minutes at a time, and a large
+share of what it captured is not worth the airtime — cloud, blur, nothing changed.
+Nearly a third of this repository's own corpus is too cloudy to use (`cloudy_frames: 56`
+of 194, `corpus/gate_result.json`), and the satellite cannot tell which third without
+looking. So the scarce contact window gets spent on whatever is next in the buffer while
+good frames sit unsent.
 
 Orbit: **each satellite scores every frame onboard, keeps a priority queue, and bids
 its best frame when the ground opens a slot. The ground grants one slot to one
@@ -103,7 +106,7 @@ Live pieces, each its own process (a real satellite replaces an `orbit sat`):
 | `orbit ground` | the arbiter on `239.255.42.99:50000`; JSONL event stream on `ws://:8766` and `runs/<run_id>.jsonl`; UDP telemetry to `display.local:50010` |
 | `orbit sat --profile sat-a` | one simulated satellite: fixed frame pool, local eviction, onboard scoring on the committed MODIS corpus |
 | `orbit display` | the monitoring page (normally on the laptop), fed only by telemetry — never in the control path |
-| `uv run python -m viz.replay runs/x.jsonl` | replay a recorded run into the display; no radio, no hardware |
+| `uv run python -m viz.replay runs/x.jsonl` | replay a recorded run into a running `orbit display`; sends telemetry, serves no page of its own |
 
 Any setting: `--set name=value` anywhere on the command line, or `ORBIT_<NAME>=…`.
 Everything tunable is one frozen dataclass in `orbit/config.py`.
@@ -172,6 +175,7 @@ Two ways to look at a run, both reading the same event stream
 
 ```sh
 uv run orbit demo --scenario nominal --display   # live: the ground serves viz/ on :8765
+uv run orbit display                             # then, in a second terminal:
 uv run python -m viz.replay runs/<id>.jsonl      # the same page, from a recorded run
 
 python3 tools/replay.py runs/sample.jsonl        # display/live.html on :8000, stdlib only
@@ -205,10 +209,10 @@ because a specific failure was expensive to find on the bench.
 The firmware checkers read the ground's side from `orbit/config.py` and
 `orbit/golden/score.py` **themselves**, never from a second transcription of them — the
 golden modules are copied into a throwaway package and imported from there, so an `orbit`
-already on `sys.path` cannot be the one that answers. They read the working tree, which is
-the only source that catches the drift they exist for: a kernel constant edited and not yet
-carried into the firmware header. `ORBIT_GOLDEN_REF=<ref>` reads them from a git ref
-instead, for comparing across branches.
+already on `sys.path` cannot be the one that answers. Both read the working tree by
+default, which is the only source that catches the drift they exist for: a kernel constant
+edited and not yet carried into the firmware header. `ORBIT_GOLDEN_REF=<ref>` reads them
+from a git ref instead, for comparing across branches.
 
 Firmware is testable against the real protocol with no hardware because the bus is an
 interface, not a socket. `orbit/bus/base.py` defines it; `MulticastBus` is the wire and
@@ -218,6 +222,7 @@ hide behind the simulator. There is no URL scheme and nothing to configure: whic
 you get is decided by which program you launch.
 
 `uv run pytest`, `uv run mypy`, `uv run ruff check` and `uv run ruff format --check` are all expected clean; tests run with warnings as errors.
-The two `tests/test_bench.py` failures and the four `orbit/bench/runner.py` mypy errors
-need the GX10's Linux scheduler calls and do not reproduce off that box.
+They are clean on the GX10. Off Linux, two `tests/test_bench.py` tests and four
+`orbit/bench/runner.py` mypy errors appear, because `os.sched_getaffinity` and
+`os.sched_setaffinity` do not exist there. Nothing else fails.
 See `ARCHITECTURE.md` for the design and the reasons behind it.

@@ -48,8 +48,9 @@ track, 19–20 September 2026.
 
 Satellites capture far more imagery than they can transmit. Downlink only
 happens during a ground-station pass — a few short windows a day, set by line of
-sight. Most captured frames are worthless (cloud, blur, nothing changed) but the
-satellite cannot tell, so the scarce window is spent on whatever is next in the
+sight. A large share of captured frames is not worth the airtime (cloud, blur, nothing
+changed) — 56 of this corpus's 194 frames are too cloudy to use — but the
+satellite cannot tell which, so the scarce window is spent on whatever is next in the
 buffer.
 
 Orbit scores every frame *where it was captured*, onboard, in one streaming
@@ -80,7 +81,12 @@ throughput and must never invite that comparison.**
   - `late_joiner` — sat-c boots 40 s into the pass with no configuration anywhere
 - **Two policies run side by side on the same frames and the same window**: the
   scored priority queue, and an unfiltered FIFO baseline computed on the ground.
-  The gap between them is the pitch.
+  The gap between them is the pitch — and it is a gap that opens under pressure.
+  Over a full contact window at seed 42 it is 1.256x under memory pressure, 1.286x
+  on a lossy bus and 1.167x against a satellite that never transmits, but only
+  1.028x on `nominal` and 0.972x on `late_joiner`, where nothing is ever evicted and
+  both policies send nearly the same set. Never quote one number as the system's
+  gain; say which window it was measured in.
 - **Fallbacks are part of the scene**: a satellite can be a real ESP32-S3 on
   the multicast bus or a simulated `orbit sat` running the same scoring kernel.
   The display must say which, per satellite, at all times — a board may die on
