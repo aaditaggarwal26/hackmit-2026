@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import signal
 import time
 from collections import Counter, deque
 from collections.abc import Iterator
@@ -313,7 +314,19 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     orbit_log.setup()
     print(f"display: http://{a.host}:{a.port}/  (telemetry UDP :{a.telemetry_port})", flush=True)
-    uvicorn.run(create_app(a.telemetry_port), host=a.host, port=a.port, log_level="warning")
+    server = uvicorn.Server(uvicorn.Config(create_app(a.telemetry_port), host=a.host, port=a.port, log_level="warning"))
+    # uvicorn re-raises a captured SIGINT on exit, which asyncio.run turns into a KeyboardInterrupt inside the
+    # loop and a traceback on every Ctrl-C. Own the signals instead: they just ask the server to stop.
+    server.capture_signals = contextlib.nullcontext  # type: ignore[method-assign]
+
+    async def serve() -> None:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, lambda: setattr(server, "should_exit", True))
+        await server.serve()
+
+    asyncio.run(serve())
     return 0
 
 
