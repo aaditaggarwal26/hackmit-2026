@@ -292,3 +292,187 @@ def test_replay_carries_a_recorded_run_including_the_liveness_events(tmp_path) -
 
     assert replay(events, ("127.0.0.1", 0), 1e6, FakeSocket()) == len(events)  # type: ignore[arg-type]
     assert sent == [raw for _, raw in events]  # byte for byte, nothing interpreted on the way out
+
+
+# --- the event stream (`type`) arriving where telemetry (`kind`) is expected --------------------
+
+
+@pytest.fixture
+def run_file(tmp_path: Any) -> Any:
+    """A real recorded run, in the event-stream shape `runs/<run_id>.jsonl` holds."""
+    from orbit import config
+    from orbit.sim.run import run_scenario
+
+    run_scenario("nominal", 12, seed=42, settings=config.Settings(runs_dir=str(tmp_path)), run_id="r")
+    return tmp_path / "r.jsonl"
+
+
+def test_a_recorded_run_replays_into_the_dashboard(run_file: Any) -> None:
+    """The whole point: a run file at the telemetry port reaches the panels instead of the floor.
+    Every number below comes out of the file; nothing here is a shape the ground never emitted."""
+    from viz.replay import load
+
+    store = Store()
+    for _t, raw in load(run_file):
+        store.ingest(raw)
+
+    st = store.state()["stats"]
+    assert st["datagrams"] > 200 and st["bad_datagrams"] == 0  # a run file is not garbage
+    assert st["by_type"]["grant"] == st["by_type"]["frame_arrived"] == 12
+    assert st["by_kind"]["decision"] == st["by_kind"]["complete"] == 12  # grant -> decision, arrival -> complete
+    assert st["by_kind"]["snapshot"] == st["by_type"]["ground_status"] >= 5  # the ground heartbeat, 1:1
+
+    snap = store.snapshot
+    assert snap is not None
+    assert sorted(snap["sats"]) == ["sat-a", "sat-b", "sat-c"]  # the roster, by label, from run_start
+    assert snap["state"] in ("READY", "BUSY", "COMPLETE", "CLOSED") and snap["round_id"] >= 1
+    assert snap["counters"]["rounds"] == snap["round_id"]
+    a = snap["sats"]["sat-a"]
+    assert a["queue_len"] >= 0 and a["transmissions"] >= 0 and len(a["window"][0]) == 3
+    w = snap["window"]
+    assert w["slots_used"] + w["slots_remaining"] == w["slots_total"] and w["capacity_bytes"] == 983040
+    assert w["used_bytes"] + w["remaining_bytes"] == w["capacity_bytes"]
+
+    assert len(store.decisions) == 12 and {d["outcome"] for d in store.decisions} == {"complete"}
+    d = store.decisions[0]
+    assert d["winner"] in snap["sats"] and d["ranked"][0]["sat"] == d["winner"]  # winner first, as telemetry ranks
+    assert (d["score"], d["total"]) == (d["ranked"][0]["score"], d["ranked"][0]["total"])  # the bid's own terms
+    assert d["total"] == pytest.approx(d["score"] + d["item_age_term"] + d["sat_wait_term"])
+    assert store.state()["rates"] == {"item_aging_rate": 0.5, "sat_aging_rate": 0.3}  # from run_start.priority
+    bs = store.bus_stats
+    assert bs is not None and bs["received"] > 0 and bs["dropped_malformed"] == 0  # from bus_health
+
+
+def test_the_stream_types_with_no_telemetry_home_are_counted_not_rendered(run_file: Any) -> None:
+    """`node_event` is prose, and the rest have no panel. They are accepted and counted so an
+    operator can see they arrived, and nothing is guessed back out of them."""
+    from viz.replay import load
+
+    store = Store()
+    for _t, raw in load(run_file):
+        store.ingest(raw)
+    assert {"node_event", "frame_scored", "baseline_arrival", "run_end"} <= set(store.by_type)
+    assert set(store.by_kind) == {"settings", "snapshot", "bus_stats", "decision", "complete"}
+    assert not store.bus  # the stream carries no bus mirror, so the bus log stays honestly empty
+    assert not store.flags  # nor any flag assessment
+
+
+def test_an_accepted_line_feeds_the_watchdog_even_when_it_renders_nowhere() -> None:
+    """The page calls the ground unreachable after a few seconds of silence. A `node_event` draws
+    no panel, but it is still the ground speaking, so it must not look like silence."""
+    store = Store()
+    store.ingest(b'{"seq": 1, "t": 1.0, "type": "node_event", "node_id": 0, "level": "info", "message": "hi"}')
+    assert store.bad_datagrams == 0 and store.last_rx_wall is not None
+    assert store.state()["stats"]["age_s"] is not None
+
+
+def test_a_telemetry_bus_event_is_never_mistaken_for_a_stream_line() -> None:
+    """Telemetry `bus` events carry a bus-message `type` of their own; `kind` decides the envelope."""
+    store = Store()
+    store.ingest(ev("bus", t=1.0, dir="in", **{"from": "sat-a"}, type="tx_chunk", seq=1, item_id=7, idx=0, n=2))
+    store.ingest(ev("bus", t=1.1, dir="in", **{"from": "sat-a"}, type="tx_begin", seq=2, item_id=7))
+    assert [b["type"] for b in store.bus] == ["tx_chunk", "tx_begin"] and store.by_kind["bus"] == 2
+    assert not store.by_type and store.bad_datagrams == 0
+
+
+def test_bad_datagrams_still_counts_real_corruption() -> None:
+    """The second envelope must not blind the counter that exists to catch a bad byte. Corruption
+    is: not JSON, not an object, or neither tag a string — a run-file line is none of those."""
+    store = Store()
+    corrupt = (
+        b"\xff\xfe not json",
+        b'{"seq": 1, "t": 0.0, "type": "grant"',  # truncated mid-datagram
+        b"[1, 2, 3]",
+        b"{}",
+        b'{"kind": 5}',
+        b'{"type": 5}',  # a number where the tag should be
+        b'{"seq": 1, "t": 0.0}',  # an envelope with neither tag
+        b'{"type": null, "kind": null}',
+    )
+    for d in corrupt:
+        store.ingest(d)
+    assert store.datagrams == store.bad_datagrams == len(corrupt)
+    assert not store.by_kind and not store.by_type
+    # and a good line on either side of the garbage still lands
+    store.ingest(b'{"seq": 2, "t": 0.0, "type": "run_start", "priority": {"item_aging_rate": 0.5}}')
+    store.ingest(ev("sat_seen", sat="sat-a"))
+    assert store.bad_datagrams == len(corrupt) and store.by_kind["sat_seen"] == 1
+
+
+def test_unknown_and_half_written_stream_events_do_not_crash() -> None:
+    """The stream gains event types (`ground_status` and `bus_health` are new). An unknown one is
+    counted and shown nowhere, exactly as an unknown `kind` already was, and a field of the wrong
+    type is survived — the display is the last thing that may fall over mid-demo."""
+    store = Store()
+    for raw in (
+        b'{"type": "something_new", "t": 1.0, "payload": {"a": 1}}',
+        b'{"type": "run_start"}',
+        b'{"type": "run_start", "nodes": "not a list", "window": 7, "priority": null}',
+        b'{"type": "grant"}',
+        b'{"type": "grant", "bids": "nope", "slot_id": "x", "node_id": "y"}',
+        b'{"type": "node_status", "node_id": 0, "label": "sat-a", "queue_depth": "deep"}',
+        b'{"type": "queue_window", "node_id": 0, "top": [1, 2, {"frame_id": 3}]}',
+        b'{"type": "ground_status", "t": 2.0, "window": null, "rounds": null}',
+        b'{"type": "bus_health", "t": 2.0, "dropped": 4}',
+        b'{"type": "frame_arrived", "t": 3.0}',
+        b'{"type": "window_update", "t": 4.0, "budget_bytes": null}',
+    ):
+        store.ingest(raw)
+    assert store.bad_datagrams == 0 and store.by_type["something_new"] == 1
+    assert store.snapshot is not None and store.snapshot["sats"]["sat-a"]["window"] == [[3, None, None]]
+    assert len(store.decisions) == 2 and store.decisions[0]["ranked"] == []
+
+
+def test_a_run_recorded_before_the_ground_heartbeat_still_draws_the_panels() -> None:
+    """`ground_status` was added late; the runs recorded before it have none. The node state still
+    has to reach the page, so it is flushed on the cadence the ground uses for `snapshot`."""
+    store = Store()
+    lines = [b'{"seq": 1, "t": 0.0, "type": "run_start", "nodes": [{"node_id": 0, "label": "sat-a"}]}']
+    for i in range(6):
+        lines.append(
+            b'{"seq": 2, "t": %.1f, "type": "node_status", "node_id": 0, "queue_depth": %d, "top_score": 50.0}'
+            % (float(i), i)
+        )
+    for raw in lines:
+        store.ingest(raw)
+    assert "ground_status" not in store.by_type and store.by_kind["snapshot"] == 6
+    assert store.snapshot is not None and store.snapshot["sats"]["sat-a"]["queue_len"] == 5
+    assert store.snapshot["state"] is None and store.snapshot["round_id"] is None  # never claimed, never invented
+
+
+def test_replayed_run_reaches_a_browser_over_the_real_sockets(client: TestClient, run_file: Any) -> None:
+    """End to end through the app the browser talks to: UDP in, `/api/state` and `/ws` out."""
+    import socket
+    import time
+
+    from viz.replay import load
+
+    lines = load(run_file)
+    port = client.app.state.udp_port  # type: ignore[attr-defined]
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "state"
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            for _t, raw in lines[:40]:
+                s.sendto(raw, ("127.0.0.1", port))
+        for _ in range(200):  # loopback UDP may still drop; wait for the first decision to arrive
+            if client.get("/api/state").json()["decisions"]:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("nothing from the run file reached the store")
+    st = client.get("/api/state").json()
+    assert st["stats"]["bad_datagrams"] == 0 and st["snapshot"]["sats"]
+    assert st["decisions"][0]["winner"].startswith("sat-")
+
+
+def test_a_looped_replay_reads_as_one_ground_restart(run_file: Any) -> None:
+    """`viz.replay --loop` starts the file again; the page must be told to clear its table rather
+    than grow a second run's worth of rows underneath the first."""
+    from viz.replay import load
+
+    lines = load(run_file)
+    store = Store()
+    for _t, raw in lines + lines:
+        store.ingest(raw)
+    assert store.restarts == 1 and len(store.decisions) == 12  # not 24
+    assert store.snapshot is not None and sorted(store.snapshot["sats"]) == ["sat-a", "sat-b", "sat-c"]

@@ -223,7 +223,11 @@ function render() {
   // contact window
   const w = snap.window;
   if (w) {
-    $('scaled').innerHTML = w.scaled ? '<span class="badge warn">SCALED</span>' : '<span class="badge ok">real pass</span>';
+    // Undefined is not false: a replayed run file carries no `scaled`, and calling that a real
+    // pass would be the one thing on this page that is affirmatively untrue.
+    $('scaled').innerHTML = w.scaled === undefined ? '<span class="badge">pass model unknown</span>'
+                          : w.scaled ? '<span class="badge warn">SCALED</span>'
+                          : '<span class="badge ok">real pass</span>';
     $('wbar').style.width = (w.capacity_bytes ? Math.min(100, 100 * w.used_bytes / w.capacity_bytes) : 0) + '%';
     $('win').innerHTML = `<span>slots</span><span class="num"><b>${fmt(w.slots_used)}</b> used of ${fmt(w.slots_total)} · ${fmt(w.slots_remaining)} remaining</span>
       <span>bytes remaining</span><span class="num">${fmt(w.remaining_bytes)} of ${fmt(w.capacity_bytes)}</span>
