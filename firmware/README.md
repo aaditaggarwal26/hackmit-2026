@@ -74,11 +74,69 @@ uv run --with numpy python tools/check_score_parity.py --n 40
 
 # firmware constants vs orbit/config.py
 uv run python tools/check_firmware_sync.py
+
+# the whole firmware suite: canonicaliser/HMAC/Ed25519 vs the ground, message schema, codec,
+# faults, satellite decisions -- each host header built with g++/gcc and held to Python
+uv run pytest tests/test_crypto_parity.py tests/test_check_message_schema.py \
+              tests/test_firmware_codec.py tests/test_registry.py tests/test_firmware_sat.py -q
 ```
 
-Both must pass before flashing. The ground re-scores every frame it receives with the
+All must pass before flashing. The ground re-scores every frame it receives with the
 golden model, so a kernel that drifts shows up as dashboard mismatches rather than as a
-build error.
+build error; the crypto parity is what lets the board's HMAC and Ed25519 verify be trusted
+without a logic analyser on the bus.
+
+## Security: provisioning and bring-up
+
+Everything is off until keyed, so a board flashed from `secrets.h.example` behaves exactly like
+an unauthenticated one. Four independent switches — `secrets.h` on the board, the environment on
+the ground — and the design doc behind them is `docs/security.md`:
+
+| `secrets.h` (board) | ground environment | protects against |
+|---|---|---|
+| `ORBIT_AUTH_KEY` (hex) | `ORBIT_AUTH_KEY`, `ORBIT_PIN_SENDERS=1` | outsider forgery + tampering (HMAC) |
+| `ORBIT_GROUND_NAME` | `ORBIT_GROUND_NAME` (its short hostname) | acting on anyone else's commands |
+| `ORBIT_GROUND_PUBKEY` (hex) | `ORBIT_GROUND_SIGN_KEY` (hex seed) | a *leaked shared key* forging a grant (Ed25519) |
+| `ORBIT_PAYLOAD_KEY` (hex) | `ORBIT_PAYLOAD_KEY` (hex) | imagery read off the air (AES-256-GCM) |
+
+Generate the keys once, on the ground, and paste the SAME hex into both places (the Ed25519
+seed goes to the ground, the public half to every board):
+
+```sh
+python3 -c "import secrets; print('ORBIT_AUTH_KEY   ', secrets.token_hex(32))"
+python3 -c "import secrets; print('ORBIT_PAYLOAD_KEY', secrets.token_hex(32))"
+uv run python -c "import os; from orbit.protocol import ed25519; s=os.urandom(32); \
+  print('ORBIT_GROUND_SIGN_KEY', s.hex()); print('ORBIT_GROUND_PUBKEY   ', ed25519.secret_to_public(s).hex())"
+```
+
+Run the ground with the matching values in its environment:
+
+```sh
+ORBIT_AUTH_KEY=<hex> ORBIT_PIN_SENDERS=1 ORBIT_GROUND_NAME=<hostname> \
+ORBIT_GROUND_SIGN_KEY=<hex> ORBIT_PAYLOAD_KEY=<hex> uv run orbit ground
+```
+
+Bring it up **one layer at a time**, so a failure is isolated instead of four-way ambiguous:
+
+1. **Nothing keyed.** Flash `secrets.h.example` unchanged. The board captures, bids and
+   downlinks; the bus log is plain JSON. This is the baseline nothing else may regress.
+2. **HMAC + pin.** Set `ORBIT_AUTH_KEY` + `ORBIT_GROUND_NAME` on the board and the matching
+   `ORBIT_AUTH_KEY`/`ORBIT_PIN_SENDERS=1`/`ORBIT_GROUND_NAME` on the ground. Grants still act; a
+   datagram from anyone else, or with a wrong tag, is dropped before the JSON parser ever sees it.
+3. **Payload encryption.** Add `ORBIT_PAYLOAD_KEY` on both. Frames now arrive `enc:"zlib+gcm"`,
+   the ground decrypts and its re-scored digest still matches, and serial prints `payload
+   encryption ON: AES-256-GCM`. Mismatch the two keys once and confirm the ground drops the frame
+   (bad GCM tag) rather than scoring garbage.
+4. **Command signatures.** Add `ORBIT_GROUND_PUBKEY` on the board and `ORBIT_GROUND_SIGN_KEY` on
+   the ground. Serial prints `ground command signatures: VERIFIED (Ed25519)` and grants act as
+   before. Point the board at the WRONG pubkey once and confirm it now ignores every grant
+   (dropped as a bad signature) — proof the check is live, not cosmetic.
+
+`tweetnacl.c` (the Ed25519 verify) is an ordinary source file in the sketch folder, so
+`arduino-cli` compiles and links it automatically — nothing extra to install. All four layers
+are validated on the host before a board is touched: `uv run pytest tests/test_crypto_parity.py`
+builds the same headers with g++/gcc and holds the C verify against the Python signer and the
+RFC 8032 vectors.
 
 ## WiFi
 
