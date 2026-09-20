@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit — camera</title>
+<title>Orbit, camera</title>
 <!--
   The scoring demo, on its own. Not the display, not the ground station: one
   edge node, a camera, and the decision it makes about every photo it takes.
@@ -98,6 +98,9 @@ b { font-weight: 600; }
 .stage .crop i { display: block; aspect-ratio: 1; height: 100%; border: 1px solid rgba(255, 255, 255, .55); box-shadow: 0 0 0 9999px rgba(17, 22, 27, .38); }
 .stage .note { position: absolute; inset: auto 0 0 0; padding: 7px 10px; font-size: 12px; color: #fff; background: rgba(17, 22, 27, .55); letter-spacing: .02em; }
 .stage .off { color: var(--stock); font-size: 13px; text-align: center; padding: 22px; max-width: 34ch; }
+.stage.drop { outline: 2px solid var(--blue); outline-offset: -2px; }
+.stage.drop::before { content: 'drop to score it'; position: absolute; z-index: 2; font-size: 13px; font-weight: 600;
+  color: var(--ink); background: var(--plate); padding: 8px 14px; border-radius: 3px; box-shadow: var(--sh); }
 .stage.flash::after { content: ''; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; animation: flash .42s var(--ease) both; }
 @keyframes flash { from { opacity: .92; } to { opacity: 0; } }
 
@@ -175,10 +178,12 @@ b { font-weight: 600; }
       </div>
       <div class="controls">
         <button class="shutter" id="shoot" disabled>Take a photo</button>
-        <button class="btn" id="sample">Use a sample photo</button>
+        <button class="btn" id="upload">Upload a photo</button>
+        <button class="btn" id="sample">Sample photo</button>
+        <input type="file" id="file" accept="image/*" hidden>
       </div>
-      <p class="hint"><kbd>Space</kbd> takes a photo too. Nothing leaves this machine: the frame goes to the
-        scoring kernel on localhost and back.</p>
+      <p class="hint"><kbd>Space</kbd> takes a photo too, and you can drop an image file straight onto the
+        preview. Nothing leaves this machine: the frame goes to the scoring kernel on localhost and back.</p>
     </section>
 
     <section class="plate">
@@ -186,7 +191,7 @@ b { font-weight: 600; }
         <span class="sub" id="shotsub">nothing yet</span></h2>
       <div id="shot" hidden>
         <div class="verdict">
-          <div class="score" id="score">—<small>/100</small></div>
+          <div class="score" id="score">-<small>/100</small></div>
           <div class="who" id="who"></div>
           <div id="usable"></div>
         </div>
@@ -207,9 +212,9 @@ b { font-weight: 600; }
   </section>
 
   <p class="foot" style="padding: 0 2px">
-    <span><b>Scored by</b> orbit/golden/score.py — the kernel the boards are held to, not a copy in this page</span>
-    <span><b>Queued by</b> orbit/golden/queue.py at depth <span id="footdepth">—</span></span>
-    <span><b>Standalone</b> — no ground station, no downlink, no display</span>
+    <span><b>Scored by</b> orbit/golden/score.py, the kernel the boards are held to, not a copy in this page</span>
+    <span><b>Queued by</b> orbit/golden/queue.py at depth <span id="footdepth">-</span></span>
+    <span><b>Standalone</b>: no ground station, no downlink, no display</span>
   </p>
 </div>
 
@@ -226,13 +231,13 @@ async function startCamera() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('This browser has no camera API. Use a sample photo instead.');
   S.wait = setTimeout(() => {                       // the prompt is browser furniture; say where to look
     if (!S.live) $('off').innerHTML = 'Waiting for you to allow the camera. Chrome asks once, '
-      + 'next to the address bar. <br>No prompt? Use a sample photo — the scoring is the same.';
+      + 'next to the address bar. <br>No prompt? Upload a photo instead, the scoring is the same.';
   }, 6000);
   try {
     S.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
   } catch (e) {
     return fail(e && e.name === 'NotAllowedError'
-      ? 'Camera blocked. Allow it in the padlock menu next to the address bar, then reload — or use a sample photo.'
+      ? 'Camera blocked. Allow it in the padlock menu next to the address bar, then reload, or upload a photo instead.'
       : 'No camera available (' + esc((e && e.name) || e) + '). Use a sample photo instead.');
   }
   clearTimeout(S.wait);
@@ -257,20 +262,44 @@ function fail(msg) {
   $('camstate').textContent = 'no camera';
 }
 
-/* one video frame -> the 16384 bytes the board works in: centre square, gray, 128x128 */
-function grab() {
-  const v = $('video'), w = v.videoWidth, h = v.videoHeight;
+/* anything drawable -> the 16384 bytes the board works in: centre square, gray, 128x128.
+   The camera and an uploaded file go through this one function, so a photo is reduced the
+   same way whatever it came from. */
+function reduce(src, w, h) {
   if (!w || !h) return null;
   const side = Math.min(w, h), N = S.cfg ? S.cfg.frame.w : 128;
   const c = document.createElement('canvas');
   c.width = c.height = N;
   const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(v, (w - side) / 2, (h - side) / 2, side, side, 0, 0, N, N);
+  g.drawImage(src, (w - side) / 2, (h - side) / 2, side, side, 0, 0, N, N);
   const px = g.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
   for (let i = 0, j = 0; i < px.length; i += 4, j++) {
     out[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000 | 0;   // the same luma opencv uses
   }
   return out;
+}
+
+function grab() {
+  const v = $('video');
+  return reduce(v, v.videoWidth, v.videoHeight);
+}
+
+/* a file the browser can decode: png, jpeg, gif, webp, heic where supported */
+async function scoreFile(file) {
+  if (!file || !/^image\//.test(file.type || '')) {
+    $('shotsub').innerHTML = '<span class="tag e">not an image</span> ' + esc((file && file.name) || '');
+    return;
+  }
+  let bmp;
+  try {
+    bmp = await createImageBitmap(file);
+  } catch (e) {
+    $('shotsub').innerHTML = '<span class="tag x">could not read that file</span> ' + esc(file.name);
+    return;
+  }
+  const bytes = reduce(bmp, bmp.width, bmp.height);
+  bmp.close();
+  if (bytes) await post(bytes);
 }
 
 async function post(bytes) {
@@ -327,7 +356,7 @@ function render(o) {
   $('who').innerHTML = o.rejected
     ? '<b>Dropped on arrival</b>the queue was full of better photos'
     : o.evicted_frame_id
-      ? '<b>Kept — and pushed #' + o.evicted_frame_id + ' out</b>the queue was full, this one was better'
+      ? '<b>Kept, and pushed #' + o.evicted_frame_id + ' out</b>the queue was full, this one was better'
       : '<b>Kept</b>' + (o.queue[0] && o.queue[0].frame_id === o.frame_id ? 'the best photo it is holding' : 'ranked ' + (rankOf(o) + 1) + ' of ' + o.depth);
 
   const parts = [['c1', 'Clear', o.parts.clear, o.terms.clear, pct(o.cloud_frac) + ' of the pixels are cloud'],
@@ -342,10 +371,10 @@ function render(o) {
     '<b>' + p[1] + '</b><span class="w">' + esc(p[4]) + '</span></div>').join('');
 
   $('maps').innerHTML = [
-    ['frame', 'As scored', '128 × 128, 8-bit gray — exactly what the kernel read'],
+    ['frame', 'As scored', '128 × 128, 8-bit gray, exactly what the kernel read'],
     ['cloud', 'Cloud', o.counts.cloud_px.toLocaleString() + ' of ' + o.counts.pixels.toLocaleString() +
       ' pixels brighter than ' + S.cfg.cloud_thr],
-    ['edges', 'Detail', 'Sobel edges — the sharpness term, drawn'],
+    ['edges', 'Detail', 'Sobel edges, the sharpness term drawn'],
     ['change', 'Change', o.first ? 'nothing to compare with yet'
       : o.counts.changed_px.toLocaleString() + ' pixels differ from #' + o.ref_id + ' by more than ' + S.cfg.change_thr]
   ].map(m => '<figure><img src="' + o.maps[m[0]] + '" alt="' + esc(m[1]) + '"><figcaption><b>' + esc(m[1]) + '</b>' +
@@ -399,7 +428,7 @@ async function boot() {
     conditions(S.cfg);
     queue(Object.assign({ queue: [], depth: 0, evicted_total: 0 }, S.cfg), -1);
   } catch (e) {
-    $('conditions').innerHTML = '<span class="tag x">the scoring server is not answering</span> — start it with '
+    $('conditions').innerHTML = '<span class="tag x">the scoring server is not answering</span>, start it with '
       + '<b>uv run python camera/demo.py</b>';
     return;
   }
@@ -408,6 +437,22 @@ async function boot() {
 
 $('shoot').addEventListener('click', shoot);
 $('sample').addEventListener('click', sample);
+$('upload').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';                      // so choosing the same file twice fires again
+  if (f) await scoreFile(f);
+});
+for (const t of ['dragenter', 'dragover']) {
+  $('stage').addEventListener(t, e => { e.preventDefault(); $('stage').classList.add('drop'); });
+}
+for (const t of ['dragleave', 'drop']) {
+  $('stage').addEventListener(t, e => { e.preventDefault(); $('stage').classList.remove('drop'); });
+}
+$('stage').addEventListener('drop', async e => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) await scoreFile(f);
+});
 $('reset').addEventListener('click', async () => {
   const c = await (await fetch('/api/reset', { method: 'POST' })).json();
   S.cfg = c;
