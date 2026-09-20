@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from dataclasses import fields
+from pathlib import Path
 from typing import Any
 
 from orbit import config, log
@@ -68,7 +69,41 @@ def cmd_sim(a: argparse.Namespace) -> int:
             argv += [f"--{k.replace('_', '-')}", str(v)]
     for item in a.set or []:
         os.environ[config.ENV_PREFIX + item.partition("=")[0].upper()] = item.partition("=")[2]
-    return main(argv)
+    if a.display and a.no_runs:
+        print("sim: --display needs the run file that --no-runs suppresses", file=sys.stderr)
+        return 2
+    rc = main(argv)
+    if rc or not a.display:
+        return rc
+    return _replay_on_display(_settings(a), a.run_id or f"sim-{a.scenario}-{a.seed}", a.display_port, a.speed)
+
+
+def _replay_on_display(s: Settings, run_id: str, port: int, speed: float) -> int:
+    """Serve the dashboard and play one finished run into it.
+
+    The simulation is over by the time this is called, so nothing here can affect the digest --
+    the run file on disk is the whole input. That is the point: the seeded table and the moving
+    page are the same events, so what a judge watches is exactly what `--digest` attests to.
+    """
+    run = Path(s.runs_dir) / f"{run_id}.jsonl"
+    if not run.exists():
+        print(f"sim: no run file at {run}", file=sys.stderr)
+        return 2
+    base = [sys.executable, "-m", "orbit.cli"]
+    procs: list[subprocess.Popen[bytes]] = []
+    try:
+        procs.append(subprocess.Popen([*base, "display", "--port", str(port)]))
+        time.sleep(0.5)
+        replay = [sys.executable, "-m", "viz.replay", str(run), "--speed", str(speed), "--loop"]
+        procs.append(subprocess.Popen(replay))
+        print(f"sim: {run} on http://127.0.0.1:{port} at {speed}x, looping. Ctrl-C to stop.", file=sys.stderr)
+        while all(p.poll() is None for p in procs):
+            time.sleep(0.5)
+        return 1
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        _stop_all(procs)
 
 
 def cmd_ground(a: argparse.Namespace) -> int:
@@ -170,6 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--digest", action="store_true")
     p.add_argument("--run-id", default=None, help="name of runs/<run_id>.jsonl (default: sim-<scenario>-<seed>)")
     p.add_argument("--no-runs", action="store_true", help="do not write runs/<run_id>.jsonl")
+    p.add_argument("--display", action="store_true", help="then show the run it just wrote on the dashboard")
+    p.add_argument("--display-port", type=int, default=8765)
+    p.add_argument("--speed", type=float, default=1.0, help="with --display: replay pace, 1.0 = as it happened")
     p.set_defaults(fn=cmd_sim)
 
     p = sub.add_parser("ground", help="live arbiter on the multicast bus")
