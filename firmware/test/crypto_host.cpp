@@ -3,7 +3,8 @@
 // builds, compiled with no Arduino present, so tests/test_crypto_parity.py can hold it against
 // orbit/protocol/auth.py byte for byte.
 //
-//   g++ -O2 -std=c++17 -Wall -Wextra -Werror -I../satellite_esp32 crypto_host.cpp -o crypto_host
+//   gcc -O2 -std=c99 -w -c ../satellite_esp32/tweetnacl.c -o tweetnacl.o
+//   g++ -O2 -std=c++17 -Wall -Wextra -Werror -I../satellite_esp32 crypto_host.cpp tweetnacl.o -o crypto_host
 //   ./crypto_host selftest                 # SHA-256/HMAC vectors + canonical + sign/verify
 //   ./crypto_host canon                    # stdin: <datagram hex> per line -> <canonical hex> | ERR
 //   ./crypto_host hmac <key hex>           # stdin: <message hex> per line  -> 64 hex (full HMAC)

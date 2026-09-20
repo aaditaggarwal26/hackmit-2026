@@ -87,9 +87,33 @@ orbit/ground/              live station, telemetry, display event stream   docs/
 orbit/bench/               energy/efficiency benchmark
 orbit/golden/              the scoring kernel (integers, bit-exact) and queue
 corpus/                    194 NASA GIBS MODIS frames, offline
-viz/                       the monitoring page + replay
-tests/                     184 tests: uv run pytest
+firmware/                  the ESP32-S3 sketch and its host-compiled harnesses  firmware/README.md
+viz/                       the monitoring page the ground serves, + replay
+display/                   the standalone sheet, fed from a run file           docs/event_stream.md
+runs/                      two recorded runs, kept for the display to open with nothing else running
+tests/                     353 tests: uv run pytest
 ```
 
+## The display
+
+Two ways to look at a run, both reading the same event stream
+(`docs/event_stream.md`):
+
+```sh
+uv run orbit demo --scenario nominal --display   # live: the ground serves viz/ on :8765
+python3 -m viz.replay runs/<run_id>.jsonl        # the same page, from a recorded run
+
+python3 tools/replay.py runs/sample.jsonl        # display/live.html on :8000, stdlib only
+python3 tools/check_run.py runs/sample.jsonl     # hold any run file against the contract
+```
+
+`tools/replay.py` needs nothing installed — no uv, no venv, no network — so the
+sheet still opens on a borrowed laptop. `--speed 20` to skim, `--loop` to leave it
+running. Every run the ground writes lands in `runs/<run_id>.jsonl` and any of them
+can be replayed; `runs/sample.jsonl` and `runs/demo-*.jsonl` are kept in the
+repository so there is always something to open.
+
 `uv run pytest`, `uv run mypy`, `uv run ruff check` and `uv run ruff format --check` are all expected clean; tests run with warnings as errors.
+The two `tests/test_bench.py` failures and the four `orbit/bench/runner.py` mypy errors
+need the GX10's Linux scheduler calls and do not reproduce off that box.
 See `ARCHITECTURE.md` for the design and the reasons behind it.
