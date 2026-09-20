@@ -37,6 +37,12 @@ packages = ["orbit", "viz", "tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    "error",
+    # third-party deprecations inside starlette's test client, not ours
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
 
 [tool.mypy]
 python_version = "3.13"

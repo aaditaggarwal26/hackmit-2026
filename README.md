@@ -90,5 +90,5 @@ viz/                       the monitoring page + replay
 tests/                     184 tests: uv run pytest
 ```
 
-`uv run pytest`, `uv run mypy`, `uv run ruff check` are all expected clean.
+`uv run pytest`, `uv run mypy`, `uv run ruff check` and `uv run ruff format --check` are all expected clean; tests run with warnings as errors.
 See `ARCHITECTURE.md` for the design and the reasons behind it.
