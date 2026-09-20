@@ -26,6 +26,7 @@
 #include "orbit_score.h"
 #include "orbit_queue.h"
 #include "orbit_sat.h"
+#include "orbit_codec.h"
 #include "orbit_fsimage.h"
 
 // Identity comes in as a bare token (-DSAT_ID=c) and is stringified here, so the build
@@ -289,8 +290,8 @@ static void sendBid(int32_t round_id) {
 }
 
 static void sendTxChunk(uint16_t idx) {
-  const uint8_t *data = fbuf.read(tx_item);
-  if (!data) return;
+  const uint8_t *data = orbit_tx_data();
+  if (tx_total == 0) return;
   const uint32_t off = (uint32_t)idx * CHUNK_BYTES;
   const size_t   len = (off + CHUNK_BYTES <= tx_total) ? CHUNK_BYTES : (tx_total - off);
   unsigned char  b64[CHUNK_BYTES * 4 / 3 + 8];
@@ -305,6 +306,7 @@ static void sendTxChunk(uint16_t idx) {
   d["item_id"] = tx_item;
   d["idx"] = idx;
   d["n"] = tx_chunks;
+  d["enc"] = orbit_tx_enc();         // "zlib" or "raw": how the ground must decode this payload
   d["data"] = (const char *)b64;     // already base64; ArduinoJson will not re-encode
   sendDoc(d, 1);                     // one copy: TX_PASSES supplies the redundancy
 
@@ -476,8 +478,9 @@ static void onGrant(JsonDocument &d) {
   tx_round = d["round_id"] | -1;
   tx_item = item_id;
   tx_pace_bps = d["pace_bps"] | 65536.0f;
-  tx_total = FRAME_BYTES;
-  tx_chunks = (uint16_t)((tx_total + CHUNK_BYTES - 1) / CHUNK_BYTES);
+  tx_total = orbit_tx_prepare(fbuf.read(item_id), FRAME_BYTES);   // compressed payload, or the raw frame
+  if (tx_total == 0) { tx_active = false; Serial.println("[grant] nothing to send"); return; }
+  tx_chunks = orbit_chunk_count(tx_total, CHUNK_BYTES);
   tx_next_idx = 0;
   tx_next_at_ms = millis();
   tx_done_sent = false;
@@ -487,10 +490,13 @@ static void onGrant(JsonDocument &d) {
   fillEnvelope(o, "tx_begin");
   o["round_id"] = tx_round;
   o["item_id"] = tx_item;
-  o["total_bytes"] = tx_total;
+  o["total_bytes"] = FRAME_BYTES;    // RAW: the frame the ground must end up holding
   o["chunks"] = tx_chunks;
+  o["enc"] = orbit_tx_enc();
+  o["enc_bytes"] = tx_total;         // what the chunks actually carry
   sendDoc(o);
-  Serial.printf("[grant] item=%u %u chunks @ %.0f bps\n", tx_item, tx_chunks, tx_pace_bps);
+  Serial.printf("[grant] item=%u %u chunks %s %u B @ %.0f bps\n", tx_item, tx_chunks,
+                orbit_tx_enc(), (unsigned)tx_total, tx_pace_bps);
 }
 
 static void onRevoke(JsonDocument &d) {
@@ -636,13 +642,13 @@ static void pumpTx() {
     // the pool slot, hex-formatted by orbit_hex64 (orbit_sat.h, tested on the host).
     uint8_t digest[32];
     char    sha_hex[65];
-    mbedtls_sha256(data, tx_total, digest, 0);
+    mbedtls_sha256(data, FRAME_BYTES, digest, 0);   // the RAW frame, never the compressed payload
     orbit_hex64(digest, sha_hex);
     JsonDocument d;
     fillEnvelope(d, "tx_done");
     d["round_id"] = tx_round;
     d["item_id"] = tx_item;
-    d["total_bytes"] = tx_total;
+    d["total_bytes"] = FRAME_BYTES;
     d["score"] = score_display(it->raw_score);
     // Repeated from `scored` on purpose: the ground can still judge the frame usable when the
     // earlier scored datagram was one of the ones multicast lost.
@@ -661,7 +667,8 @@ static void pumpTx() {
     await_since_ms = millis();
     await_round = tx_round;
     tx_active = false;
-    Serial.printf("[tx  ] item=%u done, %u bytes\n", tx_item, tx_total);
+    Serial.printf("[tx  ] item=%u done, %u B %s (%u raw)\n", tx_item, (unsigned)tx_total,
+                  orbit_tx_enc(), (unsigned)FRAME_BYTES);
   }
 }
 

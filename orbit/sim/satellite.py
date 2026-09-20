@@ -38,6 +38,7 @@ from orbit.golden.queue import NO_FRAME, PriorityQueue
 from orbit.golden.score import Config as ScoreConfig
 from orbit.golden.score import display, score_frame
 from orbit.log import log
+from orbit.protocol import codec
 from orbit.protocol import messages as M
 
 lg = logging.getLogger("orbit.sat")
@@ -125,7 +126,9 @@ class Transmission:
     round_id: int
     item_id: int
     pace_bps: float
-    chunks: list[bytes]
+    chunks: list[bytes]  # slices of the ENCODED payload: what is paced and what goes on the wire
+    raw_bytes: int = 0  # the frame these chunks decode back to; `sha256` is over exactly this many
+    enc: str = codec.ENC_RAW
     sha256: str = ""
     next_idx: int = 0
     next_at: float = 0.0
@@ -357,18 +360,31 @@ class FakeSatellite:
         if self.p.never_transmit:
             return []  # the fault we model: granted, silent
         data = bytes(self.buffer.read(g.item_id))
-        n = self.s.chunk_bytes
-        chunks = [data[i : i + n] for i in range(0, len(data), n)]
+        # Compress the frame, then chunk the COMPRESSED blob: the chunk arithmetic, the pacing
+        # and the airtime are all over the encoded length now. The digest stays over `data`.
+        enc, payload = codec.compress(data)
+        chunks = codec.split(payload, self.s.chunk_bytes)
         self.tx = Transmission(
             round_id=g.round_id,
             item_id=g.item_id,
             pace_bps=g.pace_bps,
             chunks=chunks,
+            raw_bytes=len(data),
+            enc=enc,
             sha256=hashlib.sha256(data).hexdigest(),
             next_at=now,
         )
         return [
-            self._mk(M.TxBegin, now, round_id=g.round_id, item_id=g.item_id, total_bytes=len(data), chunks=len(chunks))
+            self._mk(
+                M.TxBegin,
+                now,
+                round_id=g.round_id,
+                item_id=g.item_id,
+                total_bytes=len(data),  # RAW: unchanged meaning, whatever the chunks carry
+                chunks=len(chunks),
+                enc=enc,
+                enc_bytes=len(payload),
+            )
         ]
 
     def _pump_tx(self, now: float) -> list[M.Message]:
@@ -390,6 +406,7 @@ class FakeSatellite:
                     idx=idx,
                     n=len(tx.chunks),
                     data=tx.chunks[idx],
+                    enc=tx.enc,
                 )
             )
         if tx.next_idx >= len(tx.chunks) and not tx.done_sent:
@@ -401,7 +418,7 @@ class FakeSatellite:
                     now,
                     round_id=tx.round_id,
                     item_id=tx.item_id,
-                    total_bytes=sum(map(len, tx.chunks)),
+                    total_bytes=tx.raw_bytes,  # the RAW frame `sha256` is taken over, not the encoded blob
                     score=item.score(self.p.score_bias),
                     cloud_frac=item.cloud_frac,
                     sha256=tx.sha256,

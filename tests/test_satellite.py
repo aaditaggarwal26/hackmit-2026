@@ -4,6 +4,7 @@ window, transmit on grant, pop only on a positive ack."""
 import pytest
 
 from orbit import config, corpus
+from orbit.protocol import codec
 from orbit.protocol import messages as M
 from orbit.sim.satellite import FakeSatellite, FrameBuffer, SatelliteProfile
 
@@ -81,10 +82,16 @@ def test_grant_transmit_ack_pops_only_on_ok(corp):
     [begin] = s.on_message(
         M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.1
     )
-    assert isinstance(begin, M.TxBegin) and begin.chunks == 4 and begin.total_bytes == config.FRAME_BYTES
+    # total_bytes is the RAW frame; the chunks carry the compressed blob and are counted over it
+    assert isinstance(begin, M.TxBegin) and begin.total_bytes == config.FRAME_BYTES
+    assert begin.enc == codec.ENC_ZLIB and begin.enc_bytes is not None
+    assert begin.chunks == codec.chunk_count(begin.enc_bytes, S.chunk_bytes)
     out = s.on_tick(1.2)
     chunks = [m for m in out if isinstance(m, M.TxChunk)]
-    assert len(chunks) == 4 and b"".join(c.data for c in chunks) == bytes(s.buffer.read(b.item_id))
+    assert len(chunks) == begin.chunks and all(c.enc == begin.enc for c in chunks)
+    payload = b"".join(c.data for c in chunks)
+    assert len(payload) == begin.enc_bytes
+    assert codec.decompress(begin.enc, payload, begin.total_bytes) == bytes(s.buffer.read(b.item_id))
     assert isinstance(out[-1], M.TxDone) and s.awaiting_ack == b.item_id
     import hashlib
 

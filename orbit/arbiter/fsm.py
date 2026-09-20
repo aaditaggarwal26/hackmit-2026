@@ -32,6 +32,7 @@ from orbit.arbiter.priority import Decision, decide
 from orbit.arbiter.window import ContactWindow
 from orbit.config import Settings
 from orbit.log import log
+from orbit.protocol import codec
 from orbit.protocol import messages as M
 
 lg = logging.getLogger("orbit.ground")
@@ -53,15 +54,28 @@ class GrantState:
     chunks_expected: int = 0
     chunks_seen: set[int] = field(default_factory=set)
     chunks: dict[int, bytes] = field(default_factory=dict)  # kept until tx_done so the digest can be checked
-    bytes_seen: int = 0
+    bytes_seen: int = 0  # ENCODED bytes that actually arrived: airtime, not frame size
+    enc: str | None = None  # the payload encoding this transfer declared; None = raw (codec.ENC_RAW)
     done_pending: M.TxDone | None = None  # tx_done arrived before the last chunk: wait a little for stragglers
     done_deadline: float = 0.0
 
-    def digest(self) -> str:
-        h = hashlib.sha256()
-        for i in sorted(self.chunks):
-            h.update(self.chunks[i])
-        return h.hexdigest()
+    def payload(self) -> bytes:
+        """The reassembled ENCODED blob, chunks in index order."""
+        return b"".join(self.chunks[i] for i in sorted(self.chunks))
+
+    def frame(self, raw_bytes: int) -> bytes:
+        """The raw frame the satellite scored, or ``CodecError``.
+
+        The digest in ``tx_done`` is over this, never over the compressed blob, so this is the
+        only place the two sides can be compared — and it is also the only place a frame that
+        decodes to the wrong bytes can be caught. It raises rather than returning something
+        plausible: a frame the ground cannot reconstruct exactly must fail the transfer, not
+        reach the scorer.
+        """
+        return codec.decompress(self.enc, self.payload(), raw_bytes)
+
+    def digest(self, raw_bytes: int) -> str:
+        return hashlib.sha256(self.frame(raw_bytes)).hexdigest()
 
 
 @dataclass
@@ -316,6 +330,7 @@ class GroundStation:
             return []
         g.began = True
         g.chunks_expected = msg.chunks
+        g.enc = msg.enc
         g.deadline = now + self.s.tx_timeout_ms / 1000.0
         self._emit(
             "tx_begin",
@@ -324,7 +339,9 @@ class GroundStation:
             sat=msg.sender,
             item_id=msg.item_id,
             chunks=msg.chunks,
-            bytes=msg.total_bytes,
+            bytes=msg.total_bytes,  # the RAW frame size, whatever the chunks are encoded as
+            enc=msg.enc or codec.ENC_RAW,
+            wire_bytes=msg.enc_bytes if msg.enc_bytes is not None else msg.total_bytes,
         )
         return []
 
@@ -332,11 +349,18 @@ class GroundStation:
         g = self._holder(msg, now)
         if g is None:
             return []
-        if not g.began:  # tx_begin was lost; every chunk says how many there are
+        if not g.began:  # tx_begin was lost; every chunk says how many there are, and how they are encoded
             g.began = True
             g.chunks_expected = msg.n
+            g.enc = msg.enc
             g.deadline = now + self.s.tx_timeout_ms / 1000.0
         if not 0 <= msg.idx < g.chunks_expected:
+            self.counters.unexpected += 1
+            return []
+        if (msg.enc or codec.ENC_RAW) != (g.enc or codec.ENC_RAW):
+            # One transfer, one encoding. A chunk that disagrees cannot be part of this blob,
+            # and mixing the two would produce bytes no digest could ever match. Absent and
+            # "raw" are the same encoding, so a sender that spells it either way is consistent.
             self.counters.unexpected += 1
             return []
         if msg.idx not in g.chunks_seen:
@@ -366,10 +390,24 @@ class GroundStation:
         g.done_pending = None
         complete = self._all_chunks(g)
         reason = f"received {len(g.chunks_seen)}/{g.chunks_expected} chunks"
-        if complete and g.digest() != msg.sha256:
-            complete = False  # every chunk arrived but the bytes are not the frame the satellite scored
-            reason = "digest mismatch"
-            self.counters.corrupt_tx += 1
+        if complete:
+            # Every chunk arrived. Decode the payload back to the frame and compare the digest
+            # the satellite took over the frame it scored. A blob that will not decode, decodes
+            # to the wrong length, or decodes to bytes with another digest fails the transfer
+            # here: it is exactly as bad as a lost chunk and must not be re-scored as a frame.
+            #
+            # The bound is OUR frame size, never the one in the datagram. tx_done is untrusted
+            # input like everything else on this bus, and a sender that declares a gigabyte is
+            # asking the ground to inflate one — a frame is 16384 bytes or it is not a frame.
+            try:
+                if msg.total_bytes != self.s.frame_bytes:
+                    raise codec.CodecError(f"declared {msg.total_bytes} bytes, frames are {self.s.frame_bytes}")
+                if g.digest(self.s.frame_bytes) != msg.sha256:
+                    raise codec.CodecError("digest mismatch")
+            except codec.CodecError as e:
+                complete = False
+                reason = str(e)
+                self.counters.corrupt_tx += 1
         if not complete:
             rec.failed_tx += 1
             self.counters.failed_tx += 1
@@ -402,7 +440,9 @@ class GroundStation:
             item_id=g.item_id,
             score=msg.score,
             cloud_frac=msg.cloud_frac,
-            bytes=g.bytes_seen,
+            bytes=msg.total_bytes,  # the frame that was delivered, which is what the window debits
+            wire_bytes=g.bytes_seen,  # what it cost in airtime: the encoded chunks that arrived
+            enc=g.enc or codec.ENC_RAW,
             granted_at=g.granted_at,
             sha256=msg.sha256,
             window=self.window.snapshot(),

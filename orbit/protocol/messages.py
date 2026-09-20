@@ -238,21 +238,43 @@ class Revoke(Message):
 
 @dataclass(frozen=True)
 class TxBegin(Message):
+    """Satellite → all. ``chunks`` chunks of the ENCODED payload are about to follow.
+
+    ``total_bytes`` is and stays the RAW frame size: what the ground must end up holding, and
+    what the ``tx_done`` digest is taken over. ``enc``/``enc_bytes`` describe the blob the
+    chunks actually carry (see ``orbit/protocol/codec.py``). Both are optional so that a
+    satellite which does not compress — an older build, or one that could not allocate the
+    encoder's workspace — is not a malformed sender: an absent ``enc`` means ``"raw"``, and an
+    absent ``enc_bytes`` means the payload is the frame itself.
+    """
+
     TYPE = MessageType.TX_BEGIN
     round_id: int
     item_id: int
-    total_bytes: int
-    chunks: int
+    total_bytes: int  # RAW frame bytes, before compression
+    chunks: int  # chunks of the ENCODED payload
+    enc: str | None = None  # None/absent = "raw"; "zlib" = an RFC 1950 stream over the frame
+    enc_bytes: int | None = None  # encoded payload size; absent = the same as total_bytes
 
 
 @dataclass(frozen=True)
 class TxChunk(Message):
+    """Satellite → all. One slice of the encoded payload, base64 inside the JSON.
+
+    ``enc`` is repeated here rather than left to ``tx_begin`` alone for the same reason ``n``
+    is: ``tx_begin`` is a single datagram on a lossy multicast bus, and the ground already
+    reconstructs the chunk count from the chunks when it is lost. Without ``enc`` on the chunk
+    that recovery path would hand compressed bytes to the scorer as though they were a frame —
+    a caught, loud failure, but a whole frame of airtime thrown away to save 14 bytes a chunk.
+    """
+
     TYPE = MessageType.TX_CHUNK
     round_id: int
     item_id: int
     idx: int
     n: int
     data: bytes  # base64 on the wire
+    enc: str | None = None  # None/absent = "raw"; must agree with tx_begin
 
 
 @dataclass(frozen=True)
@@ -260,10 +282,10 @@ class TxDone(Message):
     TYPE = MessageType.TX_DONE
     round_id: int
     item_id: int
-    total_bytes: int
+    total_bytes: int  # RAW frame bytes: the digest below is over exactly this many
     score: float
     cloud_frac: float  # repeated here so "usable" can be judged even if the earlier `scored` was lost
-    sha256: str  # hex digest of the frame bytes; the ground reassembles the chunks and must match it
+    sha256: str  # hex digest of the RAW frame; the ground reassembles, decodes, and must match it
 
 
 @dataclass(frozen=True)
