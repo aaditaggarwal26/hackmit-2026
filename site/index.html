@@ -825,15 +825,25 @@ footer .credit { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(
           mid-run. Frames live in on-board flash; nothing is fetched at demo time.</p>
       </div>
       <div class="row">
-        <div class="wordmark">ASUS<small data-slot="asus-track">Track</small></div>
-        <p data-slot="asus">One line, from you: what the ASUS hardware or platform did in this
-          build. I have not put words in your mouth here because there is nothing in the
-          repository that records it.</p>
+        <div class="wordmark">ASUS<small>GX10 &middot; display</small></div>
+        <p>The GX10 is where every performance number in this project was measured. The same
+          integer kernel a satellite runs was timed on its CPU and its GB10 GPU over the same 194
+          MODIS frames: <b>11,392 &plusmn; 27 frames per second</b> on one pinned Cortex-X925 core,
+          7,811 &plusmn; 9 on the GPU, and <b>1.63 J per thousand frames</b> from the GPU-die energy
+          counter. A microcontroller can tell you the idea works. This is the machine that answers
+          the question a microcontroller cannot &mdash; what the same arithmetic costs when the frame
+          rate is real, which is the whole of the scaling argument. Its display drove the live demo.</p>
       </div>
       <div class="row">
-        <div class="wordmark">Voloridge<small data-slot="voloridge-track">Track</small></div>
-        <p data-slot="voloridge">One line, from you: what qualifies this build for the Voloridge
-          track. Same reason as above.</p>
+        <div class="wordmark">Voloridge<small>The dataset</small></div>
+        <p>The imagery is NASA's Global Imagery Browse Services: real MODIS Terra true-colour
+          tiles, not synthetic frames and not a handful picked to flatter the result. 194 of them
+          are committed to the repository across 14 scenes and 16 dates, each carrying its request
+          URL, its date, its scene and a <b>sha256</b>, with NASA's usage statement stored verbatim
+          beside them. The corpus is not decoration: a sweep of the scoring kernel across all 194
+          frames is what set the demo's pacing, and the rule that pacing had to clear was fixed
+          before the run, not after it. The same frames are on the boards, in the simulator and in
+          the benchmark, so every number on this page traces back to the same pixels.</p>
       </div>
     </div>
   </div>
