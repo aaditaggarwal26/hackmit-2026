@@ -8,6 +8,8 @@ __pycache__/
 !viz/static/**/*.png
 .coverage
 !corpus/png/*.png
+# the project page ships its frames next to it, so it needs no build step
+!site/frames/*.png
 results/raw/
 runs/*
 !runs/sample.jsonl
