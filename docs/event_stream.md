@@ -187,9 +187,18 @@ never appears here twice and `run_end` counts distinct frames.
   "bytes": 16384,
   "duration_s": 1.45,
   "cloud_frac": 0.11,
-  "usable": true
+  "usable": true,
+  "image_id": 118
 }
 ```
+
+`image_id` names this photograph in the shared image set (`corpus/png/<image_id>.png`),
+which is what the display renders. It is **not** `frame_id`: `frame_id` is the satellite's
+own item counter, so every node has a frame 1 and they are three different photographs.
+The ground reassembles the frame and already checks its sha256 against `tx_done`, so it
+recognises the bytes and names them. A frame whose bytes are not in the image set (a real
+camera, a corrupted reassembly) carries no `image_id` at all, and the display shows no
+thumbnail rather than the wrong one. Never assume the field is present.
 
 `usable` comes from the `usable_rule` in `run_start` and is computed from cloud
 fraction alone (`tx_done.cloud_frac`, falling back to the frame's `scored`
@@ -346,8 +355,10 @@ the baseline downlinked nothing usable.
 
 1. `seq` never skips. If the ground drops an event, it still burns the number.
 2. Thumbnails are not in the stream. The display keeps a local copy of the image
-   set and looks up `frame_id`. It renders a thumbnail only after a
-   `frame_arrived` for that id.
+   set and looks it up by `image_id`, which `frame_arrived` carries whenever the
+   ground could name the bytes it received (and `baseline_arrival` carries for a
+   frame that came down at some point in this run). It renders a thumbnail only
+   after a `frame_arrived` for that frame.
 3. Every run writes `runs/<run_id>.jsonl`. The stats screen reads a recorded
    file, never live memory, so the numbers survive a demo hiccup.
 4. Adding a field is fine. Renaming or removing one breaks the display, so say

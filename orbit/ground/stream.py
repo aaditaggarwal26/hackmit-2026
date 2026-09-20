@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import time
@@ -58,6 +59,35 @@ BUS_ALERT_PER_MIN = {  # a rate above this alerts; one drop never does
     "dup": 60.0,  # multicast over WiFi duplicates constantly; only a flood is worth saying
     "oversize": 1.0,  # a message too big for one datagram is a bug, not weather
 }
+
+
+_IMAGE_BY_SHA: dict[str, int] | None = None
+
+
+def image_index() -> dict[str, int]:
+    """sha256 of a raw frame -> its id in the shared corpus, built once on first use.
+
+    ``item_id`` is a satellite's own counter: every node has an item 1, and they are three
+    different photographs. The display keeps its own copy of the image set and can only look
+    a photo up by corpus id, so something has to name it. The ground already reassembles the
+    frame and checks its sha256 against ``tx_done``, so it can simply recognise the bytes --
+    no field on the wire, no firmware change, and a frame that is not from the corpus (a real
+    camera, a corrupted reassembly) is simply not named rather than named wrongly.
+
+    Costs one pass over the corpus at startup. Missing corpus is not fatal: the stream just
+    carries no ``image_id`` and the display shows no thumbnail, which it already tolerates.
+    """
+    global _IMAGE_BY_SHA
+    if _IMAGE_BY_SHA is None:
+        try:
+            from orbit import corpus
+
+            c = corpus.load()
+            _IMAGE_BY_SHA = {hashlib.sha256(bytes(c.by_id(int(i)))).hexdigest(): int(i) for i in c.ids}
+        except Exception as e:  # no corpus on this machine: name nothing, say so once
+            log(lg, logging.WARNING, "image_index_unavailable", error=str(e))
+            _IMAGE_BY_SHA = {}
+    return _IMAGE_BY_SHA
 
 
 def new_run_id() -> str:
@@ -157,6 +187,7 @@ class EventStream:
         for i, name in enumerate(settings.sat_names()):
             self.nodes[name] = NodeView(node_id=i, label=name, real=settings.nodes_real)
         self.frames: dict[tuple[int, int], FrameMeta] = {}
+        self.images: dict[tuple[int, int], int] = {}  # (node_id, item_id) -> corpus id, once its bytes arrived
         self.baseline = FifoBaseline(frame_bytes=settings.frame_bytes)
         self.baseline_budget_used = 0
         self.orbit_frames_down = 0
@@ -516,6 +547,7 @@ class EventStream:
             cloud_frac=cloud,
             usable=usable,
             sha256=p.get("sha256"),
+            **self._image_of(v.node_id, fid, p.get("sha256")),
         )
         # the baseline gets the same slot: one frame of budget, FIFO, round-robin, no scoring
         w = dict(p["window"])
@@ -535,8 +567,23 @@ class EventStream:
                 bytes=self.s.frame_bytes,
                 cloud_frac=b.cloud_frac,
                 usable=b_usable,
+                **self._image_of(b.node_id, b.frame_id, None),
             )
         self._window_update(w, now)
+
+    def _image_of(self, node_id: int, item_id: int, sha: Any) -> dict[str, int]:
+        """``{"image_id": n}`` when this photo can be named in the shared image set, else ``{}``.
+
+        An absent field means "not known", which is what the display needs to hear; a wrong id
+        would put someone else's photograph on the screen.
+        """
+        key = (node_id, item_id)
+        if isinstance(sha, str):
+            found = image_index().get(sha)
+            if found is not None:
+                self.images[key] = found
+        known = self.images.get(key)
+        return {} if known is None else {"image_id": known}
 
     def _on_flags(self, host: str, f: dict[str, Any], now: float) -> None:
         v = self._node(host, now)
