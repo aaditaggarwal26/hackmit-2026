@@ -662,6 +662,7 @@ function apply(ev, live) {
     case 'run_end': { S.runEnd = ev; S.bus = null; const h = ev.headline || {};
       R.stale = true; for (const ms of [600, 1800, 3500, 6000]) setTimeout(loadResults, ms);   // the file should hold it within moments
       sysLog(t, 'info', `run ended: ${h.orbit ?? '?'} usable photos vs ${h.baseline ?? '?'} baseline (${h.gain ?? '?'}×)`); break; }
+    case 'ground_status': case 'bus_health': break;   // in the contract, not drawn on this page
     default: S.unknown.set(String(type), (S.unknown.get(String(type)) || 0) + 1);
   }
   dirty = true;
@@ -914,7 +915,8 @@ function renderSats(now) {
       const parts = ls.parts && typeof ls.parts === 'object' ? ls.parts : {};
       [['clear', 'w_clear'], ['sharp', 'w_sharp'], ['change', 'w_change']].forEach(([k, wk]) => {
         const m = q(`.m[data-k="${k}"]`), v = num(parts[k]);
-        const max = num(weights[wk]) || (scale() / 3);            // each part can contribute at most its weight
+        const w = num(weights[wk]);                               // a weight only bounds a part when it is
+        const max = (w && w <= scale()) ? w : scale();            // on the same scale as the scores themselves
         m.querySelector('.track i').style.transform = `scaleX(${v == null ? 0 : frac(v, max)})`;
         setText(m.querySelector('.v'), v == null ? DASH : (showRaw ? String(v) : (v / scale() * 100).toFixed(1)));
       });

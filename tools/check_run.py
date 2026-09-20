@@ -50,6 +50,8 @@ TYPES = (
     "window_update",
     "node_event",
     "run_end",
+    "ground_status",
+    "bus_health",
 )
 REASONS = ("highest_score", "starvation_forced", "only_ready")
 LEVELS = ("info", "warn", "error")
@@ -73,7 +75,7 @@ SCHEMA = {
         "node_id": Int,
         "queue_depth": Int,
         "top_frame_id": Int + NULLABLE,
-        "top_score": Int,
+        "top_score": Num,
         "top_age_s": Num,
         "frames_scored": Int,
         "frames_evicted": Int,
@@ -85,7 +87,7 @@ SCHEMA = {
     "frame_scored": {
         "node_id": Int,
         "frame_id": Int,
-        "score": Int,
+        "score": Num,
         "parts": Dict,
         "cloud_frac": Num,
         "queued": Bool,
@@ -97,7 +99,7 @@ SCHEMA = {
         "slot_id": Int,
         "node_id": Int,
         "frame_id": Int,
-        "score": Int,
+        "score": Num,
         "bytes": Int,
         "duration_s": Num,
         "cloud_frac": Num,
@@ -106,7 +108,7 @@ SCHEMA = {
     "baseline_arrival": {
         "node_id": Int,
         "frame_id": Int,
-        "score": Int,
+        "score": Num,
         "bytes": Int,
         "cloud_frac": Num,
         "usable": Bool,
@@ -118,8 +120,25 @@ SCHEMA = {
         "time_remaining_s": Num,
         "open": Bool,
     },
-    "node_event": {"node_id": Int, "level": Str, "message": Str},
+    "node_event": {"node_id": Int + NULLABLE, "level": Str, "message": Str},
     "run_end": {"orbit": Dict, "baseline": Dict, "headline": Dict},
+    "ground_status": {
+        "uptime_s": Num,
+        "state": Str,
+        "rounds": Int,
+        "period_s": Num,
+        "nodes": Dict,
+        "window": Dict,
+    },
+    "bus_health": {
+        "window_s": Num,
+        "measured_s": Num,
+        "received": Int,
+        "delivered": Int,
+        "dropped": Dict,
+        "rates_per_min": Dict,
+        "alerts": List,
+    },
 }
 TOTALS = ("frames_down", "usable_down", "bytes_used", "frames_left_queued")
 
@@ -218,8 +237,12 @@ class Checker:
     def N(self, seq: int | None, msg: str) -> None:
         self.r.notes.append((seq, msg))
 
+    GROUND = NodeState("the ground")
+
     def node(self, seq: int | None, ev: Event, key: str = "node_id") -> NodeState:
         nid = ev.get(key)
+        if nid is None:  # the ground's own event, not any satellite's
+            return self.GROUND
         if nid in self.nodes:
             return self.nodes[nid]
         if self.run is not None:
@@ -312,7 +335,11 @@ class Checker:
                 self.E(seq, f"{typ}: field {field!r} should be {spec.rstrip('?')}, got {ev[field]!r}")
                 shape_ok = False
         if shape_ok:
-            getattr(self, "on_" + typ)(seq, t, ev)
+            # ground_status and bus_health are shape-checked and counted; nothing in the stream
+            # cross-references them, so there is no per-event handler to run
+            handler = getattr(self, "on_" + typ, None)
+            if handler is not None:
+                handler(seq, t, ev)
         if t is not None:
             self.last_t = t
 
@@ -413,7 +440,7 @@ class Checker:
             if (
                 not isinstance(e, dict)
                 or not is_type(e.get("frame_id"), Int)
-                or not is_type(e.get("score"), Int)
+                or not is_type(e.get("score"), Num)
                 or not is_type(e.get("age_s"), Num)
             ):
                 self.E(seq, f"queue_window {st.label}: bad entry {e!r}")
@@ -441,9 +468,7 @@ class Checker:
         fid, score = ev["frame_id"], ev["score"]
         if fid in st.scored:
             self.E(seq, f"frame_scored {st.label}: frame {fid} scored twice")
-        owner = self.frame_owner.setdefault(fid, ev["node_id"])
-        if owner != ev["node_id"]:
-            self.W(seq, f"frame_scored: frame {fid} scored by {st.label} and by node {owner} (frame ids not unique)")
+        self.frame_owner[(ev["node_id"], fid)] = ev["node_id"]
         if not 0.0 <= ev["cloud_frac"] <= 1.0:
             self.E(seq, f"frame_scored {st.label}: cloud_frac {ev['cloud_frac']} outside 0..1")
         for p in ("clear", "sharp", "change"):
@@ -512,7 +537,7 @@ class Checker:
             if (
                 not isinstance(b, dict)
                 or not is_type(b.get("node_id"), Int)
-                or not is_type(b.get("top_score"), Int)
+                or not is_type(b.get("top_score"), Num)
                 or not is_type(b.get("ready"), Bool)
             ):
                 self.E(seq, f"grant: bad bid {b!r}")
@@ -638,18 +663,17 @@ class Checker:
     def on_baseline_arrival(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         fid = ev["frame_id"]
-        owner = self.frame_owner.get(fid)
+        key = (ev["node_id"], fid)
+        owner = self.frame_owner.get(key)
         if owner is None:
-            self.E(seq, f"baseline_arrival: frame {fid} was never frame_scored")
-        elif owner != ev["node_id"]:
-            self.W(seq, f"baseline_arrival: frame {fid} attributed to node {ev['node_id']} but scored by node {owner}")
+            self.E(seq, f"baseline_arrival: {st.label} frame {fid} was never frame_scored by that node")
         else:
             rec = self.nodes[owner].scored[fid]
             if ev["score"] != rec["score"]:
                 self.E(seq, f"baseline_arrival: frame {fid} score {ev['score']} != scored {rec['score']}")
-        if fid in self.base_sent:
-            self.E(seq, f"baseline_arrival: frame {fid} delivered twice")
-        self.base_sent.add(fid)
+        if key in self.base_sent:
+            self.E(seq, f"baseline_arrival: {st.label} frame {fid} delivered twice")
+        self.base_sent.add(key)
         self.check_usable(seq, "baseline_arrival", st, ev)
         self.base_n += 1
         self.base_usable += bool(ev["usable"])
