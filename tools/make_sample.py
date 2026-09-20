@@ -1,10 +1,22 @@
 #!/usr/bin/env python3
-"""Generate runs/sample.jsonl: a realistic 120 s run to develop the display against.
+r"""Generate a SYNTHETIC run file: no hardware, no ground station, no radio was involved.
+
+Every event it writes is invented by the code below. Nothing here ever touched an
+ESP32, a radio or a serial port, so every node it emits carries real=false and the
+transport the ground uses for simulated satellites. Do not re-introduce a hardware
+claim: display/live.html renders a green "real board" chip straight off that flag,
+and PRODUCT.md requires the display to say which satellites are real at all times.
 
     uv run python tools/make_sample.py                         # writes runs/sample.jsonl
     uv run python tools/make_sample.py --seed 4 -o runs/x.jsonl
 
-Fixture generator, NOT the ground station: it fakes the stream in docs/events.md
+The two committed fixtures are regenerated with exactly these two commands:
+
+    uv run python tools/make_sample.py
+    uv run python tools/make_sample.py --seed 39 --run-id demo-2026-09-19T21-00-00 \
+        -o runs/demo-2026-09-19T21-00-00.jsonl
+
+Fixture generator, NOT the ground station: it fakes the stream in docs/event_stream.md
 by walking three imaginary satellites and one imaginary arbiter through a contact
 window, then checks its own output with tools/check_run.py before writing.
 Needs numpy (the repo's env, `uv sync`) because the frames are real: corpus ids,
@@ -12,14 +24,18 @@ scored with the golden model against their scene references, so the thumbnails
 the display looks up (corpus/png/<id>.png) match the scores in the stream.
 
 What the default run (seed 8) contains
-  - 3 nodes. SAT-2 flies clear scenes and holds the best frames; SAT-3 flies
-    cloudy ones and rarely wins; SAT-1 is in between
+  - 3 nodes, named after the simulator's satellites. sat-b flies clear scenes and
+    holds the best frames; sat-c flies cloudy ones and rarely wins; sat-a is in
+    between
   - ~40 frame_scored, exactly 16 frame_arrived (the byte budget is 16 frames)
-  - SAT-2 wins three slots in a row, so the guard forces one starvation_forced grant
-  - SAT-3 drops off the link for ~13 s, is timed out (warn, then error, then a
+  - one grant with reason starvation_forced, so the display has one to draw. The
+    fixture triggers it off three wins in a row; the real ground emits that reason
+    whenever the aging terms rather than the raw score decided the slot
+    (orbit/ground/stream.py). Same reason code, reached a simpler way.
+  - sat-c drops off the link for ~13 s, is timed out (warn, then error, then a
     node_status with link_ok=false), stays silent, and returns with the
     frame_scored reports it buffered while disconnected
-  - a CRC warning on SAT-1, boot infos, link restored info
+  - a CRC warning on sat-a, boot infos, link restored info
   - queue_limit 8 (the contract example says 32) so eviction and rejection happen
 """
 
@@ -56,12 +72,16 @@ ARB_TICK_S = 0.25
 LINK_TIMEOUT_S = 3.0
 PRELOAD = 16
 WALL0 = dt.datetime(2026, 9, 19, 20, 30, 0, tzinfo=dt.UTC)
+RUN_ID = "sample-2026-09-19T20-30-00"
+# What the ground reports for a simulated satellite: orbit/ground/stream.py:218 builds it from
+# Settings.mcast_group/mcast_port, and docs/event_stream.md:49-51 shows it in the contract.
+# These nodes are software, so this is the honest transport for them.
+TRANSPORT = "udp-multicast://239.255.42.99:50000"
 
 NODE_PLAN: list[dict[str, Any]] = [
     dict(
         node_id=0,
-        label="SAT-1",
-        transport="/dev/ttyUSB0",
+        label="sat-a",
         first=1.4,
         interval=8.6,
         jitter=1.6,
@@ -71,8 +91,7 @@ NODE_PLAN: list[dict[str, Any]] = [
     ),
     dict(
         node_id=1,
-        label="SAT-2",
-        transport="/dev/ttyUSB1",
+        label="sat-b",
         first=2.1,
         interval=8.0,
         jitter=1.2,
@@ -82,8 +101,7 @@ NODE_PLAN: list[dict[str, Any]] = [
     ),
     dict(
         node_id=2,
-        label="SAT-3",
-        transport="/dev/ttyUSB2",
+        label="sat-c",
         first=2.9,
         interval=9.0,
         jitter=1.8,
@@ -172,7 +190,8 @@ class Node:
 
 
 class Sim:
-    def __init__(self, seed: int, frames_by_id: dict[int, Frame]) -> None:
+    def __init__(self, seed: int, frames_by_id: dict[int, Frame], run_id: str = RUN_ID) -> None:
+        self.run_id = run_id
         self.rng = random.Random(seed)
         self.events: list[Event] = []
         self.seq = 0
@@ -241,11 +260,10 @@ class Sim:
         self.emit(
             0.0,
             "run_start",
-            run_id="sample-2026-09-19T20-30-00",
+            run_id=self.run_id,
             mode="live",
-            nodes=[
-                {"node_id": n.id, "label": n.label, "transport": n.plan["transport"], "real": True} for n in self.nodes
-            ],
+            # real=False, always: these satellites are the loop below, not boards.
+            nodes=[{"node_id": n.id, "label": n.label, "transport": TRANSPORT, "real": False} for n in self.nodes],
             window={"budget_bytes": BUDGET, "duration_s": DURATION},
             queue_limit=QUEUE_LIMIT,
             scoring=SCORING,
@@ -520,11 +538,15 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("-o", "--out", default=str(REPO / "runs" / "sample.jsonl"))
     ap.add_argument(
-        "--seed", type=int, default=8, help="8 is the committed sample; 39 also has frames rejected by a full queue"
+        "--seed",
+        type=int,
+        default=8,
+        help="8 is runs/sample.jsonl; 39 is the committed demo, and also has frames rejected by a full queue",
     )
+    ap.add_argument("--run-id", default=RUN_ID, help="run_id in run_start; keep a committed file's id when redoing it")
     ap.add_argument("--debug", action="store_true", help="print the frame pools and the slot sequence")
     args = ap.parse_args(argv)
-    sim = Sim(args.seed, load_frames())
+    sim = Sim(args.seed, load_frames(), args.run_id)
     events = sim.run()
     if args.debug:
         for n in sim.nodes:
