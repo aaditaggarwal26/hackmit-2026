@@ -643,8 +643,8 @@ not exist yet.
 - **Do** set the SVG `viewBox` to the box's pixel size so one unit is one pixel.
 - **Do** build the DOM once and update text, attributes and `scaleX()` in place
   on the 10 Hz tick.
-- **Do** self-host every asset under `viz/static/`; `tools/offline_check.py`
-  fails the build on any `https://` reference from `index.html`.
+- **Do** self-host every asset under `viz/static/`: no `https://` reference may
+  survive in `index.html`, because the demo has to run with no network at all.
 - **Do** set plate headings, the wordmark and large figures on the width axis
   (106–118%) and leave everything else at the default width.
 

@@ -6,15 +6,15 @@
 <title>Orbit — live run</title>
 <!--
   Sheet 1 of the display: the live run, as a test report being written live.
-  One file, no build step. It reads the event stream in docs/events.md over a
+  One file, no build step. It reads the event stream in docs/event_stream.md over a
   WebSocket and shows what is happening right now on the three satellites.
 
   The look is the Orbit design system (DESIGN.md): bond stock, white plates,
   hairline rules, Archivo alone, light only, and five pens with one job each —
     blue    Orbit's own result (a photo that came down, a won slot, used budget)
     pencil  the baseline it beats (what first-in-first-out would have sent)
-    red     live right now, or something the ground forced (the fairness guard,
-            a lost link, an error)
+    red     live right now, or something the ground forced: a slot the aging terms
+            decided rather than the raw score, a lost link, an error
     green   measured on a real board
     amber   simulated, replayed, stale, or not measured yet
   A satellite is a numbered lane, never a colour.
@@ -424,7 +424,7 @@ tr.fresh td { animation: settle 1.4s var(--ease) both; }
       </div>
       <div class="ledger">
         <div class="qline"><span class="micro" id="lanes-label">Slot by slot</span>
-          <span class="key"><span><i></i>won the slot</span><span><i class="forced"></i>fairness guard forced the switch</span><span><i class="live"></i>sending now</span></span></div>
+          <span class="key"><span><i></i>won the slot</span><span><i class="forced"></i>waiting time decided it</span><span><i class="live"></i>sending now</span></span></div>
         <div class="lanes" id="lanes"><div class="empty">No slot has been granted yet. An offer is the top score in a satellite's queue, computed onboard; the ground only compares them.</div></div>
         <div class="axis" id="axis" hidden><span class="name"></span><span class="rng"><span id="axis-a"></span><span id="axis-b"></span></span></div>
         <div class="caption" id="slots-cap"></div>
@@ -505,7 +505,7 @@ tr.fresh td { animation: settle 1.4s var(--ease) both; }
     <section class="plate" id="r-slots">
       <h2><span class="n">Fig 6</span> Slot by slot <span class="thin">what Orbit sent, over what first-in-first-out would have sent</span><span class="thin right" id="r-slots-n"></span></h2>
       <div class="slotwrap fade"><div class="slotgrid" id="r-slotgrid"><div class="empty">No photos recorded yet.</div></div></div>
-      <div class="caption">One column per slot, paired in file order. A <b>solid blue</b> or <b>dashed pencil</b> frame means usable; faded means not usable. Slot numbers in <span class="x">red</span> were forced by the fairness guard.</div>
+      <div class="caption">One column per slot, paired in file order. A <b>solid blue</b> or <b>dashed pencil</b> frame means usable; faded means not usable. Slot numbers in <span class="x">red</span> went to a satellite the aging terms lifted above the highest raw score.</div>
     </section>
 
     <section class="plate" id="r-sats">
@@ -549,7 +549,7 @@ const photoId = a => { if (a == null) return null;
   if (isInt(a.image_id)) { S.namesPhotos = true; return a.image_id; }
   return S.namesPhotos ? null : (isInt(a.frame_id) ? a.frame_id : null); };
 const SCALE_OVERRIDE = Number(Q.get('scale')) || 0;
-const REASON = { highest_score: 'won on the highest score', starvation_forced: 'was handed the slot by the fairness guard', only_ready: 'was the only one ready' };
+const REASON = { highest_score: 'won on the highest score', starvation_forced: 'won on waiting time rather than raw score', only_ready: 'was the only one ready' };
 const STALE_S = 3, DEAD_S = 12, FREEZE_S = 5;
 const LANE_COLS = 48, QUEUE_ROWS = 5, SENT_MAX = 12, ARR_ROWS = 80, LOG_ROWS = 150;
 
@@ -775,8 +775,8 @@ function renderChannel(now) {
     else if (!b) { state = 'no bid listed'; }
     else if (b.ready === true) state = 'ready';
     else { const st = n.status || {}; state = st.link_ok === false ? 'no link' : (depthOf(n) === 0 ? 'empty queue' : 'not ready'); }
-    if (g && won) { if (g.reason === 'starvation_forced') { out = 'won · the guard forced the switch'; cls += ' forced'; } else { out = 'won · ' + (g.reason === 'only_ready' ? 'the only offer' : 'highest offer'); cls += ' won'; } }
-    else if (g && b && b.ready === true) { if (best && best.node_id === id && g.reason === 'starvation_forced') { out = 'highest offer, held back by the guard'; cls += ' held'; } else { out = 'lost'; cls += ' lost'; } }
+    if (g && won) { if (g.reason === 'starvation_forced') { out = 'won · on waiting time'; cls += ' forced'; } else { out = 'won · ' + (g.reason === 'only_ready' ? 'the only offer' : 'highest offer'); cls += ' won'; } }
+    else if (g && b && b.ready === true) { if (best && best.node_id === id && g.reason === 'starvation_forced') { out = 'highest score, outweighed by waiting time'; cls += ' held'; } else { out = 'lost'; cls += ' lost'; } }
     else if (g) { out = DASH; cls += ' lost'; }
     setText(td[2], state); setText(td[3], out); if (td[3].className !== cls) td[3].className = cls;
     setAttr(tr, 'data-won', !!(g && won && g.reason !== 'starvation_forced')); setAttr(tr, 'data-forced', !!(g && won && g.reason === 'starvation_forced'));
@@ -862,7 +862,7 @@ function renderLanes() {
   }
   const forced = S.grants.filter(c => c.reason === 'starvation_forced'), last = forced[forced.length - 1];
   const bits = [];
-  if (last) bits.push(`<span class="x">The fairness guard stepped in ${forced.length === 1 ? 'once' : forced.length + ' times'}</span>, last at slot <b>${esc(last.slot ?? '?')}</b>: ${esc(satName(last.node))} got the slot although another satellite offered more.`);
+  if (last) bits.push(`<span class="x">Waiting time decided ${forced.length === 1 ? 'one slot' : forced.length + ' slots'}</span>, last at slot <b>${esc(last.slot ?? '?')}</b>: ${esc(satName(last.node))} got it although another satellite offered a higher score.`);
   if (S.grants.length > LANE_COLS) bits.push(`Showing the last ${LANE_COLS} of ${S.grants.length} slots.`);
   setHTML($('slots-cap'), bits.join(' '));
 }
@@ -1116,7 +1116,7 @@ function renderResults() {
         const ok = a.usable === true, id2 = photoId(a);
         return `<div class="slotcell"${a.usable === false ? ' data-bad' : ''} title="photo ${esc(id2 ?? '?')} · ${esc(nodeNameIn(start, a.node_id))} · ${fmtScore(a.score)} · cloud ${fmtPct(a.cloud_frac)} · ${ok ? 'usable' : a.usable === false ? 'not usable' : 'usable ?'}"><div class="shot${pencil ? ' pencil' : ''}"${ok ? ' data-usable' : ''}>${isInt(id2) ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(id2)}" onerror="this.remove()">` : ''}</div><span class="v">${fmtScore(a.score)}</span><span class="w">${esc(nodeNameIn(start, a.node_id).replace('Satellite ', 'Sat '))}</span></div>`; };
       let html = '<div class="rl">Slot</div>';
-      for (let i = from; i < n; i++) { const a = R.arrivals[i], slot = a && a.slot_id != null ? a.slot_id : i + 1; html += `<div class="hd"${forced.has(slot) ? ' data-forced' : ''} title="${forced.has(slot) ? 'the fairness guard forced this slot' : ''}">${esc(slot)}</div>`; }
+      for (let i = from; i < n; i++) { const a = R.arrivals[i], slot = a && a.slot_id != null ? a.slot_id : i + 1; html += `<div class="hd"${forced.has(slot) ? ' data-forced' : ''} title="${forced.has(slot) ? 'aging, not raw score, decided this slot' : ''}">${esc(slot)}</div>`; }
       html += '<div class="rl"><i></i>Orbit sent</div>';
       for (let i = from; i < n; i++) html += cell(R.arrivals[i], false);
       html += '<div class="rl"><i class="pencil"></i>Baseline</div>';
