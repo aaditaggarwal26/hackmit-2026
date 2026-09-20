@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit, camera</title>
+<!--
+  The scoring demo, on its own. Not the display, not the ground station: one
+  edge node, a camera, and the decision it makes about every photo it takes.
+
+  The browser owns the camera and nothing else. It reduces one video frame to
+  the 128x128 8-bit gray the board works in and posts those 16384 bytes to
+  camera/demo.py; every number and every map on this page comes back from
+  orbit/golden/score.py. Nothing here computes a score.
+
+  Orbit design system (DESIGN.md): bond stock, white plates, hairline rules,
+  Archivo, light only, and the pens kept to their jobs - blue for what the node
+  keeps, red for live and for what it throws away, amber for a fallback, pencil
+  for what is merely context.
+-->
+<style>
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: block;
+  src: url('fonts/archivo-latin.woff2') format('woff2');
+}
+:root {
+  --stock: #edf0f3; --plate: #ffffff; --plate-sunk: #f4f6f8;
+  --ink: #11161b; --ink-2: #4e5a66; --rule: #c9d2da; --rule-soft: #e2e8ed;
+  --blue: #1b54c8; --blue-wash: rgba(27, 84, 200, .10); --blue-soft: rgba(27, 84, 200, .16);
+  --pencil: #6e7a85;
+  --red: #c0271f; --red-wash: rgba(192, 39, 31, .10);
+  --green: #15704a;
+  --amber: #8a5a00; --amber-wash: rgba(138, 90, 0, .10);
+  --sh: 0 1px 2px rgba(17, 22, 27, .05), 0 6px 18px -12px rgba(17, 22, 27, .30);
+  --t-hero: clamp(34px, 3.6vw, 54px);
+  --t-title: 24px;
+  --t-standfirst: 15px;
+  --t-lede: 13px;
+  --gap: 12px; --pad: 15px;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--stock); color: var(--ink);
+  font: 400 14.5px/1.45 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+}
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+b { font-weight: 600; }
+
+#app { min-height: 100%; display: grid; grid-template-rows: auto auto 1fr auto; gap: 11px; padding: 11px 16px 16px; }
+
+/* ── title ─────────────────────────────────────────────────────────────── */
+.titleblock { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding-bottom: 7px; border-bottom: 1px solid var(--rule); }
+.wordmark { font-size: var(--t-title); font-weight: 800; font-stretch: 112%; letter-spacing: -.012em; margin: 0; line-height: 1; }
+.wordmark span { color: var(--ink-2); font-weight: 600; }
+.standfirst { color: var(--ink-2); font-size: var(--t-standfirst); letter-spacing: -.005em; margin: 0; }
+.standfirst b { color: var(--ink); font-weight: 600; }
+.titleblock .spacer { flex: 1 1 24px; }
+
+.conditions { display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline; font-size: 12px; color: var(--ink-2); padding: 1px 2px; }
+.conditions .k { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 10px; margin-right: 4px; }
+.conditions b { color: var(--ink); font-weight: 600; }
+
+/* ── furniture ─────────────────────────────────────────────────────────── */
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.tag.m { color: var(--green); } .tag.e { color: var(--amber); } .tag.x { color: var(--red); }
+.tag.b { color: var(--blue); } .tag.p { color: var(--pencil); }
+.chip { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; display: inline-block; }
+.chip.good { color: var(--blue); } .chip.bad { color: var(--red); border-color: transparent; background: var(--red-wash); }
+.chip.plain { color: var(--ink-2); border-color: var(--rule); }
+.chip.warn { color: var(--amber); border-color: transparent; background: var(--amber-wash); }
+
+.plate { background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px; box-shadow: var(--sh); padding: var(--pad); min-width: 0; display: flex; flex-direction: column; }
+.plate > h2 { margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; }
+.plate > h2 .n { color: var(--ink); font-stretch: 118%; }
+.plate > h2 .sub { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 12px; color: var(--pencil); }
+
+.btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--plate-sunk); border: 1px solid var(--rule-soft); border-radius: 3px; padding: 7px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--rule); background: var(--stock); }
+.btn:disabled { opacity: .45; cursor: default; }
+
+/* ── the grid ──────────────────────────────────────────────────────────── */
+.grid { display: grid; grid-template-columns: minmax(340px, 1fr) minmax(430px, 1.35fr); gap: var(--gap); align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+/* ── fig 1: the camera ─────────────────────────────────────────────────── */
+.stage { position: relative; background: var(--ink); border-radius: 2px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 38vh; margin: 0 auto; width: 100%; display: grid; place-items: center; }
+.stage video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.stage .crop { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.stage .crop i { display: block; aspect-ratio: 1; height: 100%; border: 1px solid rgba(255, 255, 255, .55); box-shadow: 0 0 0 9999px rgba(17, 22, 27, .38); }
+.stage .note { position: absolute; inset: auto 0 0 0; padding: 7px 10px; font-size: 12px; color: #fff; background: rgba(17, 22, 27, .55); letter-spacing: .02em; }
+.stage .off { color: var(--stock); font-size: 13px; text-align: center; padding: 22px; max-width: 34ch; }
+.stage.drop { outline: 2px solid var(--blue); outline-offset: -2px; }
+.stage.drop::before { content: 'drop to score it'; position: absolute; z-index: 2; font-size: 13px; font-weight: 600;
+  color: var(--ink); background: var(--plate); padding: 8px 14px; border-radius: 3px; box-shadow: var(--sh); }
+.stage.flash::after { content: ''; position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; animation: flash .42s var(--ease) both; }
+@keyframes flash { from { opacity: .92; } to { opacity: 0; } }
+
+.controls { display: flex; gap: 9px; align-items: center; margin-top: 11px; flex-wrap: wrap; }
+.shutter { font: inherit; font-size: 20px; font-weight: 700; letter-spacing: .01em; color: #fff; background: var(--blue); border: 1px solid var(--blue); border-radius: 3px; padding: 11px 20px; cursor: pointer; flex: 1 1 auto; }
+.shutter:hover { filter: brightness(1.08); }
+.shutter:disabled { background: var(--pencil); border-color: var(--pencil); cursor: default; }
+.hint { font-size: 12px; color: var(--pencil); margin: 9px 2px 0; }
+.hint kbd { font: inherit; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 5px; background: var(--plate-sunk); }
+
+/* ── fig 2: the score ──────────────────────────────────────────────────── */
+.verdict { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--rule-soft); }
+.score { font-size: var(--t-hero); font-weight: 800; font-stretch: 108%; line-height: .88; letter-spacing: -.035em; font-variant-numeric: proportional-nums; }
+.score small { font-size: 12px; font-weight: 600; color: var(--pencil); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.verdict .who { flex: 1 1 150px; font-size: 12px; color: var(--ink-2); }
+.verdict .who b { display: block; font-size: 14.5px; color: var(--ink); }
+
+.bar { display: flex; height: 22px; border-radius: 2px; overflow: hidden; background: var(--plate-sunk); border: 1px solid var(--rule-soft); margin: 12px 0 8px; }
+.bar i { display: block; height: 100%; }
+.bar .c1 { background: var(--blue); }
+.bar .c2 { background: rgba(27, 84, 200, .58); }
+.bar .c3 { background: rgba(27, 84, 200, .28); }
+.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.legend .item { border-top: 2px solid var(--rule); padding-top: 6px; font-size: 12px; color: var(--ink-2); }
+.legend .item.c1 { border-color: var(--blue); }
+.legend .item.c2 { border-color: rgba(27, 84, 200, .58); }
+.legend .item.c3 { border-color: rgba(27, 84, 200, .28); }
+.legend .item .n { display: block; font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1.2; }
+.legend .item .w { display: block; font-size: 12px; line-height: 1.3; color: var(--pencil); }
+
+.maps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
+.maps figure { margin: 0; min-width: 0; }
+.maps img { width: 100%; aspect-ratio: 1; display: block; border: 1px solid var(--rule-soft); border-radius: 2px; image-rendering: pixelated; background: var(--plate-sunk); }
+.maps figcaption { font-size: 12px; color: var(--ink-2); margin-top: 5px; line-height: 1.3; }
+.maps figcaption b { display: block; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink); }
+.empty { color: var(--pencil); font-size: 13px; padding: 10px 2px 4px; max-width: 46ch; }
+
+/* ── fig 3: the queue ──────────────────────────────────────────────────── */
+.cells { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+.cells li { border: 1px solid var(--rule-soft); border-radius: 3px; padding: 7px; background: var(--plate-sunk); min-width: 0; }
+.cells li.head { border-color: var(--blue); background: var(--blue-wash); }
+.cells li.fresh { animation: pop .5s var(--ease); }
+@keyframes pop { from { transform: scale(.9); opacity: .2; } to { transform: none; opacity: 1; } }
+.cells li.slot { border-style: dashed; background: transparent; display: grid; place-items: center; color: var(--pencil); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; min-height: 96px; }
+.cells img { width: 100%; aspect-ratio: 1; display: block; border-radius: 2px; image-rendering: pixelated; background: var(--stock); }
+.cells .line { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 6px; font-size: 12px; }
+.cells .line b { font-size: 14.5px; }
+.cells .rank { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--pencil); }
+.cells li.head .rank { color: var(--blue); }
+
+.foot { font-size: 12px; color: var(--pencil); display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; }
+.foot b { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="titleblock">
+    <h1 class="wordmark">ORBIT <span>· CAMERA</span></h1>
+    <p class="standfirst">A satellite sees far more than it can send home. <b>This is the part that decides.</b></p>
+    <span class="spacer"></span>
+    <button class="btn" id="reset">Empty the queue</button>
+  </header>
+
+  <div class="conditions" id="conditions"></div>
+
+  <main class="grid">
+    <section class="plate">
+      <h2><span class="n">FIG 1</span> The camera <span class="tag" id="camstate"></span></h2>
+      <div class="stage" id="stage">
+        <video id="video" playsinline muted hidden></video>
+        <div class="crop" id="crop" hidden><i></i></div>
+        <div class="note" id="note" hidden>the square is what gets scored · 128 × 128, 8-bit gray</div>
+        <p class="off" id="off">Starting the camera…</p>
+      </div>
+      <div class="controls">
+        <button class="shutter" id="shoot" disabled>Take a photo</button>
+        <button class="btn" id="upload">Upload a photo</button>
+        <button class="btn" id="sample">Sample photo</button>
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+      <p class="hint"><kbd>Space</kbd> takes a photo too, and you can drop an image file straight onto the
+        preview. Nothing leaves this machine: the frame goes to the scoring kernel on localhost and back.</p>
+    </section>
+
+    <section class="plate">
+      <h2><span class="n">FIG 2</span> What it made of the photo
+        <span class="sub" id="shotsub">nothing yet</span></h2>
+      <div id="shot" hidden>
+        <div class="verdict">
+          <div class="score" id="score">-<small>/100</small></div>
+          <div class="who" id="who"></div>
+          <div id="usable"></div>
+        </div>
+        <div class="bar" id="bar"><i class="c1"></i><i class="c2"></i><i class="c3"></i></div>
+        <div class="legend" id="legend"></div>
+        <div class="maps" id="maps"></div>
+      </div>
+      <p class="empty" id="shotempty">Take a photo and the score, the three terms behind it and the maps
+        they were counted from appear here.</p>
+    </section>
+  </main>
+
+  <section class="plate">
+    <h2><span class="n">FIG 3</span> What the satellite is holding
+      <span class="sub" id="queuesub"></span></h2>
+    <ol class="cells" id="cells"></ol>
+    <p class="foot" id="queuefoot"></p>
+  </section>
+
+  <p class="foot" style="padding: 0 2px">
+    <span><b>Scored by</b> orbit/golden/score.py, the kernel the boards are held to, not a copy in this page</span>
+    <span><b>Queued by</b> orbit/golden/queue.py at depth <span id="footdepth">-</span></span>
+    <span><b>Standalone</b>: no ground station, no downlink, no display</span>
+  </p>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const pct = x => (x * 100).toFixed(x >= 0.1 || x === 0 ? 0 : 1) + '%';
+
+const S = { cfg: null, last: null, busy: false, live: false, stream: null, wait: 0 };
+
+/* ── the camera is the browser's, and only the camera ────────────────── */
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('This browser has no camera API. Use a sample photo instead.');
+  S.wait = setTimeout(() => {                       // the prompt is browser furniture; say where to look
+    if (!S.live) $('off').innerHTML = 'Waiting for you to allow the camera. Chrome asks once, '
+      + 'next to the address bar. <br>No prompt? Upload a photo instead, the scoring is the same.';
+  }, 6000);
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  } catch (e) {
+    return fail(e && e.name === 'NotAllowedError'
+      ? 'Camera blocked. Allow it in the padlock menu next to the address bar, then reload, or upload a photo instead.'
+      : 'No camera available (' + esc((e && e.name) || e) + '). Use a sample photo instead.');
+  }
+  clearTimeout(S.wait);
+  const v = $('video');
+  v.srcObject = S.stream;
+  await v.play().catch(() => {});
+  const track = S.stream.getVideoTracks()[0], s = track ? track.getSettings() : {};
+  S.live = true;
+  v.hidden = false; $('crop').hidden = false; $('note').hidden = false; $('off').hidden = true;
+  $('shoot').disabled = false;
+  $('camstate').className = 'tag x';
+  $('camstate').textContent = 'live · ' + (s.width || '?') + '×' + (s.height || '?');
+}
+
+function fail(msg) {
+  clearTimeout(S.wait);
+  S.live = false;
+  $('off').innerHTML = msg;
+  $('off').hidden = false;
+  $('shoot').disabled = true;
+  $('camstate').className = 'tag e';
+  $('camstate').textContent = 'no camera';
+}
+
+/* anything drawable -> the 16384 bytes the board works in: centre square, gray, 128x128.
+   The camera and an uploaded file go through this one function, so a photo is reduced the
+   same way whatever it came from. */
+function reduce(src, w, h) {
+  if (!w || !h) return null;
+  const side = Math.min(w, h), N = S.cfg ? S.cfg.frame.w : 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(src, (w - side) / 2, (h - side) / 2, side, side, 0, 0, N, N);
+  const px = g.getImageData(0, 0, N, N).data, out = new Uint8Array(N * N);
+  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
+    out[j] = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000 | 0;   // the same luma opencv uses
+  }
+  return out;
+}
+
+function grab() {
+  const v = $('video');
+  return reduce(v, v.videoWidth, v.videoHeight);
+}
+
+/* a file the browser can decode: png, jpeg, gif, webp, heic where supported */
+async function scoreFile(file) {
+  if (!file || !/^image\//.test(file.type || '')) {
+    $('shotsub').innerHTML = '<span class="tag e">not an image</span> ' + esc((file && file.name) || '');
+    return;
+  }
+  let bmp;
+  try {
+    bmp = await createImageBitmap(file);
+  } catch (e) {
+    $('shotsub').innerHTML = '<span class="tag x">could not read that file</span> ' + esc(file.name);
+    return;
+  }
+  const bytes = reduce(bmp, bmp.width, bmp.height);
+  bmp.close();
+  if (bytes) await post(bytes);
+}
+
+async function post(bytes) {
+  if (S.busy) return;
+  S.busy = true;
+  $('shoot').disabled = true;
+  try {
+    const r = await fetch('/api/score', { method: 'POST', body: bytes, headers: { 'Content-Type': 'application/octet-stream' } });
+    const out = await r.json();
+    if (!r.ok || out.error) throw new Error(out.error || ('HTTP ' + r.status));
+    render(out);
+  } catch (e) {
+    $('shotsub').innerHTML = '<span class="tag x">scoring failed</span> ' + esc(e.message || e);
+  } finally {
+    S.busy = false;
+    $('shoot').disabled = !S.live;
+  }
+}
+
+function shoot() {
+  if (!S.live) return;
+  const bytes = grab();
+  if (!bytes) return;
+  const st = $('stage');
+  st.classList.remove('flash'); void st.offsetWidth; st.classList.add('flash');
+  setTimeout(() => st.classList.remove('flash'), 500);      // never leave the overlay on the preview
+  post(bytes);
+}
+
+async function sample() {
+  $('sample').disabled = true;
+  try {
+    const r = await fetch('/api/sample');
+    if (!r.ok) throw new Error('no corpus on this machine');
+    await post(new Uint8Array(await r.arrayBuffer()));
+  } catch (e) {
+    $('shotsub').innerHTML = '<span class="tag e">no sample</span> ' + esc(e.message || e);
+  } finally {
+    $('sample').disabled = false;
+  }
+}
+
+/* ── what came back ──────────────────────────────────────────────────── */
+function render(o) {
+  S.last = o;
+  $('shot').hidden = false;
+  $('shotempty').hidden = true;
+  $('shotsub').textContent = 'photo #' + o.frame_id;
+
+  $('score').innerHTML = o.display.toFixed(1) + '<small>/100</small>';
+  $('usable').innerHTML = o.usable
+    ? '<span class="chip good">Usable</span>'
+    : '<span class="chip bad">Too cloudy</span>';
+  $('who').innerHTML = o.rejected
+    ? '<b>Dropped on arrival</b>the queue was full of better photos'
+    : o.evicted_frame_id
+      ? '<b>Kept, and pushed #' + o.evicted_frame_id + ' out</b>the queue was full, this one was better'
+      : '<b>Kept</b>' + (o.queue[0] && o.queue[0].frame_id === o.frame_id ? 'the best photo it is holding' : 'ranked ' + (rankOf(o) + 1) + ' of ' + o.depth);
+
+  const parts = [['c1', 'Clear', o.parts.clear, o.terms.clear, pct(o.cloud_frac) + ' of the pixels are cloud'],
+                 ['c2', 'Detail', o.parts.sharp, o.terms.sharp, 'edge sum ' + o.counts.sobel_sum.toLocaleString()],
+                 ['c3', 'Change', o.parts.change, o.terms.change,
+                  o.first ? 'first photo: nothing to compare with yet'
+                          : o.counts.changed_px.toLocaleString() + ' pixels moved since #' + o.ref_id]];
+  const total = Math.max(1, o.score);
+  $('bar').innerHTML = parts.map(p => '<i class="' + p[0] + '" style="width:' + (100 * Math.max(0, p[2]) / total) + '%"></i>').join('');
+  $('legend').innerHTML = parts.map(p =>
+    '<div class="item ' + p[0] + '"><span class="n">' + (p[2] * 100 / 65535).toFixed(1) + '</span>' +
+    '<b>' + p[1] + '</b><span class="w">' + esc(p[4]) + '</span></div>').join('');
+
+  $('maps').innerHTML = [
+    ['frame', 'As scored', '128 × 128, 8-bit gray, exactly what the kernel read'],
+    ['cloud', 'Cloud', o.counts.cloud_px.toLocaleString() + ' of ' + o.counts.pixels.toLocaleString() +
+      ' pixels brighter than ' + S.cfg.cloud_thr],
+    ['edges', 'Detail', 'Sobel edges, the sharpness term drawn'],
+    ['change', 'Change', o.first ? 'nothing to compare with yet'
+      : o.counts.changed_px.toLocaleString() + ' pixels differ from #' + o.ref_id + ' by more than ' + S.cfg.change_thr]
+  ].map(m => '<figure><img src="' + o.maps[m[0]] + '" alt="' + esc(m[1]) + '"><figcaption><b>' + esc(m[1]) + '</b>' +
+    esc(m[2]) + '</figcaption></figure>').join('');
+
+  queue(o, o.frame_id);
+}
+
+function rankOf(o) {
+  for (let i = 0; i < o.queue.length; i++) if (o.queue[i].frame_id === o.frame_id) return i;
+  return -1;
+}
+
+function queue(o, freshId) {
+  const cells = [];
+  o.queue.forEach((q, i) => {
+    cells.push('<li class="' + (i === 0 ? 'head ' : '') + (q.frame_id === freshId ? 'fresh' : '') + '">' +
+      '<img src="' + q.thumb + '" alt="photo ' + q.frame_id + '">' +
+      '<div class="line"><b>' + q.display.toFixed(1) + '</b>' +
+      (q.usable ? '<span class="tag b">usable</span>' : '<span class="tag x">cloudy</span>') + '</div>' +
+      '<div class="line"><span class="tag p">#' + q.frame_id + '</span>' +
+      (i === 0 ? '<span class="rank">next to send</span>' : '') + '</div></li>');
+  });
+  for (let i = o.queue.length; i < o.limit; i++) cells.push('<li class="slot">empty</li>');
+  $('cells').innerHTML = cells.join('');
+  $('queuesub').textContent = o.depth + ' of ' + o.limit + ' slots full, best first';
+  $('queuefoot').innerHTML = '<span><b>Ranked by score.</b> When the queue is full the weakest photo is the one '
+    + 'that goes, even if it is the one that just arrived.</span>'
+    + (o.evicted_total ? '<span><b>' + o.evicted_total + '</b> lost to a better photo so far</span>' : '');
+  $('footdepth').textContent = o.limit;
+}
+
+/* ── the rules in force, straight from the server ────────────────────── */
+function conditions(c) {
+  const w = x => (x / 65535 * 100).toFixed(0) + '%';
+  $('conditions').innerHTML = [
+    ['Node', '1 camera <span class="tag x">live</span>'],
+    ['Frame', '<b>' + c.frame.w + ' × ' + c.frame.h + '</b> gray · ' + (c.frame.bytes / 1024) + ' KB'],
+    ['Score', 'clear <b>' + w(c.w_clear) + '</b> · detail <b>' + w(c.w_sharp) + '</b> · change <b>' + w(c.w_change) + '</b>'],
+    ['Cloud', 'pixel &gt; <b>' + c.cloud_thr + '</b>'],
+    ['Change', 'differs by &gt; <b>' + c.change_thr + '</b>'],
+    ['Queue limit', '<b>' + c.queue_limit + '</b> photos'],
+    ['Usable', '<b>' + c.usable_rule.metric + ' ≤ ' + c.usable_rule.max + '</b> · never from the score']
+  ].map(p => '<span><span class="k">' + p[0] + '</span> ' + p[1] + '</span>').join('');
+  $('footdepth').textContent = c.queue_limit;
+}
+
+async function boot() {
+  try {
+    S.cfg = await (await fetch('/api/config')).json();
+    conditions(S.cfg);
+    queue(Object.assign({ queue: [], depth: 0, evicted_total: 0 }, S.cfg), -1);
+  } catch (e) {
+    $('conditions').innerHTML = '<span class="tag x">the scoring server is not answering</span>, start it with '
+      + '<b>uv run python camera/demo.py</b>';
+    return;
+  }
+  startCamera();
+}
+
+$('shoot').addEventListener('click', shoot);
+$('sample').addEventListener('click', sample);
+$('upload').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';                      // so choosing the same file twice fires again
+  if (f) await scoreFile(f);
+});
+for (const t of ['dragenter', 'dragover']) {
+  $('stage').addEventListener(t, e => { e.preventDefault(); $('stage').classList.add('drop'); });
+}
+for (const t of ['dragleave', 'drop']) {
+  $('stage').addEventListener(t, e => { e.preventDefault(); $('stage').classList.remove('drop'); });
+}
+$('stage').addEventListener('drop', async e => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) await scoreFile(f);
+});
+$('reset').addEventListener('click', async () => {
+  const c = await (await fetch('/api/reset', { method: 'POST' })).json();
+  S.cfg = c;
+  $('shot').hidden = true; $('shotempty').hidden = false; $('shotsub').textContent = 'nothing yet';
+  queue(Object.assign({ queue: [], depth: 0, evicted_total: 0 }, c), -1);
+});
+addEventListener('keydown', e => {
+  if (e.target && /^(INPUT|TEXTAREA|BUTTON)$/.test(e.target.tagName)) return;
+  if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); shoot(); }
+});
+addEventListener('pagehide', () => { if (S.stream) S.stream.getTracks().forEach(t => t.stop()); });
+boot();
+</script>
+</body>
+</html>
