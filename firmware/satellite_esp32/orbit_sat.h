@@ -155,8 +155,8 @@ struct PendingFaults {
 
   int         size()          const { return n_; }
   int         dropped()       const { return dropped_; }
-  int         code(int i)     const { return (i >= 0 && i < n_) ? code_[i] : 0; }
-  const char *detail(int i)   const { return (i >= 0 && i < n_) ? detail_[i] : ""; }
+  int         code(int i)     const { return (i >= 0 && i < n_ && i < CAP) ? code_[i] : 0; }
+  const char *detail(int i)   const { return (i >= 0 && i < n_ && i < CAP) ? detail_[i] : ""; }
 
  private:
   int  code_[CAP]              = {0};
