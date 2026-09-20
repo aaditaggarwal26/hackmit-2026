@@ -1,0 +1,407 @@
+{
+  "generated_by": "tools/site_data.py",
+  "kernel": "orbit/golden/score.py",
+  "corpus": {
+    "frames_total": 194,
+    "source": "NASA GIBS WMS (https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi)",
+    "layer": "MODIS_Terra_CorrectedReflectance_TrueColor",
+    "licence": "NASA supports full and open sharing of data. We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS).",
+    "fetched_utc": "2026-09-15T05:57:22+00:00"
+  },
+  "weights": {
+    "clear": 21845,
+    "sharp": 21845,
+    "change": 21845
+  },
+  "thresholds": {
+    "cloud": 200,
+    "change": 16,
+    "sharp_shift": 5
+  },
+  "run": {
+    "node_id": 1,
+    "seed": 0,
+    "shown_pass": 2
+  },
+  "shown_frames": [
+    {
+      "id": 186,
+      "capture_index": 24,
+      "scene": "hawaii",
+      "date": "2024-06-15",
+      "score": 51262,
+      "display": 78.2,
+      "cloud_frac": 0.2634,
+      "cloud_px": 4315,
+      "changed_px": 14815,
+      "sobel_sum": 1480178,
+      "clear": 48276,
+      "sharp": 46255,
+      "change": 59260,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 158,
+      "capture_index": 25,
+      "scene": "ganges",
+      "date": "2024-05-08",
+      "score": 36879,
+      "display": 56.3,
+      "cloud_frac": 0.5757,
+      "cloud_px": 9433,
+      "changed_px": 16384,
+      "sobel_sum": 553634,
+      "clear": 27804,
+      "sharp": 17301,
+      "change": 65535,
+      "usable": false,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 62,
+      "capture_index": 26,
+      "scene": "pacific",
+      "date": "2024-05-08",
+      "score": 43764,
+      "display": 66.8,
+      "cloud_frac": 0.508,
+      "cloud_px": 8323,
+      "changed_px": 15662,
+      "sobel_sum": 1164986,
+      "clear": 32244,
+      "sharp": 36405,
+      "change": 62648,
+      "usable": false,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 97,
+      "capture_index": 27,
+      "scene": "netherlands",
+      "date": "2024-04-18",
+      "score": 56964,
+      "display": 86.9,
+      "cloud_frac": 0.3472,
+      "cloud_px": 5689,
+      "changed_px": 15645,
+      "sobel_sum": 2305870,
+      "clear": 42780,
+      "sharp": 65535,
+      "change": 62580,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 89,
+      "capture_index": 28,
+      "scene": "iowa",
+      "date": "2024-09-21",
+      "score": 49399,
+      "display": 75.4,
+      "cloud_frac": 0.0062,
+      "cloud_px": 101,
+      "changed_px": 10073,
+      "sobel_sum": 1368832,
+      "clear": 65132,
+      "sharp": 42776,
+      "change": 40292,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 41,
+      "capture_index": 29,
+      "scene": "sahara",
+      "date": "2024-08-13",
+      "score": 24021,
+      "display": 36.7,
+      "cloud_frac": 0.0,
+      "cloud_px": 0,
+      "changed_px": 153,
+      "sobel_sum": 189400,
+      "clear": 65535,
+      "sharp": 5918,
+      "change": 612,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 73,
+      "capture_index": 30,
+      "scene": "amazon",
+      "date": "2024-07-05",
+      "score": 43400,
+      "display": 66.2,
+      "cloud_frac": 0.0,
+      "cloud_px": 0,
+      "changed_px": 14312,
+      "sobel_sum": 237416,
+      "clear": 65535,
+      "sharp": 7419,
+      "change": 57248,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 28,
+      "capture_index": 31,
+      "scene": "cairo",
+      "date": "2024-10-10",
+      "score": 60152,
+      "display": 91.8,
+      "cloud_frac": 0.1394,
+      "cloud_px": 2284,
+      "changed_px": 14631,
+      "sobel_sum": 2770780,
+      "clear": 56400,
+      "sharp": 65535,
+      "change": 58524,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 50,
+      "capture_index": 32,
+      "scene": "atacama",
+      "date": "2024-04-18",
+      "score": 43912,
+      "display": 67.0,
+      "cloud_frac": 0.0,
+      "cloud_px": 0,
+      "changed_px": 12134,
+      "sobel_sum": 565392,
+      "clear": 65535,
+      "sharp": 17668,
+      "change": 48536,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 152,
+      "capture_index": 33,
+      "scene": "greenland",
+      "date": "2024-10-10",
+      "score": 45600,
+      "display": 69.6,
+      "cloud_frac": 0.2473,
+      "cloud_px": 4051,
+      "changed_px": 5484,
+      "sobel_sum": 2166396,
+      "clear": 49332,
+      "sharp": 65535,
+      "change": 21936,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 119,
+      "capture_index": 34,
+      "scene": "alps",
+      "date": "2024-08-13",
+      "score": 56297,
+      "display": 85.9,
+      "cloud_frac": 0.0775,
+      "cloud_px": 1270,
+      "changed_px": 10726,
+      "sobel_sum": 3279058,
+      "clear": 60456,
+      "sharp": 65535,
+      "change": 42904,
+      "usable": true,
+      "is_reference": false,
+      "pass": 2
+    },
+    {
+      "id": 130,
+      "capture_index": 35,
+      "scene": "himalaya",
+      "date": "2024-05-08",
+      "score": 37888,
+      "display": 57.8,
+      "cloud_frac": 0.6514,
+      "cloud_px": 10673,
+      "changed_px": 15331,
+      "sobel_sum": 943980,
+      "clear": 22844,
+      "sharp": 29499,
+      "change": 61324,
+      "usable": false,
+      "is_reference": false,
+      "pass": 2
+    }
+  ],
+  "window": {
+    "orbit": {
+      "sent": [
+        78,
+        120,
+        132,
+        124,
+        70,
+        139,
+        28,
+        97,
+        119,
+        193,
+        164,
+        64
+      ],
+      "usable": 12
+    },
+    "fifo": {
+      "sent": [
+        78,
+        45,
+        77,
+        15,
+        58,
+        149,
+        120,
+        132,
+        66,
+        105,
+        85,
+        186
+      ],
+      "usable": 11
+    },
+    "gain": 1.091,
+    "frames_down": 12,
+    "bytes_used": 196608,
+    "slots_per_pass": 3,
+    "frames_per_pass": 12,
+    "passes": 4,
+    "queue_limit": 8,
+    "bytes_per_frame": 16384,
+    "usable_cloud_max": 0.35,
+    "per_pass": [
+      {
+        "pass": 0,
+        "captured": [
+          78,
+          45,
+          77,
+          15,
+          58,
+          149,
+          120,
+          132,
+          2,
+          173,
+          181,
+          156
+        ],
+        "orbit_sent": [
+          78,
+          120,
+          132
+        ],
+        "fifo_sent": [
+          78,
+          45,
+          77
+        ],
+        "orbit_usable": 3,
+        "fifo_usable": 3
+      },
+      {
+        "pass": 1,
+        "captured": [
+          66,
+          105,
+          85,
+          33,
+          70,
+          30,
+          49,
+          150,
+          124,
+          139,
+          0,
+          167
+        ],
+        "orbit_sent": [
+          124,
+          70,
+          139
+        ],
+        "fifo_sent": [
+          15,
+          58,
+          149
+        ],
+        "orbit_usable": 3,
+        "fifo_usable": 3
+      },
+      {
+        "pass": 2,
+        "captured": [
+          186,
+          158,
+          62,
+          97,
+          89,
+          41,
+          73,
+          28,
+          50,
+          152,
+          119,
+          130
+        ],
+        "orbit_sent": [
+          28,
+          97,
+          119
+        ],
+        "fifo_sent": [
+          120,
+          132,
+          66
+        ],
+        "orbit_usable": 3,
+        "fifo_usable": 3
+      },
+      {
+        "pass": 3,
+        "captured": [
+          4,
+          166,
+          193,
+          164,
+          64,
+          94,
+          81,
+          38,
+          69,
+          20,
+          57,
+          141
+        ],
+        "orbit_sent": [
+          193,
+          164,
+          64
+        ],
+        "fifo_sent": [
+          105,
+          85,
+          186
+        ],
+        "orbit_usable": 3,
+        "fifo_usable": 2
+      }
+    ]
+  }
+}
