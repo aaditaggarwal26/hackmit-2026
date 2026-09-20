@@ -15,6 +15,12 @@ that number would be circular.
 
 Nothing here may slow arbitration: emitting is a list append and a few callbacks; the
 WebSocket side uses bounded per-client queues and drops a client that falls behind.
+
+Observability flows *through* the ground, so a dead ground used to look exactly like a quiet
+one: the stream simply stopped. ``tick`` closes that hole. The satellites prove they are alive
+with heartbeats; ``ground_status`` and ``bus_health`` are the ground proving the same thing to
+the display, on a fixed period, whatever else the run is doing. Neither is a bus message and
+neither ever goes on the bus — the laptop observes and never transmits.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from orbit import config
+from orbit.bus.base import BusStats
 from orbit.config import Settings
 from orbit.log import log
 from orbit.protocol import messages as M
@@ -40,6 +47,17 @@ lg = logging.getLogger("orbit.stream")
 
 Writer = Callable[[str], None]
 QUEUE_WINDOW_CAP = 5  # the contract caps queue_window.top at 5 entries
+NEVER_SEEN = -1e9  # NodeView.last_seen before that node has said anything
+
+# Ground-liveness tunables. These are thresholds of the same kind as soft_wait_s/peer_stale_s and
+# belong in config.Settings; that module is owned elsewhere right now, so they live here until they
+# can move. The display never needs them: every bus_health event carries the thresholds it breached.
+BUS_HEALTH_WINDOW_S = 60.0  # sliding window the drop rates are measured over
+BUS_ALERT_PER_MIN = {  # a rate above this alerts; one drop never does
+    "malformed": 6.0,
+    "dup": 60.0,  # multicast over WiFi duplicates constantly; only a flood is worth saying
+    "oversize": 1.0,  # a message too big for one datagram is a bug, not weather
+}
 
 
 def new_run_id() -> str:
@@ -53,7 +71,7 @@ class NodeView:
     node_id: int
     label: str
     real: bool
-    last_seen: float = -1e9
+    last_seen: float = NEVER_SEEN
     queue_depth: int = 0
     top_frame_id: int = -1
     top_score: float = 0.0
@@ -136,7 +154,7 @@ class EventStream:
         self.backlog_dropped = 0
         self.seq = 0
         self.nodes: dict[str, NodeView] = {}
-        for i, name in enumerate(n for n in settings.expected_sats.split(",") if n):
+        for i, name in enumerate(settings.sat_names()):
             self.nodes[name] = NodeView(node_id=i, label=name, real=settings.nodes_real)
         self.frames: dict[tuple[int, int], FrameMeta] = {}
         self.baseline = FifoBaseline(frame_bytes=settings.frame_bytes)
@@ -146,6 +164,10 @@ class EventStream:
         self.orbit_bytes_used = 0
         self.ended = False
         self.started = False
+        # (t, malformed, dup, oversize) counter samples, trimmed to BUS_HEALTH_WINDOW_S: the oldest one
+        # is the baseline the rates are measured against, so one drop is a rate, not an alert.
+        self._bus_samples: deque[tuple[float, int, int, int]] = deque()
+        self._bus_alerting: set[str] = set()
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -213,6 +235,105 @@ class EventStream:
                 gain=round(gain, 3) if gain is not None else None,
             ),
         )
+
+    def tick(
+        self,
+        now: float,
+        *,
+        state: str,
+        rounds: int,
+        window: dict[str, Any],
+        bus_stats: BusStats,
+        period_s: float,
+    ) -> None:
+        """The ground's liveness, emitted from the caller's periodic tick (live and simulated).
+
+        Before run_start there is nothing to be alive for and after run_end the contract says the
+        stream is over, so both ends are silent: run_end stays the last event of a run."""
+        if not self.started or self.ended:
+            return
+        self._ground_status(now, state, rounds, window, period_s)
+        self._bus_health(now, bus_stats)
+
+    def _ground_status(self, now: float, state: str, rounds: int, w: dict[str, Any], period_s: float) -> None:
+        seen = [v for v in self.nodes.values() if v.last_seen > NEVER_SEEN]
+        self._emit(
+            "ground_status",
+            now,
+            uptime_s=round(now, 3),
+            state=state,
+            rounds=rounds,
+            period_s=period_s,
+            nodes=dict(
+                expected=len(self.nodes),
+                seen=len(seen),
+                linked=sum(1 for v in seen if (now - v.last_seen) <= self.s.peer_stale_s),
+            ),
+            window=dict(
+                open=bool(w["open"]),
+                budget_bytes=int(w["capacity_bytes"]),
+                used_bytes=int(w["used_bytes"]),
+                remaining_bytes=int(w["remaining_bytes"]),
+                slots_used=int(w["slots_used"]),
+                slots_remaining=int(w["slots_remaining"]),
+                time_remaining_s=round(max(0.0, self.s.window_duration_s - now), 1),
+            ),
+        )
+
+    def _bus_health(self, now: float, st: BusStats) -> None:
+        """Drops as rates over a sliding window, never one event per dropped datagram: a bus that
+        loses a frame an hour is healthy and a panel that says otherwise teaches people to ignore it."""
+        self._bus_samples.append((now, st.dropped_malformed, st.dropped_dup, st.dropped_oversize))
+        cutoff = now - BUS_HEALTH_WINDOW_S
+        while len(self._bus_samples) > 1 and self._bus_samples[0][0] < cutoff:
+            self._bus_samples.popleft()
+        base = self._bus_samples[0]
+        elapsed = now - base[0]
+        totals = (st.dropped_malformed, st.dropped_dup, st.dropped_oversize)
+        rates = {
+            name: round((totals[i] - base[i + 1]) * 60.0 / elapsed, 3) if elapsed > 0 else 0.0
+            for i, name in enumerate(("malformed", "dup", "oversize"))
+        }
+        alerts = [
+            dict(metric=k, rate_per_min=rates[k], threshold_per_min=thr)
+            for k, thr in BUS_ALERT_PER_MIN.items()
+            if rates[k] > thr
+        ]
+        self._emit(
+            "bus_health",
+            now,
+            window_s=BUS_HEALTH_WINDOW_S,
+            measured_s=round(elapsed, 3),
+            received=st.received,
+            delivered=st.delivered,
+            dropped=dict(
+                malformed=st.dropped_malformed,
+                dup=st.dropped_dup,
+                oversize=st.dropped_oversize,
+                own=st.dropped_own,
+            ),
+            malformed_by_type=dict(sorted(st.malformed_by_type.items())),
+            rates_per_min=rates,
+            alerts=alerts,
+        )
+        firing = {str(a["metric"]) for a in alerts}
+        for m in sorted(firing - self._bus_alerting):  # edge-triggered, like the hard/silent flags
+            self._emit(
+                "node_event",
+                now,
+                node_id=None,
+                level="warn",
+                message=f"bus {m} drops at {rates[m]:.1f}/min, over {BUS_ALERT_PER_MIN[m]:.1f}/min",
+            )
+        for m in sorted(self._bus_alerting - firing):
+            self._emit(
+                "node_event",
+                now,
+                node_id=None,
+                level="info",
+                message=f"bus {m} drops back under {BUS_ALERT_PER_MIN[m]:.1f}/min",
+            )
+        self._bus_alerting = firing
 
     # ------------------------------------------------------------------ inputs
 

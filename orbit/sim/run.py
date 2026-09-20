@@ -139,6 +139,16 @@ class Simulation:
             snap = self.ground.snapshot(self.now)
             self.telemetry.emit("snapshot", {"t": self.now, **snap})
             self.telemetry.emit("flags", {"t": self.now, "sats": {h: s["flags"] for h, s in snap["sats"].items()}})
+            # ground liveness, last so a failure here cannot cost the snapshot. Everything it carries is
+            # counters and virtual time, so the run file stays byte-identical for a seed.
+            self.stream.tick(
+                self.now,
+                state=self.ground.state,
+                rounds=self.ground.counters.rounds,
+                window=snap["window"],
+                bus_stats=self.ground_bus.stats,
+                period_s=SNAPSHOT_S,
+            )
         for sat in self.sats:
             bus = self.sat_bus[sat.hostname]
             for msg in bus.poll():

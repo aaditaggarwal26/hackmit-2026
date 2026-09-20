@@ -21,6 +21,7 @@ from orbit.protocol import messages as M
 lg = logging.getLogger("orbit.runtime")
 
 DEFAULT_TICK_S = 0.02
+DEFAULT_PERIOD_S = 1.0  # how often ``periodic`` runs: snapshots, flag evaluation, ground liveness
 
 
 class Node(Protocol):
@@ -48,10 +49,12 @@ async def drive(
     stop: asyncio.Event | None = None,
     observer: Callable[[M.Message, bool, float], None] | None = None,
     periodic: Callable[[float], None] | None = None,
-    period_s: float = 1.0,
+    period_s: float = DEFAULT_PERIOD_S,
 ) -> None:
     """Run until ``stop`` is set. ``observer(msg, outbound, now)`` sees every message in and out;
-    ``periodic(now)`` runs every ``period_s`` (snapshots, flag evaluation)."""
+    ``periodic(now)`` runs every ``period_s`` (snapshots, flag evaluation, ground liveness). That
+    period is also what ``ground_status.period_s`` promises the display, so the caller's periodic
+    and this one must be the same number — hence the shared default."""
     stop = stop or asyncio.Event()
 
     def send(msgs: list[M.Message], now: float) -> None:

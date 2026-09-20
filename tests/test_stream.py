@@ -2,12 +2,21 @@
 and the WebSocket fan-out with backlog."""
 
 import asyncio
+import itertools
 import json
 
 import pytest
 
 from orbit import config
-from orbit.ground.stream import EventStream, FifoBaseline, FrameMeta, StreamServer
+from orbit.bus.base import BusStats
+from orbit.ground.stream import (
+    BUS_ALERT_PER_MIN,
+    BUS_HEALTH_WINDOW_S,
+    EventStream,
+    FifoBaseline,
+    FrameMeta,
+    StreamServer,
+)
 from orbit.sim.run import run_scenario
 
 S = config.Settings()
@@ -20,8 +29,18 @@ TYPES = {
     "frame_arrived",
     "baseline_arrival",
     "window_update",
+    "ground_status",
+    "bus_health",
     "node_event",
     "run_end",
+}
+WINDOW = {  # a ContactWindow.snapshot() as the periodic tick passes it in
+    "open": True,
+    "capacity_bytes": 983040,
+    "used_bytes": 0,
+    "remaining_bytes": 983040,
+    "slots_used": 0,
+    "slots_remaining": 60,
 }
 
 
@@ -237,3 +256,119 @@ def test_run_end_is_the_last_event_even_if_the_bus_keeps_talking(tmp_path):
     sim.stream.on_event("no_bids", {"t": sim.now + 1, "round_id": 999, "excluded": []})
     sim.stream.end(sim.now + 2, reason="stopped")
     assert len(sim.stream.lines) == n and sim.stream.seq == n
+
+
+# ------------------------------------------------------------------ ground liveness
+
+
+def _events(stream):
+    return [json.loads(x) for x in stream.lines]
+
+
+def _tick(stream, now, st, **kw):
+    stream.tick(
+        now, state=kw.get("state", "READY"), rounds=kw.get("rounds", 0), window=WINDOW, bus_stats=st, period_s=1.0
+    )
+
+
+def _bus_alerts(events):
+    return [e for e in events if e["type"] == "node_event" and e["node_id"] is None and "bus " in e["message"]]
+
+
+def test_ground_status_is_periodic_and_says_who_is_linked(run):
+    _, ev = run
+    gs = [e for e in ev if e["type"] == "ground_status"]
+    assert len(gs) >= 5
+    for g in gs:
+        assert g["uptime_s"] == g["t"] and g["period_s"] == 1.0
+        assert g["state"] in ("READY", "BUSY", "COMPLETE", "CLOSED")
+        assert set(g["nodes"]) == {"expected", "seen", "linked"}
+        assert g["nodes"]["expected"] == 3 and g["nodes"]["linked"] <= g["nodes"]["seen"] <= 3
+        w = g["window"]
+        assert w["budget_bytes"] == w["used_bytes"] + w["remaining_bytes"] and w["open"] is True
+    assert [g["rounds"] for g in gs] == sorted(g["rounds"] for g in gs)  # monotonic: it is a counter
+    assert gs[-1]["nodes"]["seen"] == 3  # every satellite was heard from by the end
+    # one per tick, and the tick is the simulator's snapshot period
+    assert all(round(b["t"] - a["t"], 3) == 1.0 for a, b in itertools.pairwise(gs))
+
+
+def test_bus_health_reports_rates_and_stays_quiet_on_a_healthy_bus(run):
+    _, ev = run
+    bh = [e for e in ev if e["type"] == "bus_health"]
+    gs = [e for e in ev if e["type"] == "ground_status"]
+    assert len(bh) == len(gs)  # the two go out together, every tick
+    for b in bh:
+        assert b["window_s"] == BUS_HEALTH_WINDOW_S and 0 <= b["measured_s"] <= BUS_HEALTH_WINDOW_S
+        assert set(b["dropped"]) == {"malformed", "dup", "oversize", "own"}
+        assert set(b["rates_per_min"]) == set(BUS_ALERT_PER_MIN)
+        assert b["received"] >= b["delivered"] >= 0
+        assert b["alerts"] == []  # the loopback bus in this scenario drops nothing
+    assert _bus_alerts(ev) == []
+    assert [b["dropped"]["dup"] for b in bh] == sorted(b["dropped"]["dup"] for b in bh)  # totals, not deltas
+
+
+def test_bus_alert_fires_above_the_threshold_and_only_on_the_edge():
+    """One dropped datagram is a rate, not an alert; a sustained flood is one log line, not one a second."""
+    stream = EventStream(S, "rates", wall=False)
+    stream.start(0.0)
+    st = BusStats()
+    for t in range(6):
+        _tick(stream, float(t), st)
+    assert _bus_alerts(_events(stream)) == []
+    assert all(e["alerts"] == [] for e in _events(stream) if e["type"] == "bus_health")
+
+    st.dropped_dup = 5  # 5 over 6 s = 50/min, under the 60/min threshold: still silent
+    _tick(stream, 6.0, st)
+    assert _bus_alerts(_events(stream)) == []
+
+    st.dropped_dup = 12  # 12 over 7 s = 102.9/min: crosses
+    _tick(stream, 7.0, st)
+    fired = _bus_alerts(_events(stream))
+    assert len(fired) == 1 and fired[0]["level"] == "warn" and "dup" in fired[0]["message"]
+    alert = [e for e in _events(stream) if e["type"] == "bus_health"][-1]["alerts"]
+    assert alert == [{"metric": "dup", "rate_per_min": 102.857, "threshold_per_min": 60.0}]
+
+    st.dropped_dup = 20  # still above: no second warning
+    _tick(stream, 8.0, st)
+    _tick(stream, 9.0, st)
+    assert len(_bus_alerts(_events(stream))) == 1
+
+    _tick(stream, 20.0, st)  # 20 over 20 s = exactly 60/min, which is not *above* the threshold
+    back = _bus_alerts(_events(stream))
+    assert len(back) == 2 and back[1]["level"] == "info"
+    assert [e for e in _events(stream) if e["type"] == "bus_health"][-1]["alerts"] == []
+
+
+def test_malformed_rate_and_by_type_travel_together():
+    stream = EventStream(S, "malformed", wall=False)
+    stream.start(0.0)
+    st = BusStats()
+    _tick(stream, 0.0, st)
+    st.dropped_malformed, st.malformed_by_type = 4, {"bid": 3, "heartbeat": 1}
+    _tick(stream, 10.0, st)  # 4 over 10 s = 24/min, over the 6/min threshold
+    b = [e for e in _events(stream) if e["type"] == "bus_health"][-1]
+    assert b["rates_per_min"]["malformed"] == 24.0
+    assert b["malformed_by_type"] == {"bid": 3, "heartbeat": 1}
+    assert b["alerts"] == [{"metric": "malformed", "rate_per_min": 24.0, "threshold_per_min": 6.0}]
+
+
+def test_tick_is_silent_before_run_start_and_after_run_end():
+    """run_start is the first event and run_end the last; a periodic tick may not break either."""
+    stream = EventStream(S, "bounds", wall=False)
+    _tick(stream, 0.0, BusStats())
+    assert stream.seq == 0 and not stream.lines
+    stream.start(0.0)
+    _tick(stream, 1.0, BusStats())
+    n = stream.seq
+    assert n == 3
+    stream.end(2.0, reason="stopped")
+    _tick(stream, 3.0, BusStats())
+    assert stream.seq == n + 1 and _events(stream)[-1]["type"] == "run_end"
+
+
+def test_a_lossy_bus_alerts_once_in_a_whole_run(tmp_path):
+    sim = run_scenario("lossy", 12, seed=42, settings=S.with_overrides(runs_dir=str(tmp_path)))
+    ev = _events(sim.stream)
+    fired = _bus_alerts(ev)
+    assert [e["level"] for e in fired] == ["warn"] and "dup" in fired[0]["message"]
+    assert any(b["alerts"] for b in ev if b["type"] == "bus_health")

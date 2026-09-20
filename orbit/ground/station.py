@@ -20,7 +20,7 @@ from typing import Any
 from orbit.arbiter.fsm import GroundStation
 from orbit.bus.multicast import MulticastBus
 from orbit.config import Settings
-from orbit.ground.runtime import Clock, drive
+from orbit.ground.runtime import DEFAULT_PERIOD_S, Clock, drive
 from orbit.ground.stream import EventStream, RunFile, StreamServer, new_run_id
 from orbit.ground.telemetry import Telemetry, bus_summary
 from orbit.log import log
@@ -77,6 +77,15 @@ async def run_ground(
         sink("flags", {"t": now, "sats": {h: s["flags"] for h, s in snap["sats"].items()}})  # stream needs it too
         telemetry.emit("bus_stats", {"t": now, **bus.stats.as_dict()})
         telemetry.emit("telemetry_stats", {"t": now, **telemetry.stats.as_dict()})
+        # the ground's own liveness, last so a failure here cannot cost the snapshot above
+        stream.tick(
+            now,
+            state=ground.state,
+            rounds=ground.counters.rounds,
+            window=snap["window"],
+            bus_stats=bus.stats,
+            period_s=DEFAULT_PERIOD_S,
+        )
 
     log(
         lg,

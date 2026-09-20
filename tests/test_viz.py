@@ -243,6 +243,10 @@ def test_websocket_receives_state_then_pushes(client: TestClient) -> None:
 def test_index_served(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200 and "Orbit" in r.text and "/ws" in r.text
+    assert "GROUND UNREACHABLE" in r.text and 'id="watchdog"' in r.text  # the laptop's own liveness check
+    # observe-only: the page opens one socket and one GET, and has no other way to reach the network
+    assert r.text.count("new WebSocket(") == 1 and r.text.count("fetch(") == 1
+    assert "sendto" not in r.text and "ws.send" not in r.text
 
 
 def test_real_udp_path(client: TestClient) -> None:
@@ -259,3 +263,32 @@ def test_real_udp_path(client: TestClient) -> None:
         time.sleep(0.02)
     else:
         pytest.fail("datagram never arrived")
+
+
+def test_replay_carries_a_recorded_run_including_the_liveness_events(tmp_path) -> None:
+    """A recorded run is the rehearsal for the laptop's watchdog, so the periodic ground_status /
+    bus_health lines have to come back out of the file in order, with their pacing intact."""
+    from orbit import config
+    from orbit.sim.run import run_scenario
+    from viz.replay import load, replay
+
+    run_scenario("nominal", 8, seed=42, settings=config.Settings(runs_dir=str(tmp_path)), run_id="r")
+    events = load(tmp_path / "r.jsonl")
+    assert events and [t for t, _ in events] == sorted(t for t, _ in events)
+    by_type: dict[str, list[float]] = {}
+    for t, raw in events:
+        e = json.loads(raw)
+        assert e["t"] == t  # paced by the event's own ground time, not by file position
+        by_type.setdefault(str(e["type"]), []).append(t)
+    assert len(by_type["ground_status"]) == len(by_type["bus_health"]) >= 5
+    assert by_type["ground_status"] == sorted(by_type["ground_status"])
+    assert by_type["ground_status"][:3] == [0.0, 1.0, 2.0]  # one per ground tick, as the contract promises
+
+    sent: list[bytes] = []
+
+    class FakeSocket:  # replay only ever sends; a real socket would just add a kernel round trip
+        def sendto(self, data: bytes, addr: tuple[str, int]) -> None:
+            sent.append(data)
+
+    assert replay(events, ("127.0.0.1", 0), 1e6, FakeSocket()) == len(events)  # type: ignore[arg-type]
+    assert sent == [raw for _, raw in events]  # byte for byte, nothing interpreted on the way out

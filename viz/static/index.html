@@ -39,6 +39,7 @@
   .badge.quiet { border-color:transparent; padding-left:0 }
   .sat { border-left:6px solid var(--c0) } .sat.hard { border:2px solid var(--bad); border-left-width:6px }
   .sat.silent h2 .name { text-decoration:line-through; color:var(--ink2) }
+  .sat.unknown { opacity:.55 } .sat.unknown .kv, .sat.unknown .bars { filter:grayscale(1) }
   .sat h2 { color:var(--ink); text-transform:none; letter-spacing:0; font-size:15px; display:flex; gap:6px; align-items:center; flex-wrap:wrap }
   .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px }
   .kv span:nth-child(odd) { color:var(--ink2) }
@@ -80,6 +81,7 @@
   <span class="num">round <b id="round">—</b></span>
   <span>granted to <b id="granted">—</b></span>
   <span id="age" class="num">no telemetry yet</span>
+  <span id="watchdog" class="badge">watching</span>
   <span id="link" class="badge">connecting</span>
   <span id="ground" class="muted"></span>
 </header>
@@ -130,6 +132,12 @@ const has = v => v !== undefined && v !== null;
 // The page is a view of the server's state: everything below arrives on the socket or from /api/state.
 let S = { snapshot:null, decisions:[], recent:[], bus:[], flags:{}, rates:null, telemetry_stats:null, bus_stats:null, stats:{} };
 let lastRxWall = null, wsState = 'connecting', dirty = true, backoff = 500;
+// Watchdog. The ground heartbeats to the laptop — a snapshot, flags, bus and telemetry stats every
+// second — so silence means a crash, not a quiet pass. Staleness is measured on *this* clock: a
+// timestamp the ground stamped cannot tell us the ground stopped stamping. liveSince covers the case
+// where the socket is up and nothing has ever arrived, and the check only runs while the socket is
+// live, so a display-server outage is never reported as a dead ground.
+let liveSince = null, groundDown = false;
 const satColor = {}, expanded = new Set();
 const colorOf = h => { if (!(h in satColor)) satColor[h] = COLORS[Object.keys(satColor).length % COLORS.length]; return satColor[h]; };
 
@@ -171,9 +179,11 @@ function pushBus(e) {
 // --- transport: auto-reconnect with backoff; the page never asks the ground for anything ---------
 function connect() {
   const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-  ws.onopen = () => { wsState = 'live'; backoff = 500; dirty = true; };
+  // lastRxWall is cleared on connect: the age of an event from *before* the outage says nothing about
+  // the ground now, and adopt() restores it from the state message that arrives within milliseconds.
+  ws.onopen = () => { wsState = 'live'; liveSince = Date.now(); lastRxWall = null; backoff = 500; dirty = true; };
   ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.type === 'state') adopt(m); else applyPush(m); };
-  ws.onclose = () => { wsState = 'reconnecting'; dirty = true; setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
+  ws.onclose = () => { wsState = 'reconnecting'; liveSince = null; dirty = true; setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
   ws.onerror = () => ws.close();
 }
 fetch('/api/state').then(r => r.json()).then(adopt).catch(() => {});
@@ -191,6 +201,13 @@ function renderHeader() {
   ageEl.textContent = age == null ? 'no telemetry yet' : `last event ${age.toFixed(1)} s ago`;
   ageEl.className = 'num' + ((age == null || age > STALE_S) ? ' stale' : '');
   const link = $('link'); link.textContent = wsState; link.className = 'badge ' + (wsState === 'live' ? 'ok' : 'bad');
+  const quiet = (lastRxWall ?? liveSince) == null ? null : (Date.now() - (lastRxWall ?? liveSince)) / 1000;
+  const down = wsState === 'live' && quiet != null && quiet > STALE_S;
+  if (down !== groundDown) { groundDown = down; dirty = true; }  // the satellite panels change with it
+  const wd = $('watchdog');
+  if (wsState !== 'live') { wd.textContent = `display link ${wsState}`; wd.className = 'badge warn'; }
+  else if (down) { wd.textContent = `GROUND UNREACHABLE — nothing for ${quiet.toFixed(0)} s`; wd.className = 'badge bad'; }
+  else { wd.textContent = 'ground alive'; wd.className = 'badge ok'; }
   const last = S.recent[S.recent.length - 1];
   $('ground').textContent = last && last.host ? `ground: ${last.host} · t=${f1(last.t)} s` : '';
 }
@@ -252,12 +269,14 @@ function renderSats(sats) {
   const maxScore = Math.max(1, ...hosts.flatMap(h => (sats[h].window || []).map(e => e[1] || 0)));
   const el = $('sats');
   el.innerHTML = hosts.map(h => {
-    const s = sats[h], f = S.flags[h] || s.flags || null, col = colorOf(h);
-    const cls = 'panel sat' + (f && f.level === 'hard' ? ' hard' : '') + (f && f.silent ? ' silent' : '');
+    // with the ground unreachable every flag on the panel is a stale assessment, so none is shown:
+    // the honest answer about a satellite we can no longer hear about is "unknown", not "nominal".
+    const s = sats[h], f = groundDown ? null : (S.flags[h] || s.flags || null), col = colorOf(h);
+    const cls = 'panel sat' + (groundDown ? ' unknown' : '') + (f && f.level === 'hard' ? ' hard' : '') + (f && f.silent ? ' silent' : '');
     const occ = s.occupancy_pct, hot = f && f.memory_pressured;
     const win = (s.window || []).slice(0, 8);
     return `<section class="${cls}" style="border-left-color:${col}">
-      <h2><span class="dot" style="background:${col}"></span><span class="name">${esc(h)}</span> ${flagChips(f)}</h2>
+      <h2><span class="dot" style="background:${col}"></span><span class="name">${esc(h)}</span> ${groundDown ? '<span class="badge bad">unknown — ground unreachable</span>' : flagChips(f)}</h2>
       <div class="kv">
         <span>top score</span><span class="num"><b>${f1(s.top_score)}</b></span>
         <span>queue</span><span class="num">${fmt(s.queue_len)} item(s)</span>

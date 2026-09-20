@@ -134,3 +134,18 @@ def test_restarting_the_ground_mid_pass_resumes_arbitration():
     assert sim.ground.counters.completed >= 5, sim.ground.counters
     assert all(b.stats.dropped_dup == 0 for b in sim.sat_bus.values())
     assert before > 0
+
+
+def test_the_whole_event_stream_is_byte_identical_for_a_seed():
+    """The digest fingerprints the arbitration table; the periodic ground_status / bus_health events are
+    not in it. Pin the stream itself, so a wall clock or any other nondeterministic value leaking into a
+    simulated event fails here rather than the morning of the demo."""
+    import json
+
+    a = run_scenario("lossy", 12, seed=42, settings=S)
+    b = run_scenario("lossy", 12, seed=42, settings=S)
+    assert list(a.stream.lines) == list(b.stream.lines)
+    events = [json.loads(x) for x in a.stream.lines]
+    assert {"ground_status", "bus_health"} <= {e["type"] for e in events}
+    assert all("wall" not in e for e in events)  # the simulator runs the stream with wall=False
+    assert all(e["t"] == e["uptime_s"] for e in events if e["type"] == "ground_status")  # virtual clock only

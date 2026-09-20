@@ -6,6 +6,15 @@ The file is what ``orbit sim --events`` writes: one JSON event per line with a g
 time ``t``. Each line is sent as its own datagram to 127.0.0.1:port, paced by the gaps
 in ``t`` divided by ``--speed``. This is how the dashboard is exercised without a ground
 or any hardware, and how the demo is rehearsed: same events, same page, no radio.
+
+A run file (``runs/<run_id>.jsonl``, the display contract in ``docs/event_stream.md``)
+replays the same way: every line there carries ``t`` as well, so the periodic
+``ground_status`` and ``bus_health`` events come back out at the cadence the ground emitted
+them — which is what makes a recorded run a rehearsal for the laptop's ground watchdog and
+not just for the panels. Both shapes go out as bytes, in file order; nothing here reads an
+event, so an added event type replays without a change in this module.
+
+    uv run python -m viz.replay runs/sim-nominal-42.jsonl --speed 10
 """
 
 from __future__ import annotations
@@ -54,7 +63,7 @@ def replay(events: list[tuple[float, bytes]], addr: tuple[str, int], speed: floa
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("path", type=Path, help="JSON-lines file from `orbit sim --events`")
+    ap.add_argument("path", type=Path, help="JSON-lines file: `orbit sim --events`, or a runs/<run_id>.jsonl")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=DEFAULTS.telemetry_port)
     ap.add_argument("--speed", type=float, default=1.0, help="time compression; 10 = ten seconds of ground per second")
