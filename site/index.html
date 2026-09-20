@@ -1,0 +1,1085 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — deciding in orbit which picture is worth sending home</title>
+<meta name="description" content="Earth-observation satellites capture far more than they can transmit. Orbit scores every frame on the satellite that took it and spends the contact window best first. HackMIT 2026.">
+<meta name="theme-color" content="#edf0f3">
+<meta property="og:title" content="Orbit — deciding in orbit which picture is worth sending home">
+<meta property="og:description" content="Every frame scored where it was captured. The contact window spent best first. Real NASA MODIS imagery, real scores, one honest number.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23edf0f3'/%3E%3Cellipse cx='16' cy='16' rx='13' ry='6.5' fill='none' stroke='%236e7a85' stroke-width='1.5'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%231b54c8'/%3E%3C/svg%3E">
+<!--
+  Orbit — the project page, for the people judging it.
+
+  One file, no build step, no network: the font, the imagery and the data all sit
+  next to this file, so it opens by double-click on a borrowed laptop and deploys
+  to GitHub Pages unchanged.
+
+  The look is the Orbit design system (DESIGN.md), the same one the live display
+  sheet wears: bond stock, white plates, hairline rules, Archivo alone, light
+  only, and five pens that each carry exactly one meaning —
+    blue    Orbit's own result
+    pencil  the first-in-first-out baseline it is measured against
+    red     live, or unusable, or something the ground forced
+    green   measured on real hardware
+    amber   modelled, simulated, scaled or not yet measured
+  A satellite is a numbered lane, never a colour.
+
+  Every frame shown is a real NASA GIBS MODIS Terra frame from corpus/, and every
+  score beside it was computed by orbit/golden/score.py — the same kernel the
+  ESP32 firmware holds bit-exact. tools/site_data.py regenerates site/data.json
+  and site/frames/ from the corpus; nothing here is typed in by hand.
+-->
+<style>
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url('fonts/archivo-latin.woff2') format('woff2');
+}
+
+/* ── the five pens and the paper ──────────────────────────────────────── */
+:root {
+  --stock: #edf0f3; --plate: #ffffff; --plate-sunk: #f4f6f8;
+  --ink: #11161b; --ink-2: #4e5a66; --rule: #c9d2da; --rule-soft: #e2e8ed;
+  --blue: #1b54c8; --blue-wash: rgba(27, 84, 200, .10); --blue-soft: rgba(27, 84, 200, .16);
+  --pencil: #6e7a85;       /* the baseline pen: marks, rules, large figures */
+  --pencil-text: #626d78;  /* the same pen at small sizes, where 4.39:1 is not enough */
+  --red: #c0271f; --red-wash: rgba(192, 39, 31, .10);
+  --green: #15704a; --green-wash: rgba(21, 112, 74, .10);
+  --amber: #8a5a00; --amber-wash: rgba(138, 90, 0, .10);
+  --sh: 0 1px 2px rgba(17, 22, 27, .05), 0 6px 18px -12px rgba(17, 22, 27, .30);
+
+  --t-hero: clamp(36px, 4.4vw, 66px);
+  --t-head: clamp(27px, 3.2vw, 44px);
+  --t-fig:  clamp(30px, 3.6vw, 52px);
+  --t-title: clamp(19px, 1.5vw, 23px);
+  --t-lede: clamp(16px, 1.25vw, 19px);
+  --t-body: 15.5px;
+
+  --gut: clamp(18px, 3vw, 44px);
+  --wrap: 1560px;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0; background: var(--stock); color: var(--ink);
+  font: 400 var(--t-body)/1.5 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+  overflow-x: hidden;
+}
+
+/* The browser's own surfaces, dressed in the same palette. */
+::selection { background: var(--blue-soft); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 9px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--pencil); background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+a { color: var(--blue); text-decoration-thickness: 1px; text-underline-offset: 3px; transition: color .18s var(--ease); }
+a:hover { color: var(--ink); }
+h1, h2, h3 { margin: 0; font-weight: 800; letter-spacing: -.028em; font-stretch: 108%; line-height: .95; text-wrap: balance; }
+p { margin: 0; }
+img { display: block; max-width: 100%; }
+
+.wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: var(--gut); }
+.rule { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+.micro { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+.lede { font-size: var(--t-lede); line-height: 1.5; color: var(--ink-2); max-width: 68ch; }
+.lede b { color: var(--ink); font-weight: 600; }
+.note { font-size: 12.5px; line-height: 1.4; color: var(--ink-2); }
+.note b { color: var(--ink); font-weight: 600; }
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: var(--gut); top: 10px; z-index: 40; background: var(--plate); padding: 9px 14px; border: 1px solid var(--rule); border-radius: 3px; }
+
+/* ── provenance tags: the five pens, as labels ────────────────────────── */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  padding: 3px 7px; border-radius: 3px; border: 1px solid currentColor; white-space: nowrap;
+}
+.tag::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.tag.measured { color: var(--green); background: var(--green-wash); }
+.tag.modelled { color: var(--amber); background: var(--amber-wash); }
+.tag.orbit    { color: var(--blue);  background: var(--blue-wash); }
+.tag.base     { color: var(--pencil-text); background: rgba(110,122,133,.10); }
+.tag.live     { color: var(--red);   background: var(--red-wash); }
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead { position: sticky; top: 0; z-index: 30; background: rgba(237,240,243,.92); backdrop-filter: blur(9px) saturate(1.2); border-bottom: 1px solid var(--rule); }
+.masthead .wrap { display: flex; align-items: center; gap: 10px 26px; min-height: 58px; flex-wrap: wrap; }
+.mark { display: flex; align-items: center; gap: 9px; font-size: 20px; font-weight: 800; letter-spacing: -.03em; font-stretch: 114%; color: var(--ink); text-decoration: none; flex: none; }
+.mark svg { display: block; }
+.mark:hover { color: var(--ink); }
+.masthead nav { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+.masthead nav a {
+  font-size: 12.5px; font-weight: 600; color: var(--ink-2); text-decoration: none;
+  padding: 6px 10px; border-radius: 3px; border: 1px solid transparent; white-space: nowrap;
+  transition: color .18s var(--ease), background-color .18s var(--ease);
+}
+.masthead nav a:hover { color: var(--ink); background: var(--plate); }
+.masthead nav a[aria-current="true"] { color: var(--ink); background: var(--plate); border-color: var(--rule-soft); }
+@media (max-width: 900px) { .masthead nav { display: none; } }
+
+/* ── the running head: what this run is ───────────────────────────────── */
+.runhead { background: var(--plate); border-bottom: 1px solid var(--rule); }
+.runhead .wrap { display: flex; flex-wrap: wrap; gap: 4px 28px; padding-block: 9px; }
+.runhead dl { display: flex; align-items: baseline; gap: 7px; margin: 0; font-size: 12px; color: var(--ink-2); }
+.runhead dt { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 10px; }
+.runhead dd { margin: 0; color: var(--ink); font-weight: 600; }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+section { padding-block: clamp(56px, 7.5vw, 116px); border-bottom: 1px solid var(--rule); }
+section > .wrap > h2 { font-size: var(--t-head); max-width: 20ch; }
+.head { display: grid; gap: 22px; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: end; margin-bottom: clamp(30px, 3.6vw, 52px); }
+@media (max-width: 1000px) { .head { grid-template-columns: 1fr; align-items: start; gap: 18px; } }
+
+/* ── hero ─────────────────────────────────────────────────────────────── */
+.hero { padding-top: clamp(44px, 6vw, 86px); padding-bottom: clamp(30px, 3.4vw, 46px); }
+.hero h1 { font-size: var(--t-hero); letter-spacing: -.038em; font-stretch: 112%; max-width: 17ch; }
+.hero .lede { margin-top: clamp(20px, 2vw, 30px); font-size: clamp(15px, 1.4vw, 20px); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, .88fr); gap: clamp(26px, 3.6vw, 64px); align-items: start; }
+@media (max-width: 1100px) { .hero-grid { grid-template-columns: 1fr; } }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.btn {
+  font: inherit; font-size: 14px; font-weight: 700; letter-spacing: -.01em;
+  padding: 11px 18px; border-radius: 3px; cursor: pointer; text-decoration: none;
+  border: 1px solid var(--ink); background: var(--ink); color: var(--plate);
+  transition: background-color .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease);
+}
+.btn:hover { background: var(--blue); border-color: var(--blue); color: var(--plate); }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+.btn.ghost:hover { background: var(--plate); border-color: var(--pencil); color: var(--ink); }
+.btn:disabled { opacity: .42; cursor: not-allowed; background: var(--plate-sunk); color: var(--ink-2); border-color: var(--rule-soft); }
+
+/* ── the split: the page's spine ──────────────────────────────────────── */
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0; border: 1px solid var(--rule-soft); border-radius: 3px; background: var(--plate); box-shadow: var(--sh); overflow: hidden; }
+.split > * { min-width: 0; }
+.split > .budget { grid-column: 1 / -1; }
+.split .col { padding: clamp(15px, 1.5vw, 22px); }
+.split .col + .col { border-left: 1px solid var(--rule); }
+@media (max-width: 760px) {
+  .split { grid-template-columns: 1fr; }
+  .split .col + .col { border-left: 0; border-top: 1px solid var(--rule); }
+}
+.colhead { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; padding-bottom: 9px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 13px; }
+.colhead h3 { font-size: var(--t-title); letter-spacing: -.022em; }
+.colhead .who { color: var(--pencil); }
+.col.is-orbit .colhead h3 { color: var(--blue); }
+.colhead .sub { font-size: 12.5px; color: var(--ink-2); width: 100%; font-weight: 400; letter-spacing: 0; }
+
+.budget { display: flex; align-items: center; gap: 12px; padding: 10px clamp(15px, 1.5vw, 22px); border-bottom: 1px solid var(--rule); background: var(--plate-sunk); font-size: 12px; color: var(--ink-2); flex-wrap: wrap; }
+.budget b { color: var(--ink); font-weight: 600; white-space: nowrap; }
+@media (max-width: 620px) { .budget .track { flex-basis: 100%; order: 3; } }
+.budget .track { flex: 1 1 140px; height: 7px; min-width: 90px; border-radius: 5px; background: var(--stock); border: 1px solid var(--rule-soft); overflow: hidden; }
+.budget .track i { display: block; height: 100%; background: var(--ink); transform-origin: left; transform: scaleX(0); transition: transform .5s var(--ease); }
+
+/* ── frame slots ──────────────────────────────────────────────────────── */
+.slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.slot { position: relative; border: 1px solid var(--rule-soft); border-radius: 3px; background: var(--plate-sunk); aspect-ratio: 1; overflow: hidden; }
+.slot.empty::after { content: attr(data-n); position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--pencil-text); text-transform: uppercase; }
+.slot img { width: 100%; height: 100%; object-fit: cover; image-rendering: auto; }
+.slot .verdict {
+  position: absolute; left: 4px; bottom: 4px; right: 4px; text-align: center;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 3px 4px; border-radius: 2px; background: rgba(255,255,255,.94); color: var(--green);
+}
+.slot .verdict.no { color: var(--red); }
+.slot .sc {
+  position: absolute; top: 4px; left: 4px; min-width: 22px; text-align: center;
+  font-size: 11px; font-weight: 800; color: var(--ink); background: rgba(255,255,255,.94);
+  padding: 2px 4px; border-radius: 2px; font-variant-numeric: tabular-nums;
+}
+.slot.filling { animation: land .52s var(--ease) both; }
+@keyframes land { from { opacity: 0; transform: translateY(9px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* ── the tally under each column ──────────────────────────────────────── */
+.tally { display: flex; align-items: baseline; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule-soft); flex-wrap: wrap; }
+.tally .fig { font-size: var(--t-fig); font-weight: 800; letter-spacing: -.03em; line-height: .9; font-stretch: 106%; color: var(--pencil); }
+.col.is-orbit .tally .fig { color: var(--blue); }
+.tally .lbl { font-size: 12.5px; color: var(--ink-2); max-width: 22ch; line-height: 1.3; }
+
+/* ── the capture strip ────────────────────────────────────────────────── */
+.strip { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 900px) { .strip { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.cap { position: relative; border: 1px solid var(--rule-soft); border-radius: 3px; overflow: hidden; background: var(--plate-sunk); aspect-ratio: 1; opacity: .3; transition: opacity .3s var(--ease); }
+.cap.on { opacity: 1; }
+.cap img { width: 100%; height: 100%; object-fit: cover; }
+.cap .s { position: absolute; left: 0; right: 0; bottom: 0; font-size: 10px; font-weight: 700; text-align: center; padding: 2px 0; background: rgba(255,255,255,.93); color: var(--ink); letter-spacing: 0; }
+.cap.bad .s { color: var(--red); }
+
+/* ── ledger rows: the anti-card ───────────────────────────────────────── */
+.ledger { border-top: 1px solid var(--rule); }
+.row { display: grid; grid-template-columns: 210px minmax(0, 1fr) auto; gap: 14px 26px; align-items: baseline; padding-block: 18px; border-bottom: 1px solid var(--rule); }
+.row > h3 { font-size: 15.5px; font-weight: 700; letter-spacing: -.012em; line-height: 1.3; font-stretch: 100%; }
+.row p { color: var(--ink-2); max-width: 74ch; }
+.row p b, .row p strong { color: var(--ink); font-weight: 600; }
+.row .fig { font-size: 20px; font-weight: 800; letter-spacing: -.022em; color: var(--ink); white-space: nowrap; }
+@media (max-width: 860px) {
+  .row { grid-template-columns: 1fr; gap: 7px; padding-block: 15px; }
+  .row .fig { font-size: 15px; }
+}
+
+/* ── the terms of the score ───────────────────────────────────────────── */
+.termwrap { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 520px) { .termwrap { grid-template-columns: 1fr; } }
+.termwrap img { width: 100%; border: 1px solid var(--rule-soft); border-radius: 3px; }
+.terms { display: grid; gap: 11px; }
+.term { display: grid; grid-template-columns: 96px minmax(0, 1fr) 52px; gap: 12px; align-items: center; font-size: 13px; }
+.term .n { font-weight: 700; }
+.term .bar { height: 9px; border-radius: 5px; background: var(--stock); border: 1px solid var(--rule-soft); overflow: hidden; }
+.term .bar i { display: block; height: 100%; background: var(--blue); transform-origin: left; }
+.term .v { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* ── the formula ──────────────────────────────────────────────────────── */
+.formula { background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px; box-shadow: var(--sh); padding: clamp(18px, 2vw, 28px); }
+.formula .eq { display: grid; gap: 9px; }
+.formula .ln { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding-bottom: 9px; border-bottom: 1px solid var(--rule-soft); }
+.formula .ln:last-child { border-bottom: 0; padding-bottom: 0; }
+.formula .op { font-size: 15px; font-weight: 700; color: var(--pencil-text); }
+.formula .what { font-size: 15px; font-weight: 600; }
+.formula .what small { display: block; font-size: 12.5px; font-weight: 400; color: var(--ink-2); letter-spacing: 0; margin-top: 2px; }
+.formula .rate { font-size: 13px; font-weight: 700; color: var(--blue); white-space: nowrap; }
+
+/* ── the honesty ledger ───────────────────────────────────────────────── */
+.honest .row { grid-template-columns: 128px minmax(0, 1fr); }
+@media (max-width: 860px) { .honest .row { grid-template-columns: 1fr; } }
+
+/* ── sponsors ─────────────────────────────────────────────────────────── */
+.sponsors .row { grid-template-columns: 190px minmax(0, 1fr); align-items: center; padding-block: 26px; }
+@media (max-width: 860px) { .sponsors .row { grid-template-columns: 1fr; align-items: start; } }
+.wordmark { font-size: 23px; font-weight: 800; letter-spacing: -.02em; font-stretch: 112%; color: var(--ink); line-height: 1; }
+.wordmark small { display: block; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); margin-top: 6px; }
+.sponsors img.logo { max-height: 30px; width: auto; }
+
+/* ── architecture diagram ─────────────────────────────────────────────── */
+.diagram { background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px; box-shadow: var(--sh); padding: clamp(16px, 2vw, 26px); overflow-x: auto; }
+.diagram svg { display: block; min-width: 660px; width: 100%; max-width: 860px; height: auto; margin-inline: auto; }
+
+/* ── footer ───────────────────────────────────────────────────────────── */
+footer { padding-block: clamp(44px, 5vw, 72px); }
+footer .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 30px; }
+footer h3 { font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 11px; font-stretch: 100%; }
+footer ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; font-size: 13.5px; }
+footer .credit { margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-2); max-width: 92ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="mark" href="#top">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+        <ellipse cx="16" cy="16" rx="13" ry="6.5" fill="none" stroke="#6e7a85" stroke-width="1.6"/>
+        <circle cx="16" cy="16" r="5" fill="#1b54c8"/>
+      </svg>
+      Orbit
+    </a>
+    <nav aria-label="Sections">
+      <a href="#window">The window</a>
+      <a href="#score">Scoring</a>
+      <a href="#pass">One pass</a>
+      <a href="#arbitration">Arbitration</a>
+      <a href="#result">The result</a>
+      <a href="#camera">Camera</a>
+      <a href="#real">What is real</a>
+      <a href="#next">What is next</a>
+      <a href="#built">Built with</a>
+    </nav>
+  </div>
+</header>
+
+<div class="runhead">
+  <div class="wrap">
+    <dl><dt>Event</dt><dd>HackMIT 2026</dd></dl>
+    <dl><dt>Track</dt><dd>Sustainability</dd></dl>
+    <dl><dt>Corpus</dt><dd>194 NASA MODIS frames</dd></dl>
+    <dl><dt>Kernel</dt><dd>orbit/golden/score.py</dd></dl>
+    <dl><dt>Tests</dt><dd>353</dd></dl>
+  </div>
+</div>
+
+<main id="main">
+<a id="top"></a>
+
+<!-- ══ hero ═══════════════════════════════════════════════════════════ -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <h1>A satellite takes far more pictures than it can ever send home.</h1>
+        <p class="lede">
+          A spacecraft can only downlink while it is passing over a ground station. Most of what
+          it captured in between is cloud, haze, or a scene that has not changed since yesterday,
+          and it has no way of knowing which is which. So the window gets spent on whatever
+          happened to be next in the buffer.
+          <b>Orbit scores every frame on the satellite that took it, and spends the window
+          best first.</b>
+        </p>
+        <div class="actions">
+          <a class="btn" href="#pass">Run one pass yourself</a>
+          <a class="btn ghost" href="#result">See the measured result</a>
+        </div>
+      </div>
+
+      <figure style="margin:0">
+        <div class="split" aria-label="The same twelve captures, two policies, one window">
+          <div class="budget">
+            <span>One contact window</span>
+            <span class="track"><i style="transform:scaleX(1)"></i></span>
+            <b>3 slots · 49,152 bytes</b>
+          </div>
+          <div class="col">
+            <div class="colhead">
+              <h3 class="who">First in, first out</h3>
+              <span class="tag base">Baseline</span>
+              <span class="sub">Sends whatever was captured first. No scoring.</span>
+            </div>
+            <div class="slots" id="heroFifo"></div>
+            <div class="tally"><span class="fig">1</span><span class="lbl">of 3 delivered frames are usable</span></div>
+          </div>
+          <div class="col is-orbit">
+            <div class="colhead">
+              <h3>Orbit</h3>
+              <span class="tag orbit">Scored queue</span>
+              <span class="sub">Sends its highest-scoring frames first.</span>
+            </div>
+            <div class="slots" id="heroOrbit"></div>
+            <div class="tally"><span class="fig">3</span><span class="lbl">of 3 delivered frames are usable</span></div>
+          </div>
+        </div>
+        <figcaption class="note" style="margin-top:11px">
+          Real MODIS frames from the committed corpus, scored by <b>orbit/golden/score.py</b>.
+          Same twelve captures, same window, same bytes. A frame is <b>usable</b> when its cloud
+          fraction is at most 0.35, which is never the score that ranked it.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ══ the window ═════════════════════════════════════════════════════ -->
+<section id="window">
+  <div class="wrap">
+    <div class="head">
+      <h2>The camera is not the constraint. The window is.</h2>
+      <p class="lede">
+        Downlink happens only during a pass over a ground station, and a satellite cannot
+        widen that window: it is a matter of line of sight and licensed spectrum, not of
+        engineering effort. The buffer fills faster than the link can drain it, so something
+        has to decide what leaves first. Today, nothing does.
+      </p>
+    </div>
+
+    <div class="ledger">
+      <div class="row">
+        <h3>Every frame is the same size</h3>
+        <p>128 × 128 pixels, 8-bit grayscale, one byte per pixel. It leaves the board as
+          <b>19 chunks of 900 raw bytes</b>, repeated over three whole passes, because the shared
+          bus loses datagrams.</p>
+        <span class="fig">16,384 B</span>
+      </div>
+      <div class="row">
+        <h3>The modelled window carries 60</h3>
+        <p>120 seconds at 65,536 bits per second is 983,040 bytes, which is sixty frames.
+          Both policies are handed that same budget, and the comparison is what each one
+          chose to spend it on. <b>The window is modelled by byte accounting, not radiated</b>:
+          pixels never cross a radio.</p>
+        <span class="tag modelled">Modelled</span>
+      </div>
+      <div class="row">
+        <h3>29% of the corpus is cloudy</h3>
+        <p>56 of the 194 committed MODIS frames are classified cloudy by the scoring kernel's
+          own threshold. Those are the frames a first-in-first-out satellite spends its window
+          on roughly a third of the time, and they are the ones that arrive worthless.</p>
+        <span class="fig">56 / 194</span>
+      </div>
+      <div class="row">
+        <h3>Losing a frame is not the failure mode</h3>
+        <p>Cloud lowers a frame's score. It does not block the radio. What gates transmission is
+          line of sight, and those two things stay separate everywhere in this system, because
+          conflating them is how a demo gets taken apart.</p>
+        <span class="tag base">By design</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ scoring ════════════════════════════════════════════════════════ -->
+<section id="score">
+  <div class="wrap">
+    <div class="head">
+      <h2>Score it where the picture was taken.</h2>
+      <p class="lede">
+        Three integer measurements over the frame's own pixels, one streaming pass, no
+        multiplication in the inner loop and no neural network. It is deliberately simple:
+        it has to run on a microcontroller, and it has to give the same answer every time.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="col">
+        <div class="colhead"><h3 class="who">What it measures</h3>
+          <span class="sub">Every term is a count of pixels, weighted equally at 21,845 of 65,535.</span>
+        </div>
+        <div class="termwrap">
+          <figure style="margin:0" id="termFrame"></figure>
+          <div class="terms" id="terms"></div>
+        </div>
+        <p class="note" style="margin-top:16px">
+          A pixel counts as cloud above <b>200</b>, and as changed when it differs from its
+          scene's reference frame by more than <b>16</b>. Sharpness is a Sobel sum shifted
+          right by <b>5</b>, a value tuned once against the corpus and then frozen.
+          Scores are unsigned 16-bit on the wire and shown here out of 100.
+        </p>
+      </div>
+      <div class="col is-orbit">
+        <div class="colhead"><h3>Reorder, do not discard</h3>
+          <span class="sub">The difference that makes this defensible.</span>
+        </div>
+        <p style="color:var(--ink-2);max-width:60ch">
+          ESA's Φ-sat-1 showed in 2020 that a satellite can filter its own imagery onboard, using
+          an AI accelerator to throw cloudy frames away before they were ever sent. Orbit only
+          changes the order.
+        </p>
+        <p style="color:var(--ink-2);max-width:60ch;margin-top:14px">
+          If the score is wrong about a frame, that frame is still on the satellite, just further
+          back in the queue. Nothing is destroyed on the strength of a number computed by a
+          microcontroller. It is a better failure mode for a hackathon, and a better one for a
+          real mission.
+        </p>
+        <div class="tally">
+          <span class="fig" style="color:var(--blue)">8</span>
+          <span class="lbl">frame slots held in PSRAM on each board, allocated once at boot</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ one pass ═══════════════════════════════════════════════════════ -->
+<section id="pass">
+  <div class="wrap">
+    <div class="head">
+      <h2>One pass, two policies, the same three slots.</h2>
+      <p class="lede">
+        These are twelve real captures from a single pass of the recorded run, in the order the
+        satellite took them. Capture them, then open the window. Both policies get three slots
+        and the same bytes. The only difference is which frames they choose to spend them on.
+      </p>
+    </div>
+
+    <div style="background:var(--plate);border:1px solid var(--rule-soft);border-radius:3px;box-shadow:var(--sh);padding:clamp(15px,1.8vw,24px)">
+      <div class="actions" style="margin-top:0;margin-bottom:18px">
+        <button class="btn" id="btnCapture">Capture next frame</button>
+        <button class="btn ghost" id="btnAll">Capture all twelve</button>
+        <button class="btn ghost" id="btnOpen" disabled>Open the contact window</button>
+        <button class="btn ghost" id="btnReset">Reset</button>
+      </div>
+
+      <p class="micro" style="margin-bottom:9px">Captured this pass <span id="capCount" style="color:var(--ink)">0 of 12</span></p>
+      <div class="strip" id="strip"></div>
+      <p class="note" style="margin:11px 0 22px">
+        Each tile shows the frame and the score the kernel gave it, out of 100.
+        A score in <span style="color:var(--red);font-weight:600">red</span> is a frame whose cloud
+        fraction is above 0.35, so it would arrive unusable however it was ranked.
+      </p>
+
+      <div class="split">
+        <div class="budget">
+          <span>Window budget</span>
+          <span class="track"><i id="budgetBar"></i></span>
+          <b><span id="budgetUsed">0</span> of 49,152 bytes</b>
+        </div>
+        <div class="col">
+          <div class="colhead">
+            <h3 class="who">First in, first out</h3>
+            <span class="tag base">Baseline</span>
+            <span class="sub">Transmits in capture order.</span>
+          </div>
+          <div class="slots" id="simFifo"></div>
+          <div class="tally"><span class="fig" id="fifoFig">0</span><span class="lbl">usable frames delivered</span></div>
+        </div>
+        <div class="col is-orbit">
+          <div class="colhead">
+            <h3>Orbit</h3>
+            <span class="tag orbit">Scored queue</span>
+            <span class="sub">Transmits highest score first.</span>
+          </div>
+          <div class="slots" id="simOrbit"></div>
+          <div class="tally"><span class="fig" id="orbitFig">0</span><span class="lbl">usable frames delivered</span></div>
+        </div>
+      </div>
+      <p class="note" id="simVerdict" style="margin-top:14px" role="status" aria-live="polite">
+        Capture some frames, then open the window.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ══ arbitration ════════════════════════════════════════════════════ -->
+<section id="arbitration">
+  <div class="wrap">
+    <div class="head">
+      <h2>One window, several satellites, one decision at a time.</h2>
+      <p class="lede">
+        Scoring onboard a single satellite has flown before. What this project is actually about
+        is the next problem: several satellites sharing one ground station. Each bids its best
+        frame, the ground grants one slot to one satellite, that satellite transmits to completion,
+        and the arbitration runs again.
+      </p>
+    </div>
+
+    <div class="hero-grid">
+      <div class="diagram">
+        <svg viewBox="0 0 700 260" role="img" aria-label="Three satellites and a ground station share one multicast bus; the display machine listens only.">
+          <text x="350" y="20" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="1.1" fill="#4e5a66">SHARED MULTICAST BUS — EVERY NODE HEARS EVERY MESSAGE</text>
+          <line x1="40" y1="38" x2="660" y2="38" stroke="#11161b" stroke-width="2"/>
+          <g stroke="#c9d2da" stroke-width="1">
+            <line x1="130" y1="38" x2="130" y2="76"/><line x1="350" y1="38" x2="350" y2="76"/><line x1="570" y1="38" x2="570" y2="76"/>
+            <line x1="350" y1="140" x2="350" y2="172"/>
+          </g>
+          <g font-size="13" font-weight="700" fill="#11161b" text-anchor="middle">
+            <g><rect x="52" y="76" width="156" height="64" rx="3" fill="#ffffff" stroke="#c9d2da"/>
+              <text x="130" y="100">Satellite 1</text>
+              <text x="130" y="118" font-size="11" font-weight="400" fill="#4e5a66">scores · queues · bids</text>
+              <text x="130" y="132" font-size="10" font-weight="700" fill="#15704a" letter-spacing=".6">ESP32-S3</text></g>
+            <g><rect x="272" y="76" width="156" height="64" rx="3" fill="#ffffff" stroke="#c9d2da"/>
+              <text x="350" y="100">Satellite 2</text>
+              <text x="350" y="118" font-size="11" font-weight="400" fill="#4e5a66">scores · queues · bids</text>
+              <text x="350" y="132" font-size="10" font-weight="700" fill="#15704a" letter-spacing=".6">ESP32-S3</text></g>
+            <g><rect x="492" y="76" width="156" height="64" rx="3" fill="#ffffff" stroke="#c9d2da"/>
+              <text x="570" y="100">Satellite 3</text>
+              <text x="570" y="118" font-size="11" font-weight="400" fill="#4e5a66">scores · queues · bids</text>
+              <text x="570" y="132" font-size="10" font-weight="700" fill="#15704a" letter-spacing=".6">ESP32-S3</text></g>
+            <g><rect x="252" y="172" width="196" height="66" rx="3" fill="#1b54c8" stroke="#1b54c8"/>
+              <text x="350" y="196" fill="#ffffff">Ground station</text>
+              <text x="350" y="214" font-size="11" font-weight="400" fill="#ffffff" opacity=".88">grants one slot at a time</text>
+              <text x="350" y="229" font-size="11" font-weight="400" fill="#ffffff" opacity=".88">and does the byte accounting</text></g>
+            <g><rect x="492" y="180" width="156" height="50" rx="3" fill="#f4f6f8" stroke="#c9d2da" stroke-dasharray="4 3"/>
+              <text x="570" y="202" font-size="12">Display laptop</text>
+              <text x="570" y="219" font-size="10.5" font-weight="400" fill="#4e5a66">listens, never commands</text></g>
+          </g>
+          <line x1="448" y1="205" x2="492" y2="205" stroke="#c9d2da" stroke-width="1" stroke-dasharray="4 3"/>
+        </svg>
+        <p class="note" style="margin-top:13px">
+          Solid lines are the control bus. The dashed line is telemetry only: the laptop is never
+          in the control path, so closing it does not stop the run. Satellites are identified by
+          numbered lane rather than by colour, so the display survives a bad projector.
+        </p>
+      </div>
+
+      <div class="formula">
+        <p class="micro" style="margin-bottom:14px">How one slot is decided</p>
+        <div class="eq">
+          <div class="ln"><span class="op"></span>
+            <span class="what">The frame's score<small>What the kernel measured, out of 65,535.</small></span>
+            <span class="rate">score</span></div>
+          <div class="ln"><span class="op">+</span>
+            <span class="what">How long that frame has waited<small>Stops a good frame being stranded behind newer arrivals.</small></span>
+            <span class="rate">0.5 / s</span></div>
+          <div class="ln"><span class="op">+</span>
+            <span class="what">How long that satellite has waited<small>Stops a slightly lower-scoring satellite being locked out, which frame aging alone can never fix.</small></span>
+            <span class="rate">0.3 / s</span></div>
+        </div>
+        <p class="note" style="margin-top:18px">
+          Evaluated per slot, on each satellite's top item only. <b>No round robin, no time
+          slicing, no preemption</b>: a satellite that keeps winning genuinely holds the best
+          frames. Ties go to the lowest hostname, so a run replays identically.
+          When the two aging terms rather than the raw score decide a slot, the ground labels
+          that grant <b>starvation_forced</b> in the event stream, which is how fairness is
+          audited after the fact rather than asserted.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ the result ═════════════════════════════════════════════════════ -->
+<section id="result">
+  <div class="wrap">
+    <div class="head">
+      <h2>The number this project stands on.</h2>
+      <p class="lede">
+        Usable frames delivered per byte of contact window, from a run written by the ground
+        station itself. Both paths were handed the same 983,040-byte budget. Usable means a
+        cloud fraction of at most 0.35, computed from the delivered frame and never from the
+        score that ranked it, because ranking by a number and then reporting that same number
+        is circular.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="col">
+        <div class="colhead">
+          <h3 class="who">First in, first out</h3>
+          <span class="tag base">Baseline</span>
+          <span class="sub">Same sixty slots, same bytes, no scoring.</span>
+        </div>
+        <div class="tally" style="border-top:0;padding-top:0;margin-top:4px">
+          <span class="fig">34</span>
+          <span class="lbl">usable frames of 60 delivered</span>
+        </div>
+      </div>
+      <div class="col is-orbit">
+        <div class="colhead">
+          <h3>Orbit</h3>
+          <span class="tag orbit">Scored queue</span>
+          <span class="sub">Same sixty slots, same bytes, spent best first.</span>
+        </div>
+        <div class="tally" style="border-top:0;padding-top:0;margin-top:4px">
+          <span class="fig">40</span>
+          <span class="lbl">usable frames of 60 delivered</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="ledger" style="margin-top:34px">
+      <div class="row">
+        <h3>1.176× more usable imagery</h3>
+        <p>Written by the real ground station, not by a fixture generator. The run closed because
+          the window closed, and the event stream, the byte accounting and the usable rule are all
+          recoverable from the file.</p>
+        <span class="tag measured">Recorded run</span>
+      </div>
+      <div class="row">
+        <h3>The scoring kernel, timed</h3>
+        <p><b>11,392 ± 27 frames per second</b> on one pinned Cortex-X925 core, and 7,811 ± 9 on the
+          GB10 GPU, over the same 194 MODIS frames. This is a single-frame-per-call microbenchmark
+          with a host synchronisation per frame, so it is a latency figure, not a throughput
+          contest, and Orbit makes no claim about beating a datacentre GPU.</p>
+        <span class="tag measured">GX10</span>
+      </div>
+      <div class="row">
+        <h3>1.63 J per 1,000 frames</h3>
+        <p>GPU-die only, from the NVML energy counter. <b>CPU and whole-board power are not
+          instrumented on that machine</b> and are reported as unavailable rather than estimated.
+          Die figures and board figures are never compared as though they were the same quantity.</p>
+        <span class="tag measured">GPU die</span>
+      </div>
+      <div class="row">
+        <h3>Redundancy is what makes the bus usable</h3>
+        <p>Measured on the demo network by counting gaps in each node's own sequence numbers:
+          a single copy of every datagram loses <b>35.7%</b>. Three copies four milliseconds apart
+          lose 13.3%. Four copies twenty milliseconds apart lose <b>3.6%</b>, which is what the
+          firmware ships.</p>
+        <span class="tag measured">On the bench</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ camera ═════════════════════════════════════════════════════════ -->
+<section id="camera">
+  <div class="wrap">
+    <div class="head">
+      <h2>Hold something up to a camera and watch the kernel score it.</h2>
+      <p class="lede">
+        The same scoring function, running on whatever your laptop camera is pointed at. It
+        shows the cloud mask, the edge map and the change mask that produced the number, and
+        whether the priority queue chose to keep the frame or evict it.
+      </p>
+    </div>
+    <div class="ledger">
+      <div class="row">
+        <h3>What it proves</h3>
+        <p>Onboard scoring and queue admission, live, on an image nobody prepared in advance.
+          A photo comes in, the kernel scores it on cloud, detail and change, and the eight-slot
+          queue decides whether it is worth keeping.</p>
+        <span class="tag orbit">Live</span>
+      </div>
+      <div class="row">
+        <h3>What it does not show</h3>
+        <p>Arbitration or downlink. <b>Nothing is ever transmitted in this demo.</b> It is the half
+          of the system that happens on the board, shown by itself.</p>
+        <span class="tag base">Scope</span>
+      </div>
+      <div class="row">
+        <h3>With no camera it still runs</h3>
+        <p>No webcam, or a denied permission, is not a failure: it pulls a frame from the committed
+          corpus and scores it exactly the same way.</p>
+        <code style="font-size:12.5px;color:var(--ink-2)">uv run python camera/demo.py</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ what is real ═══════════════════════════════════════════════════ -->
+<section id="real">
+  <div class="wrap">
+    <div class="head">
+      <h2>What is measured, what is modelled, and what is scaled down.</h2>
+      <p class="lede">
+        The project's first principle is that it never invents a number. Anything that has not
+        been measured says so, with the reason. This is the section to read before asking a
+        hard question, because the hard question has probably already been answered here.
+      </p>
+    </div>
+
+    <div class="ledger honest">
+      <div class="row"><span class="tag measured">Measured</span>
+        <p><b>The scoring kernel's speed and GPU-die energy</b>, on the GX10, over the committed
+          corpus. <b>The multicast loss rates</b>, on the demo network. <b>The board's flash and
+          PSRAM</b>, read off the chip rather than off the datasheet. <b>353 tests</b>, of which two
+          need that machine's Linux scheduler calls and do not run anywhere else.</p></div>
+      <div class="row"><span class="tag modelled">Modelled</span>
+        <p><b>The contact window.</b> Pixels never cross a radio: the link carries frame rows in
+          and scores, grants and accounting out, and the window's capacity is enforced by byte
+          accounting. The demo window is deliberately <b>scaled down</b> to three frames per pass,
+          and it is labelled as scaled everywhere it appears.</p></div>
+      <div class="row"><span class="tag modelled">Not measured</span>
+        <p><b>CPU and whole-board power on the GX10</b>, which needs an inline USB-C power meter
+          nobody had. <b>Per-frame energy on the satellite itself</b>, because no board is
+          instrumented. These read <em>unavailable</em>, with the reason, and that is the correct
+          behaviour rather than a gap.</p></div>
+      <div class="row"><span class="tag live">Open</span>
+        <p><b>Contact-window duration in a real mission</b> is not something this project has
+          established, so no figure for it appears anywhere. The same goes for camera hardware
+          and for whether a flight system would capture live or replay.</p></div>
+      <div class="row"><span class="tag base">Bit-exact</span>
+        <p>The firmware's C kernel and the Python reference model are held to the same answer,
+          pixel for pixel, by a parity checker in the test suite. The number a board reports and
+          the number the simulator reports are the same number, which is what lets a board drop
+          off the bus mid-demo without invalidating the run.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ what is next ═══════════════════════════════════════════════════ -->
+<section id="next">
+  <div class="wrap">
+    <div class="head">
+      <h2>What a real mission would need next.</h2>
+      <p class="lede">
+        Not a roadmap of features. These are the four things that stand between a weekend
+        demonstration of the idea and something that would survive a power and timing budget.
+      </p>
+    </div>
+    <div class="ledger">
+      <div class="row">
+        <h3>Scoring in the camera's data path</h3>
+        <p>A general-purpose microcontroller keeps up with a demo workload. A live sensor at
+          flight data rates cannot wait on software sharing a CPU, so the same integer pass
+          belongs in an FPGA sitting directly in the data path. It is the same arithmetic;
+          what changes is where it runs.</p>
+        <span class="fig">Hardware</span>
+      </div>
+      <div class="row">
+        <h3>Energy measured on the satellite</h3>
+        <p>The claim that scoring costs less than transmitting is the economic argument for the
+          whole idea, and right now this project cannot measure the satellite side of it.
+          An instrumented board turns the strongest assumption into a number.</p>
+        <span class="fig">Instrumentation</span>
+      </div>
+      <div class="row">
+        <h3>A scoring function with an error bar</h3>
+        <p>Brightness variance is a proxy for usefulness, chosen for being fast and predictable.
+          The honest next step is to measure how often it disagrees with a human about which
+          frame was worth sending, and publish that disagreement rate rather than assert the
+          proxy is good.</p>
+        <span class="fig">Validation</span>
+      </div>
+      <div class="row">
+        <h3>More satellites than slots</h3>
+        <p>Arbitration is the part nobody has flown, and three nodes is the smallest number that
+          makes it interesting. The aging terms are what should hold at twelve; that is a claim
+          this project has not yet tested and would want to before making it.</p>
+        <span class="fig">Scale</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ built with ═════════════════════════════════════════════════════ -->
+<section id="built">
+  <div class="wrap">
+    <div class="head">
+      <h2>Built with.</h2>
+      <p class="lede">
+        What each sponsor's hardware or platform actually did in this build, rather than a
+        logo wall.
+      </p>
+    </div>
+    <div class="ledger sponsors">
+      <div class="row">
+        <div class="wordmark">Espressif<small>ESP32-S3</small></div>
+        <p>The satellites themselves. Each board runs the scoring kernel in C, holds its own
+          eight-slot priority queue in a 128 KB PSRAM pool allocated once at boot, and bids for
+          transmission slots over UDP multicast. The C kernel is held bit-exact against the
+          Python reference model, so a board and a simulated satellite are interchangeable
+          mid-run. Frames live in on-board flash; nothing is fetched at demo time.</p>
+      </div>
+      <div class="row">
+        <div class="wordmark">ASUS<small data-slot="asus-track">Track</small></div>
+        <p data-slot="asus">One line, from you: what the ASUS hardware or platform did in this
+          build. I have not put words in your mouth here because there is nothing in the
+          repository that records it.</p>
+      </div>
+      <div class="row">
+        <div class="wordmark">Voloridge<small data-slot="voloridge-track">Track</small></div>
+        <p data-slot="voloridge">One line, from you: what qualifies this build for the Voloridge
+          track. Same reason as above.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h3>Run it</h3>
+        <ul>
+          <li><code style="color:var(--ink-2)">uv run orbit demo --display</code></li>
+          <li><code style="color:var(--ink-2)">uv run python camera/demo.py</code></li>
+          <li><code style="color:var(--ink-2)">uv run pytest</code></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Read it</h3>
+        <ul>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026">Source</a></li>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026/blob/main/ARCHITECTURE.md">Architecture</a></li>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026/blob/main/docs/event_stream.md">Event stream contract</a></li>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026/blob/main/docs/protocol.md">Wire protocol</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>The numbers</h3>
+        <ul>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026/blob/main/results/bench.md">Benchmark run</a></li>
+          <li><a href="https://github.com/aaditaggarwal26/hackmit-2026/blob/main/corpus/manifest.json">Corpus manifest</a></li>
+          <li><a href="data.json">This page's frame data</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="credit">
+      Imagery: NASA supports full and open sharing of data. We acknowledge the use of imagery
+      provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's
+      Earth Science Data and Information System (ESDIS). Frames are MODIS Terra Corrected
+      Reflectance (True Color), 194 of them across 14 scenes and 16 dates in 2024, reduced to
+      128 × 128 grayscale and committed to the repository so the demo never touches a network.
+      Type is Archivo, under the SIL Open Font License.
+    </p>
+  </div>
+</footer>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const BYTES = 16384, SLOTS = 3;
+
+  const state = { frames: [], captured: 0, opened: false };
+
+  const pad = id => String(id).padStart(4, '0');
+  const src = id => `frames/${pad(id)}.png`;
+
+  function slotEl(f, animate, delay) {
+    const d = document.createElement('div');
+    d.className = 'slot' + (animate ? ' filling' : '');
+    if (animate && delay) d.style.animationDelay = delay + 'ms';
+    d.innerHTML =
+      `<img src="${src(f.id)}" alt="MODIS frame ${f.id}, ${f.scene}, ${f.date}" width="128" height="128" loading="lazy" decoding="async">` +
+      `<b class="sc">${f.display.toFixed(0)}</b>` +
+      `<span class="verdict${f.usable ? '' : ' no'}">${f.usable ? 'Usable' : 'Unusable'}</span>`;
+    return d;
+  }
+
+  function emptySlots(host, n) {
+    host.replaceChildren();
+    for (let i = 0; i < n; i++) {
+      const d = document.createElement('div');
+      d.className = 'slot empty';
+      d.dataset.n = 'Slot ' + (i + 1);
+      host.appendChild(d);
+    }
+  }
+
+  function fill(host, frames, animate) {
+    host.replaceChildren();
+    frames.forEach((f, i) => host.appendChild(slotEl(f, animate, i * 110)));
+    for (let i = frames.length; i < SLOTS; i++) {
+      const d = document.createElement('div');
+      d.className = 'slot empty';
+      d.dataset.n = 'Slot ' + (i + 1);
+      host.appendChild(d);
+    }
+  }
+
+  // ── the hero comparison: static, the same pass, decided in advance ──
+  function paintHero() {
+    const f = state.frames;
+    const fifo = f.slice(0, SLOTS);
+    const orbit = [...f].sort((a, b) => b.score - a.score).slice(0, SLOTS);
+    fill($('#heroFifo'), fifo, false);
+    fill($('#heroOrbit'), orbit, false);
+    const count = arr => arr.filter(x => x.usable).length;
+    $('#heroFifo').closest('.col').querySelector('.tally .fig').textContent = count(fifo);
+    $('#heroOrbit').closest('.col').querySelector('.tally .fig').textContent = count(orbit);
+  }
+
+  // ── the three terms, from the best-scoring frame in the pass ──
+  function paintTerms() {
+    const f = [...state.frames].sort((a, b) => b.score - a.score)[0];
+    const rows = [
+      ['Clear', f.clear, 'pixels that are not cloud'],
+      ['Detail', f.sharp, 'edge energy across the frame'],
+      ['Change', f.change, 'pixels that moved since the reference'],
+    ];
+    const host = $('#terms');
+    host.replaceChildren();
+    for (const [name, v, what] of rows) {
+      const pct = Math.max(2, Math.round(v / 65535 * 100));
+      const d = document.createElement('div');
+      d.className = 'term';
+      d.innerHTML = `<span class="n">${name}</span>` +
+        `<span class="bar"><i style="transform:scaleX(${pct / 100})"></i></span>` +
+        `<span class="v">${pct}%</span>`;
+      d.title = what;
+      host.appendChild(d);
+    }
+    const cap = document.createElement('p');
+    cap.className = 'note';
+    cap.style.marginTop = '4px';
+    cap.innerHTML = `Composite score <b>${f.display.toFixed(1)}</b> out of 100, ` +
+      `cloud fraction <b>${f.cloud_frac.toFixed(3)}</b>.`;
+    host.appendChild(cap);
+
+    $('#termFrame').innerHTML =
+      `<img src="${src(f.id)}" alt="MODIS frame ${f.id}, ${f.scene}, ${f.date}" width="128" height="128" decoding="async">` +
+      `<figcaption class="note" style="margin-top:7px">Frame <b>${f.id}</b><br>${f.scene}, ${f.date}</figcaption>`;
+  }
+
+  // ── the interactive pass ──
+  function paintStrip() {
+    const host = $('#strip');
+    host.replaceChildren();
+    state.frames.forEach((f, i) => {
+      const on = i < state.captured;
+      const d = document.createElement('div');
+      d.className = 'cap' + (on ? ' on' : '') + (f.usable ? '' : ' bad');
+      d.innerHTML = on
+        ? `<img src="${src(f.id)}" alt="MODIS frame ${f.id}, ${f.scene}" width="128" height="128" loading="lazy" decoding="async"><span class="s">${f.display.toFixed(0)}</span>`
+        : '';
+      host.appendChild(d);
+    });
+    $('#capCount').textContent = `${state.captured} of ${state.frames.length}`;
+    $('#btnOpen').disabled = state.captured === 0 || state.opened;
+    $('#btnCapture').disabled = state.captured >= state.frames.length;
+    $('#btnAll').disabled = state.captured >= state.frames.length;
+  }
+
+  function openWindow() {
+    const got = state.frames.slice(0, state.captured);
+    const fifo = got.slice(0, SLOTS);
+    const orbit = [...got].sort((a, b) => b.score - a.score).slice(0, SLOTS);
+    state.opened = true;
+    fill($('#simFifo'), fifo, !reduced);
+    fill($('#simOrbit'), orbit, !reduced);
+
+    const fu = fifo.filter(x => x.usable).length;
+    const ou = orbit.filter(x => x.usable).length;
+    $('#fifoFig').textContent = fu;
+    $('#orbitFig').textContent = ou;
+
+    const used = fifo.length * BYTES;
+    $('#budgetUsed').textContent = used.toLocaleString();
+    $('#budgetBar').style.transform = `scaleX(${fifo.length / SLOTS})`;
+
+    const v = $('#simVerdict');
+    if (ou > fu) {
+      v.innerHTML = `Same ${fifo.length} slots, same ${used.toLocaleString()} bytes. The baseline ` +
+        `delivered <b>${fu}</b> usable ${fu === 1 ? 'frame' : 'frames'}; Orbit delivered <b>${ou}</b>. ` +
+        `The frames the baseline spent the window on are still on the satellite either way, ` +
+        `just further back in the queue.`;
+    } else if (ou === fu) {
+      v.innerHTML = `Same ${fifo.length} slots, same ${used.toLocaleString()} bytes, and this time ` +
+        `both policies delivered <b>${ou}</b> usable. That happens: when the frames that arrived ` +
+        `first were also the good ones, ordering them buys nothing. The gap is a property of the ` +
+        `run, not a guarantee.`;
+    }
+    $('#btnOpen').disabled = true;
+  }
+
+  function reset() {
+    state.captured = 0; state.opened = false;
+    emptySlots($('#simFifo'), SLOTS);
+    emptySlots($('#simOrbit'), SLOTS);
+    $('#fifoFig').textContent = '0';
+    $('#orbitFig').textContent = '0';
+    $('#budgetUsed').textContent = '0';
+    $('#budgetBar').style.transform = 'scaleX(0)';
+    $('#simVerdict').textContent = 'Capture some frames, then open the window.';
+    paintStrip();
+  }
+
+  // ── nav: mark the section being read ──
+  function spy() {
+    const links = [...document.querySelectorAll('.masthead nav a')];
+    const targets = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+    if (!targets.length || !('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        links.forEach(a => a.removeAttribute('aria-current'));
+        const hit = links.find(a => a.getAttribute('href') === '#' + e.target.id);
+        if (hit) hit.setAttribute('aria-current', 'true');
+      }
+    }, { rootMargin: '-15% 0px -70% 0px' });
+    targets.forEach(t => io.observe(t));
+  }
+
+  async function boot() {
+    let data;
+    try {
+      const r = await fetch('data.json');
+      if (!r.ok) throw new Error(r.status);
+      data = await r.json();
+    } catch (err) {
+      // Opened from file:// with no fetch, or the data file is missing. The page
+      // is still readable; only the two live comparisons go quiet.
+      document.querySelectorAll('#strip, #heroFifo, #heroOrbit').forEach(el => {
+        el.innerHTML = '<p class="note">Frame data could not be loaded. Serve this folder over HTTP, ' +
+          'or run <b>python3 -m http.server</b> in it, to see the frames.</p>';
+      });
+      return;
+    }
+    state.frames = data.shown_frames;
+    paintHero();
+    paintTerms();
+    reset();
+    spy();
+
+    $('#btnCapture').addEventListener('click', () => {
+      if (state.captured < state.frames.length) { state.captured++; state.opened = false; paintStrip(); }
+    });
+    $('#btnAll').addEventListener('click', () => {
+      state.captured = state.frames.length; state.opened = false; paintStrip();
+    });
+    $('#btnOpen').addEventListener('click', openWindow);
+    $('#btnReset').addEventListener('click', reset);
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
