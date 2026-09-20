@@ -570,12 +570,12 @@ static inline size_t orbit_canonical(const uint8_t *src, size_t len,
 // =============================================================== tag
 
 static inline void orbit_tag_hex(const char *key, const uint8_t *canon, size_t clen, char out[ORBIT_TAG_HEX + 1]) {
-  static const char HEX[] = "0123456789abcdef";
+  static const char HEXDIGITS[] = "0123456789abcdef";  // not HEX: Print.h defines that as 16
   uint8_t mac[32];
   orbit_hmac_sha256((const uint8_t *)key, strlen(key), canon, clen, mac);
   for (int i = 0; i < ORBIT_TAG_BYTES; i++) {
-    out[i * 2]     = HEX[mac[i] >> 4];
-    out[i * 2 + 1] = HEX[mac[i] & 0x0F];
+    out[i * 2]     = HEXDIGITS[mac[i] >> 4];
+    out[i * 2 + 1] = HEXDIGITS[mac[i] & 0x0F];
   }
   out[ORBIT_TAG_HEX] = '\0';
 }
