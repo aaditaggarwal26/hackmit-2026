@@ -11,6 +11,7 @@ real hardware -- the property the dashboard's `mismatches` counter depends on.
 
   uv run --with numpy python tools/bus_round.py
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +22,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import numpy as np
 
@@ -32,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
 
 
-def load_ground(tmp: Path):
+def load_ground(tmp: Path) -> tuple[ModuleType, ModuleType, ModuleType]:
     pkg = tmp / "orbit"
     (pkg / "protocol").mkdir(parents=True)
     (pkg / "golden").mkdir(parents=True)
@@ -40,13 +44,15 @@ def load_ground(tmp: Path):
     (pkg / "protocol" / "__init__.py").write_text("")
     (pkg / "golden" / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/protocol/messages.py", "orbit/golden/score.py"):
-        blob = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"],
-                              capture_output=True, text=True, check=True).stdout
+        blob = subprocess.run(
+            ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True, check=True
+        ).stdout
         (tmp / path).write_text(blob)
     sys.path.insert(0, str(tmp))
     from orbit import config
     from orbit.golden import score
     from orbit.protocol import messages
+
     return config, messages, score
 
 
@@ -77,8 +83,11 @@ def main() -> int:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 << 20)  # rule out receiver-side drops
         sock.bind((cfg.mcast_group, cfg.mcast_port))
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
-                        struct.pack("4s4s", socket.inet_aton(cfg.mcast_group), socket.inet_aton(iface)))
+        sock.setsockopt(
+            socket.IPPROTO_IP,
+            socket.IP_ADD_MEMBERSHIP,
+            struct.pack("4s4s", socket.inet_aton(cfg.mcast_group), socket.inet_aton(iface)),
+        )
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(iface))
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, cfg.mcast_ttl)
         sock.settimeout(0.5)
@@ -89,7 +98,7 @@ def main() -> int:
         # looks like a replay of the previous run and is correctly ignored.
         seq = int(time.time()) % 1_000_000
 
-        def send(cls, **body):
+        def send(cls: type[Any], **body: Any) -> Any:
             """Sent REPEAT times with one seq. WiFi multicast loses ~36% here and the
             ground/satellite both dedup by (sender, seq), so repeats cost nothing."""
             nonlocal seq
@@ -102,11 +111,11 @@ def main() -> int:
                     time.sleep(0.020)  # bursty loss: separation beats count
             return msg
 
-        def recv(pred, deadline):
+        def recv(pred: Callable[[Any], bool], deadline: float) -> Any | None:
             while time.time() < deadline:
                 try:
                     data, _ = sock.recvfrom(65535)
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 m = M.decode(data)
                 if isinstance(m, M.DecodeError):
@@ -121,28 +130,39 @@ def main() -> int:
         deadline = time.time() + a.timeout
 
         print("1. offers_open ->")
-        send(M.OffersOpen, round_id=a.round_id, window_remaining_bytes=cfg.window_capacity_bytes,
-             collect_ms=cfg.bid_collect_ms)
+        send(
+            M.OffersOpen,
+            round_id=a.round_id,
+            window_remaining_bytes=cfg.window_capacity_bytes,
+            collect_ms=cfg.bid_collect_ms,
+        )
 
         bid = recv(lambda m: isinstance(m, M.Bid) and m.round_id == a.round_id, deadline)
         if bid is None:
-            print("   FAIL: no bid"); return 1
-        print(f"   <- bid from {bid.sender}: item={bid.item_id} score={bid.score:.2f} "
-              f"age={bid.item_age_s:.1f}s queue_len={bid.queue_len}")
+            print("   FAIL: no bid")
+            return 1
+        print(
+            f"   <- bid from {bid.sender}: item={bid.item_id} score={bid.score:.2f} "
+            f"age={bid.item_age_s:.1f}s queue_len={bid.queue_len}"
+        )
         print(f"      buffer {bid.buffer.used}/{bid.buffer.slots} slots, evictions={bid.eviction_count}")
-        print(f"      diagnostic window: {[(e.item_id, round(e.score,1)) for e in bid.window]}")
+        print(f"      diagnostic window: {[(e.item_id, round(e.score, 1)) for e in bid.window]}")
 
         print("\n2. grant ->")
-        bd = M.Breakdown(score=bid.score, item_age_s=bid.item_age_s,
-                         item_age_term=bid.item_age_s * cfg.item_aging_rate,
-                         sat_wait_s=0.0, sat_wait_term=0.0,
-                         total=bid.score + bid.item_age_s * cfg.item_aging_rate)
-        send(M.Grant, round_id=a.round_id, to=bid.sender, item_id=bid.item_id,
-             pace_bps=cfg.link_rate_bps, breakdown=bd)
+        bd = M.Breakdown(
+            score=bid.score,
+            item_age_s=bid.item_age_s,
+            item_age_term=bid.item_age_s * cfg.item_aging_rate,
+            sat_wait_s=0.0,
+            sat_wait_term=0.0,
+            total=bid.score + bid.item_age_s * cfg.item_aging_rate,
+        )
+        send(M.Grant, round_id=a.round_id, to=bid.sender, item_id=bid.item_id, pace_bps=cfg.link_rate_bps, breakdown=bd)
 
         begin = recv(lambda m: isinstance(m, M.TxBegin) and m.item_id == bid.item_id, deadline)
         if begin is None:
-            print("   FAIL: no tx_begin"); return 1
+            print("   FAIL: no tx_begin")
+            return 1
         print(f"   <- tx_begin: {begin.total_bytes} bytes in {begin.chunks} chunks")
 
         chunks: dict[int, bytes] = {}
@@ -150,7 +170,7 @@ def main() -> int:
         while time.time() < deadline and done is None:
             try:
                 data, _ = sock.recvfrom(65535)
-            except socket.timeout:
+            except TimeoutError:
                 continue
             m = M.decode(data)
             if isinstance(m, M.DecodeError) or m.sender == me:
@@ -160,13 +180,21 @@ def main() -> int:
             elif isinstance(m, M.TxDone) and m.item_id == bid.item_id:
                 done = m
         if done is None:
-            print(f"   FAIL: no tx_done ({len(chunks)}/{begin.chunks} chunks)"); return 1
+            print(f"   FAIL: no tx_done ({len(chunks)}/{begin.chunks} chunks)")
+            return 1
         missing = [i for i in range(begin.chunks) if i not in chunks]
         blob = b"".join(chunks[i] for i in sorted(chunks))
         ok = not missing and len(blob) == begin.total_bytes
         # ack FIRST: the satellite gives up after SAT_ACK_TIMEOUT_MS and printing is not free
-        send(M.TxAck, round_id=a.round_id, to=bid.sender, item_id=bid.item_id, ok=ok,
-             bytes_received=len(blob), reason="" if ok else "incomplete")
+        send(
+            M.TxAck,
+            round_id=a.round_id,
+            to=bid.sender,
+            item_id=bid.item_id,
+            ok=ok,
+            bytes_received=len(blob),
+            reason="" if ok else "incomplete",
+        )
         print(f"   <- {len(chunks)}/{begin.chunks} chunks, tx_done: {done.total_bytes} bytes score={done.score:.2f}")
         print(f"\n3. reassembled {len(blob)}/{begin.total_bytes} bytes, missing chunks: {missing or 'none'}")
         print(f"\n4. tx_ack -> ok={ok} (sent immediately on tx_done)")
@@ -186,18 +214,20 @@ def main() -> int:
         # the real prize: does the ground's golden model reproduce the satellite's score?
         print("\n5. re-scoring the received frame with the golden model")
         if not ok:
-            print("   skipped: frame incomplete"); sock.close(); return 1
+            print("   skipped: frame incomplete")
+            sock.close()
+            return 1
         frame = np.frombuffer(blob, dtype=np.uint8).reshape(config.FRAME_H, config.FRAME_W)
         npz = np.load(ROOT / "corpus/frames.npz")
         corpus_frames = npz[npz.files[0]]
-        hit = next((i for i in range(len(corpus_frames))
-                    if np.array_equal(np.asarray(corpus_frames[i]), frame)), None)
+        hit = next((i for i in range(len(corpus_frames)) if np.array_equal(np.asarray(corpus_frames[i]), frame)), None)
         print(f"   frame matches corpus id {hit}" if hit is not None else "   frame not found in corpus (!)")
         sock.close()
 
         if hit is None:
             return 1
         import json
+
         manifest = json.loads((ROOT / "corpus/manifest.json").read_text())
         ref_id = int(manifest["scenes"][manifest["frames"][hit]["scene"]]["reference_id"])
         golden = score_mod.score_frame(frame, np.asarray(corpus_frames[ref_id]))

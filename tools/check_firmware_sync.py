@@ -7,11 +7,11 @@ hardest to read off a dashboard. So it is checked, not trusted.
 
   uv run python tools/check_firmware_sync.py
 """
+
 from __future__ import annotations
 
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,8 +50,9 @@ def firmware_values(text: str) -> dict[str, str]:
 
 
 def main() -> int:
-    py = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:orbit/config.py"],
-                        capture_output=True, text=True, check=True).stdout
+    py = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:orbit/config.py"], capture_output=True, text=True, check=True
+    ).stdout
     fw = firmware_values(HEADER.read_text())
 
     consts = dict(re.findall(r"^([A-Z_][A-Z0-9_]*)\s*=\s*([^#\n]+)", py, re.M))

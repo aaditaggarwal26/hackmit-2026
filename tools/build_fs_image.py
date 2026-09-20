@@ -11,6 +11,7 @@ two boards besides the hostname.
 
   uv run --with numpy python tools/build_fs_image.py --sat b --frames 40
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # this file sits on, so HEAD is the authoritative source; override to compare against another
 # branch (ORBIT_GOLDEN_REF=origin/ground-station, or --golden-ref).
 GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
-SAT_NODE_ID = {"b": 1, "c": 2}          # which corpus sequence each board follows (sim seq_seed)
+SAT_NODE_ID = {"b": 1, "c": 2}  # which corpus sequence each board follows (sim seq_seed)
 
 
 def load_corpus_module(tmp: Path, ref: str = GOLDEN_REF) -> ModuleType:
@@ -38,13 +39,15 @@ def load_corpus_module(tmp: Path, ref: str = GOLDEN_REF) -> ModuleType:
     (pkg / "corpus").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/corpus/__init__.py"):
-        blob = subprocess.run(["git", "-C", str(ROOT), "show", f"{ref}:{path}"],
-                              capture_output=True, text=True, check=True).stdout
+        blob = subprocess.run(
+            ["git", "-C", str(ROOT), "show", f"{ref}:{path}"], capture_output=True, text=True, check=True
+        ).stdout
         (tmp / path).write_text(blob)
     # the module resolves the corpus relative to its own location, so point it at the real one
     (tmp / "corpus").symlink_to(ROOT / "corpus")
     sys.path.insert(0, str(tmp))
-    from orbit import corpus  # noqa: E402
+    from orbit import corpus
+
     return corpus
 
 
@@ -63,8 +66,11 @@ def capture_sequence(corp: Any, node_id: int, seed: int, n: int) -> list[int]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sat", choices=sorted(SAT_NODE_ID), required=True)
-    ap.add_argument("--golden-ref", default=GOLDEN_REF,
-                    help=f"git revision the ground's modules are read from (default {GOLDEN_REF})")
+    ap.add_argument(
+        "--golden-ref",
+        default=GOLDEN_REF,
+        help=f"git revision the ground's modules are read from (default {GOLDEN_REF})",
+    )
     ap.add_argument("--frames", type=int, default=40, help="frames in the capture sequence")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None, help="output .bin (default firmware/build/littlefs_<sat>.bin)")
@@ -90,16 +96,17 @@ def main() -> int:
             ref_id = corp.reference_for(cid)
             if ref_id not in refs_written:
                 (root / "refs" / f"{ref_id:03d}.bin").write_bytes(
-                    np.asarray(corp.by_id(ref_id), dtype=np.uint8).tobytes())
+                    np.asarray(corp.by_id(ref_id), dtype=np.uint8).tobytes()
+                )
                 refs_written.add(ref_id)
             entries.append({"frame": i, "ref": int(ref_id)})
 
         (root / "manifest.json").write_text(json.dumps({"sat": a.sat, "frames": entries}, separators=(",", ":")))
 
         payload = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
-        print(f"{len(seq)} frames, {len(refs_written)} references, {payload/1024:.0f} KiB of payload")
+        print(f"{len(seq)} frames, {len(refs_written)} references, {payload / 1024:.0f} KiB of payload")
         if payload > int(a.size, 16):
-            print(f"ERROR: payload exceeds the {int(a.size,16)/1024:.0f} KiB partition", file=sys.stderr)
+            print(f"ERROR: payload exceeds the {int(a.size, 16) / 1024:.0f} KiB partition", file=sys.stderr)
             return 1
 
         mklittlefs = next(Path.home().glob(".arduino15/packages/esp32/tools/mklittlefs/*/mklittlefs"), None)
@@ -113,7 +120,7 @@ def main() -> int:
             print(r.stdout + r.stderr, file=sys.stderr)
             return 1
 
-    print(f"wrote {out}  ({out.stat().st_size/1024:.0f} KiB image)")
+    print(f"wrote {out}  ({out.stat().st_size / 1024:.0f} KiB image)")
     print(f"flash with:  esptool --chip esp32s3 --port <port> write-flash 0x670000 {out}")
     return 0
 

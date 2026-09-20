@@ -9,6 +9,7 @@ firmware against the real spec, never against a second transcription of it.
 
   uv run --with numpy python tools/check_score_parity.py [--n 40]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -18,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 
@@ -28,19 +30,21 @@ ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
 
 
-def load_golden(tmp: Path):
+def load_golden(tmp: Path) -> tuple[ModuleType, ModuleType]:
     """Materialise orbit.config and orbit.golden.score from the ground-station branch."""
     pkg = tmp / "orbit"
     (pkg / "golden").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     (pkg / "golden" / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/golden/score.py"):
-        blob = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"],
-                              capture_output=True, text=True, check=True).stdout
+        blob = subprocess.run(
+            ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True, check=True
+        ).stdout
         (tmp / path).write_text(blob)
     sys.path.insert(0, str(tmp))
-    from orbit import config  # noqa: E402
-    from orbit.golden import score  # noqa: E402
+    from orbit import config
+    from orbit.golden import score
+
     return config, score
 
 
@@ -51,12 +55,12 @@ def main() -> int:
 
     exe = ROOT / "firmware/test/score_host"
     if not exe.exists():
-        print(f"build it first:  g++ -O2 -I../satellite_esp32 score_host.cpp -o score_host", file=sys.stderr)
+        print("build it first:  g++ -O2 -I../satellite_esp32 score_host.cpp -o score_host", file=sys.stderr)
         return 2
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        config, score = load_golden(tmp)
+        _config, score = load_golden(tmp)
 
         npz = np.load(ROOT / "corpus/frames.npz")
         frames = npz[npz.files[0]]
@@ -87,18 +91,20 @@ def main() -> int:
 
     fields = ("cloud_px", "changed_px", "sobel_sum", "clear", "sharp", "change", "score")
     bad = 0
-    for i, (g, e) in enumerate(zip(got, expect)):
+    for i, (g, e) in enumerate(zip(got, expect, strict=True)):
         want = (e.cloud_px, e.changed_px, e.sobel_sum, e.clear, e.sharp, e.change, e.score)
         if g != want:
             bad += 1
-            diff = [f"{name}: firmware={a_} golden={b}" for name, a_, b in zip(fields, g, want) if a_ != b]
+            diff = [f"{name}: firmware={a_} golden={b}" for name, a_, b in zip(fields, g, want, strict=True) if a_ != b]
             print(f"FAIL frame {i}: " + "; ".join(diff))
 
     if bad:
         print(f"\n{bad}/{len(expect)} frames differ")
         return 1
-    print(f"OK: {len(expect)} frames, all 7 intermediates bit-exact "
-          f"(cloud_px, changed_px, sobel_sum, clear, sharp, change, score)")
+    print(
+        f"OK: {len(expect)} frames, all 7 intermediates bit-exact "
+        f"(cloud_px, changed_px, sobel_sum, clear, sharp, change, score)"
+    )
     return 0
 
 
