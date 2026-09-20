@@ -4,10 +4,12 @@ The firmware header is compiled by g++ into firmware/test/score_host -- by this 
 demand -- and fed the same corpus frame/ref pairs the satellite would score. Every
 intermediate is compared, not just the final score, so a failure names the term that drifted.
 
-The golden side is read out of git rather than imported from the working tree, so what the
-firmware is held to is a committed revision of orbit/config.py and orbit/golden/score.py and
-never a second transcription of them. That revision is HEAD by default; set ORBIT_GOLDEN_REF
-to compare against another branch (ORBIT_GOLDEN_REF=origin/ground-station).
+The golden side is copied into a throwaway package and imported from there, never from the
+`orbit` already on sys.path, so what the firmware is held to is orbit/config.py and
+orbit/golden/score.py themselves and never a second transcription of them. By default those
+two files are read from the working tree, which is the only source that catches the drift this
+check exists for: a kernel constant edited and not yet reflected in the firmware header. Set
+ORBIT_GOLDEN_REF to read them from a git ref instead (ORBIT_GOLDEN_REF=origin/ground-station).
 
   uv run --with numpy python tools/check_score_parity.py [--n 40]
 
@@ -39,10 +41,12 @@ EXE = Path(os.environ["ORBIT_SCORE_HOST"]) if os.environ.get("ORBIT_SCORE_HOST")
 # test_firmware_sat.py, test_firmware_fsimage.py, test_crypto_parity.py). score_host.cpp is clean
 # under -Werror, so nothing is relaxed here: a new warning in the firmware header is a failure.
 CXXFLAGS = ["-O2", "-std=c++17", "-Wall", "-Wextra", "-Werror"]
-# Which revision the ground's own modules are read from. Integration work lives on the branch
-# this file sits on, so HEAD is the authoritative source; override to compare against another
-# branch: ORBIT_GOLDEN_REF=origin/ground-station.
-GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
+# Which revision the ground's own modules are read from. Unset means the working tree: the
+# firmware header on the other side of this comparison is read from the working tree too, and
+# reading only the golden half out of git would hold the firmware to a config.py from a
+# different point in history -- so an edited CLOUD_THRESHOLD that the firmware has not caught up
+# with would be reported bit-exact. ORBIT_GOLDEN_REF=<ref> opts into the cross-branch compare.
+GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF") or ""
 
 
 class CheckError(RuntimeError):
@@ -83,20 +87,32 @@ def build_host(exe: Path = EXE) -> Path:
     return exe
 
 
+def golden_source(path: str) -> str:
+    """One golden module's text: the working tree, or GOLDEN_REF when one is set."""
+    if not GOLDEN_REF:
+        return (ROOT / path).read_text()
+    show = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True)
+    if show.returncode != 0:
+        raise CheckError(
+            f"cannot read {path} from ref {GOLDEN_REF!r}: {show.stderr.strip() or 'git show failed'}\n"
+            "set ORBIT_GOLDEN_REF to a ref this clone has, or unset it to use the working tree"
+        )
+    return show.stdout
+
+
 def load_golden(tmp: Path) -> tuple[ModuleType, ModuleType]:
-    """Materialise orbit.config and orbit.golden.score from GOLDEN_REF."""
+    """Import orbit.config and orbit.golden.score out of a throwaway package.
+
+    Copied rather than imported in place because ``orbit`` is usually already on sys.path (and
+    already in sys.modules under pytest), which would quietly compare the firmware against
+    whichever copy got imported first.
+    """
     pkg = tmp / "orbit"
     (pkg / "golden").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     (pkg / "golden" / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/golden/score.py"):
-        show = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True)
-        if show.returncode != 0:
-            raise CheckError(
-                f"cannot read {path} from ref {GOLDEN_REF!r}: {show.stderr.strip() or 'git show failed'}\n"
-                "set ORBIT_GOLDEN_REF to a ref this clone has, or leave it unset for HEAD"
-            )
-        (tmp / path).write_text(show.stdout)
+        (tmp / path).write_text(golden_source(path))
     sys.path.insert(0, str(tmp))
     from orbit import config
     from orbit.golden import score

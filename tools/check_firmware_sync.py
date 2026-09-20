@@ -33,10 +33,16 @@ from pathlib import Path
 from orbit.protocol import registry as R
 
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "orbit/config.py"
 HEADER = ROOT / "firmware/satellite_esp32/orbit_config.h"
 FAULTS_HEADER = ROOT / "firmware/satellite_esp32/orbit_faults.h"
-# Which revision orbit/config.py is read from; HEAD is the authoritative source on this branch.
-GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
+# Which revision orbit/config.py is read from. Unset means the working tree, which is the only
+# answer that catches the drift this check exists for: the edit in progress. Both the firmware
+# headers and the registry are read from the working tree too, so reading config.py out of git by
+# default would compare three files across two different points in history and pass a config.py
+# whose new constant had simply not been committed yet. ORBIT_GOLDEN_REF=<ref> opts into the
+# cross-branch comparison this once needed (ORBIT_GOLDEN_REF=origin/ground-station).
+GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF") or ""
 
 # firmware name -> (python name, where it lives: "const" = module level, "setting" = Settings default)
 CHECKS = {
@@ -110,17 +116,26 @@ def fault_drift() -> list[str]:
     return bad
 
 
-def main() -> int:
+def config_source() -> str | None:
+    """orbit/config.py as the check should read it, or None if the named ref cannot be read."""
+    if not GOLDEN_REF:
+        return CONFIG.read_text()
     show = subprocess.run(
         ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:orbit/config.py"], capture_output=True, text=True
     )
     if show.returncode != 0:
-        # A fresh clone has no origin/ground-station; say so instead of raising CalledProcessError.
+        # A clone without that ref: say which one, instead of raising CalledProcessError.
         print(f"cannot read orbit/config.py from ref {GOLDEN_REF!r}:", file=sys.stderr)
         print("  " + (show.stderr.strip() or "git show failed"), file=sys.stderr)
-        print("  set ORBIT_GOLDEN_REF to a ref this clone has, or leave it unset for HEAD", file=sys.stderr)
+        print("  set ORBIT_GOLDEN_REF to a ref this clone has, or unset it to use the working tree", file=sys.stderr)
+        return None
+    return show.stdout
+
+
+def main() -> int:
+    py = config_source()
+    if py is None:
         return 2
-    py = show.stdout
     fw = firmware_values(HEADER.read_text())
 
     consts = dict(re.findall(r"^([A-Z_][A-Z0-9_]*)\s*=\s*([^#\n]+)", py, re.M))
@@ -162,7 +177,7 @@ def main() -> int:
         print(f"\nregenerate: {R.REGEN}")
         return 1
 
-    print(f"OK: {len(CHECKS)} constants + MCAST_GROUP match orbit/config.py ({GOLDEN_REF})")
+    print(f"OK: {len(CHECKS)} constants + MCAST_GROUP match orbit/config.py ({GOLDEN_REF or 'working tree'})")
     print(f"OK: {len(R.FAULTS)} fault code ids and severities match orbit/protocol/registry.py")
     return 0
 

@@ -184,11 +184,13 @@ because a specific failure was expensive to find on the bench.
 | `plot_value.py` | plots the cumulative value-delivered curve out of a run file: bytes of contact window spent against usable frames delivered, Orbit's scored queue against the unfiltered FIFO baseline on the same budget. The pitch's one chart, drawn from a recorded run rather than from memory. |
 | `make_sample.py` | generates `runs/sample.jsonl`, a fixture run to develop the display against: imaginary satellites, but real corpus ids scored with the golden model, so the thumbnails match the scores. It checks its own output with `check_run.py` before writing. |
 
-The firmware checkers read the ground's side **out of git rather than off disk**, so the
-firmware is held to a committed revision of `orbit/config.py` and `orbit/golden/score.py`
-and never to a second transcription of them or to whatever the working tree happens to
-hold. That revision is `HEAD` by default; `ORBIT_GOLDEN_REF` points them at another
-branch.
+The firmware checkers read the ground's side from `orbit/config.py` and
+`orbit/golden/score.py` **themselves**, never from a second transcription of them — the
+golden modules are copied into a throwaway package and imported from there, so an `orbit`
+already on `sys.path` cannot be the one that answers. They read the working tree, which is
+the only source that catches the drift they exist for: a kernel constant edited and not yet
+carried into the firmware header. `ORBIT_GOLDEN_REF=<ref>` reads them from a git ref
+instead, for comparing across branches.
 
 Firmware is testable against the real protocol with no hardware because the bus is an
 interface, not a socket. `orbit/bus/base.py` defines it; `MulticastBus` is the wire and
