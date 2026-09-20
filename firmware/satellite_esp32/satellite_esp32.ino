@@ -100,6 +100,16 @@ static uint32_t c_ack_lost = 0, c_peer_grants = 0, c_late_acks = 0;
 static uint8_t g_payload_key[32];
 static size_t  g_payload_key_len = 0;
 
+// The ground's Ed25519 public key, decoded once at boot from ORBIT_GROUND_PUBKEY. When present,
+// a grant/revoke/tx_ack must carry a valid signature from the ground -- not merely a valid HMAC
+// tag, which a holder of the shared key could also produce.
+static uint8_t       g_ground_pk[32];
+static const uint8_t *g_ground_pkp = nullptr;
+
+// TweetNaCl (orbit_crypto.h) references randombytes() in its keypair code, which we never call --
+// we only verify. The symbol must still link, so back it with the hardware RNG.
+extern "C" void randombytes(unsigned char *p, unsigned long long n) { esp_fill_random(p, (size_t)n); }
+
 // in-flight transmission
 static bool     tx_active = false;
 static int32_t  tx_round = -1;
@@ -615,7 +625,7 @@ static void pollBus() {
     // datagram must never move this node's sequence state -- one forgery with a huge seq would
     // otherwise mute the real ground for the rest of the window. Sender pinning, the MAC and
     // the anti-replay watermark, in one call, on the raw bytes.
-    if (orbit_auth_accept(buf, (size_t)len, ORBIT_AUTH_KEY, ORBIT_GROUND_NAME, &g_auth) != ORBIT_OK)
+    if (orbit_auth_accept(buf, (size_t)len, ORBIT_AUTH_KEY, ORBIT_GROUND_NAME, g_ground_pkp, &g_auth) != ORBIT_OK)
       continue;
     JsonDocument d;
     if (deserializeJson(d, buf, len) != DeserializationError::Ok) continue;
@@ -778,11 +788,28 @@ static void loadPayloadKey() {
   Serial.printf("[crypto] payload encryption ON: AES-%u-GCM\n", (unsigned)(g_payload_key_len * 8));
 }
 
+// Decode ORBIT_GROUND_PUBKEY (64 hex chars) into g_ground_pk. "" leaves the signature check off
+// (HMAC + pin still apply); a malformed key is a loud boot message, never a silent downgrade.
+static void loadGroundPubkey() {
+  const char *hex = ORBIT_GROUND_PUBKEY;
+  const size_t n = strlen(hex);
+  if (n == 0) { g_ground_pkp = nullptr; return; }
+  if (n != 64) { Serial.println("[crypto] ORBIT_GROUND_PUBKEY must be 64 hex chars; ignoring"); return; }
+  for (size_t i = 0; i < 32; i++) {
+    const int hi = orbit_unhex((uint8_t)hex[i * 2]), lo = orbit_unhex((uint8_t)hex[i * 2 + 1]);
+    if (hi < 0 || lo < 0) { Serial.println("[crypto] ORBIT_GROUND_PUBKEY is not hex; ignoring"); return; }
+    g_ground_pk[i] = (uint8_t)((hi << 4) | lo);
+  }
+  g_ground_pkp = g_ground_pk;
+  Serial.println("[crypto] ground command signatures: VERIFIED (Ed25519)");
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.printf("\n=== orbit satellite %s ===\n", HOSTNAME);
   loadPayloadKey();
+  loadGroundPubkey();
   Serial.printf("chip %s rev %d, heap %u, psram %u\n",
                 ESP.getChipModel(), ESP.getChipRevision(),
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getPsramSize());

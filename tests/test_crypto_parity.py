@@ -35,9 +35,12 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "firmware/test/crypto_host.cpp"
 INC = ROOT / "firmware/satellite_esp32"
 HEADER = INC / "orbit_crypto.h"
+TWEETNACL = INC / "tweetnacl.c"
 VECTORS = ROOT / "docs/protocol_vectors.json"
 
-pytestmark = pytest.mark.skipif(shutil.which("g++") is None, reason="no g++ to build the host harness")
+pytestmark = pytest.mark.skipif(
+    shutil.which("g++") is None or shutil.which("gcc") is None, reason="no g++/gcc to build the host harness"
+)
 
 # Obviously not a key. Long enough to exercise the ordinary path, shaped so that nobody can
 # mistake it for something that was ever used: never put a production-looking secret in a
@@ -47,10 +50,22 @@ TEST_KEY = b"not-a-real-key-0000000000000000"
 
 @pytest.fixture(scope="module")
 def host(tmp_path_factory):
-    """Build the firmware header into a host binary. A compile error is a test failure."""
-    exe = tmp_path_factory.mktemp("fw") / "crypto_host"
+    """Build the firmware header into a host binary. A compile error is a test failure.
+
+    TweetNaCl (the Ed25519 verify) is compiled separately as C -- it is not valid C++ and it is
+    third-party, so warnings are suppressed for it alone; the harness itself stays -Werror clean.
+    """
+    d = tmp_path_factory.mktemp("fw")
+    obj = d / "tweetnacl.o"
     subprocess.run(
-        ["g++", "-O2", "-std=c++17", "-Wall", "-Wextra", "-Werror", f"-I{INC}", str(SRC), "-o", str(exe)],
+        ["gcc", "-O2", "-std=c99", "-w", "-c", str(TWEETNACL), "-o", str(obj)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    exe = d / "crypto_host"
+    subprocess.run(
+        ["g++", "-O2", "-std=c++17", "-Wall", "-Wextra", "-Werror", f"-I{INC}", str(SRC), str(obj), "-o", str(exe)],
         check=True,
         capture_output=True,
         text=True,
@@ -489,3 +504,28 @@ def test_a_key_with_a_nul_is_refused():
     """It reaches the firmware as a C string, where it would be silently truncated at the zero."""
     with pytest.raises(ValueError):
         auth.check_key(b"ab\x00cd")
+
+
+def test_ground_signature_is_verified_by_the_firmware(host):
+    """The whole point of the Ed25519 layer, end to end across the tiers: Python signs a grant
+    with the ground's private seed, the firmware (given the matching public key) accepts it, and
+    it rejects the grant a holder of the shared HMAC key could forge -- HMAC-tagged but unsigned."""
+    from orbit.protocol import ed25519
+
+    ground = "gx10-f548"
+    seed, other = bytes(range(32)), bytes(range(1, 33))
+    pub = ed25519.secret_to_public(seed)
+    grant = dict(M.examples())["grant"].encode()
+
+    signed = auth.Policy(key=TEST_KEY, sign_seed=seed).sign(grant)  # HMAC + the ground's signature
+    hmac_only = auth.Policy(key=TEST_KEY).sign(grant)  # a shared-key holder's best forgery
+    wrong_signer = auth.Policy(key=TEST_KEY, sign_seed=other).sign(grant)  # valid HMAC, wrong signature
+    tampered = signed.replace(b'"item_id":14', b'"item_id":15')
+    assert tampered != signed
+
+    assert feed(host, "accept", [signed], TEST_KEY.hex(), ground, pub.hex()) == ["OK"]
+    assert feed(host, "accept", [hmac_only], TEST_KEY.hex(), ground, pub.hex()) == ["NO_SIG"]
+    assert feed(host, "accept", [wrong_signer], TEST_KEY.hex(), ground, pub.hex()) == ["BAD_SIG"]
+    assert feed(host, "accept", [tampered], TEST_KEY.hex(), ground, pub.hex()) != ["OK"]
+    # With no pubkey configured the firmware falls back to HMAC-only and accepts the tagged grant.
+    assert feed(host, "accept", [hmac_only], TEST_KEY.hex(), ground) == ["OK"]

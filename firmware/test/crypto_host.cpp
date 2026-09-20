@@ -21,6 +21,13 @@
 #include <vector>
 #include "orbit_crypto.h"
 
+// TweetNaCl references randombytes() in its keypair functions (which we never call -- we only
+// verify). The symbol still has to link, so provide one; on the device the sketch provides a real
+// one from the hardware RNG. Verification is deterministic and never touches this.
+extern "C" void randombytes(unsigned char *p, unsigned long long n) {
+  for (unsigned long long i = 0; i < n; i++) p[i] = (unsigned char)rand();
+}
+
 static int failures = 0;
 
 static void check(bool cond, const char *what) {
@@ -72,6 +79,8 @@ static const char *result_name(OrbitAuthResult r) {
     case ORBIT_ERR_BAD_TAG:  return "BAD_TAG";
     case ORBIT_ERR_PIN:      return "PIN";
     case ORBIT_ERR_REPLAY:   return "REPLAY";
+    case ORBIT_ERR_NO_SIG:   return "NO_SIG";
+    case ORBIT_ERR_BAD_SIG:  return "BAD_SIG";
     default:                 return "PEERS";
   }
 }
@@ -168,23 +177,23 @@ static void selftest() {
 
     OrbitAuthState st;
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept(buf, signed_len, key, "ground-x", &st) == ORBIT_OK, "accept own signature");
+    check(orbit_auth_accept(buf, signed_len, key, "ground-x", nullptr, &st) == ORBIT_OK, "accept own signature");
     // the same datagram again: seq is no longer ahead of the watermark
-    check(orbit_auth_accept(buf, signed_len, key, "ground-x", &st) == ORBIT_ERR_REPLAY, "replay rejected");
+    check(orbit_auth_accept(buf, signed_len, key, "ground-x", nullptr, &st) == ORBIT_ERR_REPLAY, "replay rejected");
     // pinned to the wrong ground
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept(buf, signed_len, key, "someone-else", &st) == ORBIT_ERR_PIN, "sender pinning");
+    check(orbit_auth_accept(buf, signed_len, key, "someone-else", nullptr, &st) == ORBIT_ERR_PIN, "sender pinning");
     // one flipped bit anywhere in the body
     memset(&st, 0, sizeof(st));
     buf[30] ^= 0x01;
-    check(orbit_auth_accept(buf, signed_len, key, "ground-x", &st) != ORBIT_OK, "tampered body rejected");
+    check(orbit_auth_accept(buf, signed_len, key, "ground-x", nullptr, &st) != ORBIT_OK, "tampered body rejected");
     buf[30] ^= 0x01;
     // the wrong key
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept(buf, signed_len, "another-key", "ground-x", &st) == ORBIT_ERR_BAD_TAG, "wrong key");
+    check(orbit_auth_accept(buf, signed_len, "another-key", "ground-x", nullptr, &st) == ORBIT_ERR_BAD_TAG, "wrong key");
     // no tag at all
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept((const uint8_t *)doc, n, key, "ground-x", &st) == ORBIT_ERR_NO_TAG, "untagged");
+    check(orbit_auth_accept((const uint8_t *)doc, n, key, "ground-x", nullptr, &st) == ORBIT_ERR_NO_TAG, "untagged");
     // a satellite type is not pinned to the ground name
     memset(&st, 0, sizeof(st));
     uint8_t sb[256];
@@ -192,22 +201,39 @@ static void selftest() {
     size_t sn = strlen(sd);
     memcpy(sb, sd, sn);
     sn = orbit_auth_sign(sb, sn, sizeof(sb), key);
-    check(orbit_auth_accept(sb, sn, key, "ground-x", &st) == ORBIT_OK, "peer traffic not pinned");
+    check(orbit_auth_accept(sb, sn, key, "ground-x", nullptr, &st) == ORBIT_OK, "peer traffic not pinned");
 
     // --- an unconfigured board: no key, no ground name --------------------------------
     // A pass-through. No watermark (that needs the MAC), no canonical check, no pin.
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept((const uint8_t *)doc, n, "", "", &st) == ORBIT_OK, "no key, no pin: pass 1");
-    check(orbit_auth_accept((const uint8_t *)doc, n, "", "", &st) == ORBIT_OK, "no key, no pin: pass 2");
-    check(orbit_auth_accept((const uint8_t *)"{not json", 9, "", "", &st) == ORBIT_OK, "no key, no pin: garbage");
+    check(orbit_auth_accept((const uint8_t *)doc, n, "", "", nullptr, &st) == ORBIT_OK, "no key, no pin: pass 1");
+    check(orbit_auth_accept((const uint8_t *)doc, n, "", "", nullptr, &st) == ORBIT_OK, "no key, no pin: pass 2");
+    check(orbit_auth_accept((const uint8_t *)"{not json", 9, "", "", nullptr, &st) == ORBIT_OK, "no key, no pin: garbage");
     // Pinning alone, still no key: the pin bites, the watermark does not.
     memset(&st, 0, sizeof(st));
-    check(orbit_auth_accept((const uint8_t *)doc, n, "", "ground-x", &st) == ORBIT_OK, "pin only: pass 1");
-    check(orbit_auth_accept((const uint8_t *)doc, n, "", "ground-x", &st) == ORBIT_OK, "pin only: repeat is fine");
-    check(orbit_auth_accept((const uint8_t *)doc, n, "", "someone-else", &st) == ORBIT_ERR_PIN, "pin only: pinned");
+    check(orbit_auth_accept((const uint8_t *)doc, n, "", "ground-x", nullptr, &st) == ORBIT_OK, "pin only: pass 1");
+    check(orbit_auth_accept((const uint8_t *)doc, n, "", "ground-x", nullptr, &st) == ORBIT_OK, "pin only: repeat is fine");
+    check(orbit_auth_accept((const uint8_t *)doc, n, "", "someone-else", nullptr, &st) == ORBIT_ERR_PIN, "pin only: pinned");
   }
 
-  if (failures == 0) printf("OK: 39 crypto, canonical and policy checks\n");
+  // --- Ed25519 (TweetNaCl), held to the RFC 8032 vectors through the detached-verify wrapper ---
+  {
+    std::vector<uint8_t> pk, sig, m3, pk3, sig3;
+    from_hex("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", pk);      // Test 1 pk
+    from_hex("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a3"
+             "3bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", sig);                 // Test 1 sig, empty msg
+    check(orbit_ed25519_verify(pk.data(), (const uint8_t *)"", 0, sig.data()) == 1, "ed25519 RFC8032 vector 1");
+    from_hex("fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", pk3);     // Test 3 pk
+    from_hex("6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f"
+             "290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a", sig3);                 // Test 3 sig
+    from_hex("af82", m3);
+    check(orbit_ed25519_verify(pk3.data(), m3.data(), m3.size(), sig3.data()) == 1, "ed25519 RFC8032 vector 3");
+    sig3[0] ^= 0x01;
+    check(orbit_ed25519_verify(pk3.data(), m3.data(), m3.size(), sig3.data()) == 0, "ed25519 tampered sig rejected");
+    check(orbit_ed25519_verify(pk.data(), (const uint8_t *)"x", 1, sig.data()) == 0, "ed25519 wrong message rejected");
+  }
+
+  if (failures == 0) printf("OK: crypto, canonical, policy and Ed25519 checks\n");
 }
 
 int main(int argc, char **argv) {
@@ -267,11 +293,17 @@ int main(int argc, char **argv) {
 
   if (!strcmp(mode, "accept") && argc > 3) {
     const std::string key = key_from_hex(argv[2]);
+    std::vector<uint8_t> pk;                 // optional 4th arg: the ground's Ed25519 public key (hex)
+    const uint8_t *pkp = nullptr;
+    if (argc > 4 && *argv[4]) {
+      if (!from_hex(argv[4], pk) || pk.size() != 32) { fprintf(stderr, "bad ground pubkey hex\n"); return 2; }
+      pkp = pk.data();
+    }
     OrbitAuthState st;
     memset(&st, 0, sizeof(st));
     while (read_line(line)) {
       if (!from_hex(line, d)) { printf("ERR\n"); continue; }
-      printf("%s\n", result_name(orbit_auth_accept(d.data(), d.size(), key.c_str(), argv[3], &st)));
+      printf("%s\n", result_name(orbit_auth_accept(d.data(), d.size(), key.c_str(), argv[3], pkp, &st)));
     }
     return 0;
   }

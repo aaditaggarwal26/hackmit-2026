@@ -75,6 +75,16 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+// Vendored verbatim (public domain); Ed25519 crypto_sign_open for the sig check. tweetnacl.c is
+// compiled as C, so its declarations need C linkage in a C++ TU (the sketch and the host tests
+// are both C++) or the names mangle and the link fails on device and host alike.
+#ifdef __cplusplus
+extern "C" {
+#include "tweetnacl.h"
+}
+#else
+#include "tweetnacl.h"
+#endif
 
 // ---------------------------------------------------------------- build-time configuration
 //
@@ -107,6 +117,15 @@
 // board flashed from secrets.h.example is in, and it is how the bus behaved before this file
 // existed, so an unconfigured node is not silently deaf -- it is unauthenticated, loudly.
 #define ORBIT_AUTH_ENABLED (sizeof(ORBIT_AUTH_KEY) > 1)
+
+// The ground's Ed25519 PUBLIC key as 64 hex characters, so a satellite can verify that a
+// grant/revoke/tx_ack really came from the ground and not merely from a holder of the shared
+// HMAC key. Public, not secret -- but site-local, so it lives in secrets.h beside the rest.
+// "" means the signature is not checked (HMAC + pin still apply), which is the default. The
+// ground holds the matching private seed as ORBIT_GROUND_SIGN_KEY in its environment.
+#ifndef ORBIT_GROUND_PUBKEY
+#define ORBIT_GROUND_PUBKEY ""
+#endif
 
 #define ORBIT_TAG_BYTES    16                       // truncated HMAC-SHA256, see above
 #define ORBIT_TAG_HEX      (ORBIT_TAG_BYTES * 2)    // 32 characters on the wire
@@ -459,6 +478,7 @@ typedef struct {
   const uint8_t *type_s, *type_e;   // JSON string literals, quotes included
   const uint8_t *from_s, *from_e;
   const uint8_t *auth_s, *auth_e;   // the tag literal, or NULL when there is no `auth` member
+  const uint8_t *sig_s, *sig_e;     // the Ed25519 signature literal, or NULL when there is no `sig`
   uint32_t       seq;
   uint32_t       t_ms;
   int            members;           // top-level members, so sign() can see whether a 25th fits
@@ -487,7 +507,7 @@ static inline size_t orbit_canonical(const uint8_t *src, size_t len,
   const uint8_t *e = src + len;
   const uint8_t *p = orbit_ws(src, e);
   int n = 0, i;
-  const OrbitMember *mv = NULL, *mt = NULL, *mf = NULL, *ms = NULL, *mu = NULL, *ma = NULL;
+  const OrbitMember *mv = NULL, *mt = NULL, *mf = NULL, *ms = NULL, *mu = NULL, *ma = NULL, *msig = NULL;
 
   p = orbit_scan_object(p, e, 1, m, &n);
   if (!p) return 0;
@@ -502,6 +522,7 @@ static inline size_t orbit_canonical(const uint8_t *src, size_t len,
     else if (kl == 5 && !memcmp(k, "\"seq\"", 5))     ms = &m[i];
     else if (kl == 6 && !memcmp(k, "\"t_ms\"", 6))    mu = &m[i];
     else if (kl == 6 && !memcmp(k, "\"auth\"", 6))    ma = &m[i];
+    else if (kl == 5 && !memcmp(k, "\"sig\"", 5))     msig = &m[i];
   }
   if (!mv || !mt || !mf || !ms || !mu) return 0;
   if (*mt->vs != '"' || *mf->vs != '"') return 0;            // type/from must be strings
@@ -510,6 +531,8 @@ static inline size_t orbit_canonical(const uint8_t *src, size_t len,
   ev.from_s = mf->vs; ev.from_e = mf->ve;
   ev.auth_s = ma ? ma->vs : NULL;
   ev.auth_e = ma ? ma->ve : NULL;
+  ev.sig_s = msig ? msig->vs : NULL;
+  ev.sig_e = msig ? msig->ve : NULL;
   ev.members = n;
   if (!orbit_u32(ms->vs, ms->ve, &ev.seq)) return 0;
   if (!orbit_u32(mu->vs, mu->ve, &ev.t_ms)) return 0;
@@ -530,7 +553,7 @@ static inline size_t orbit_canonical(const uint8_t *src, size_t len,
     int first = 1;
     for (i = 0; i < n; i++) {
       if (&m[i] == mv || &m[i] == mt || &m[i] == mf || &m[i] == ms || &m[i] == mu) continue;
-      if (&m[i] == ma) continue;                             // the tag is never its own input
+      if (&m[i] == ma || &m[i] == msig) continue;            // the tag and the signature are never their own input
       if (!first) orbit_out_ch(&o, ',');
       first = 0;
       orbit_out_put(&o, m[i].ks, (size_t)(m[i].ke - m[i].ks));
@@ -624,7 +647,9 @@ typedef enum {
   ORBIT_ERR_BAD_TAG,   // the tag does not verify under the key
   ORBIT_ERR_PIN,       // a control message from someone who is not the ground
   ORBIT_ERR_REPLAY,    // seq <= the highest already verified from this sender
-  ORBIT_ERR_PEERS      // the peer table is full
+  ORBIT_ERR_PEERS,     // the peer table is full
+  ORBIT_ERR_NO_SIG,    // a state-changing command with no `sig`, when a ground pubkey is set
+  ORBIT_ERR_BAD_SIG    // the Ed25519 signature does not verify under the ground's public key
 } OrbitAuthResult;
 
 static inline int orbit_is_control(const uint8_t *ts, const uint8_t *te) {
@@ -633,6 +658,64 @@ static inline int orbit_is_control(const uint8_t *ts, const uint8_t *te) {
          (n ==  7 && !memcmp(ts, "\"grant\"", 7))        ||
          (n ==  8 && !memcmp(ts, "\"revoke\"", 8))       ||
          (n ==  8 && !memcmp(ts, "\"tx_ack\"", 8));
+}
+
+// The state-changing subset that additionally carries an Ed25519 signature (auth.SIGNED_TYPES).
+// offers_open is control but only invites bids, so it is left to the HMAC + pin.
+static inline int orbit_is_signed_type(const uint8_t *ts, const uint8_t *te) {
+  const size_t n = (size_t)(te - ts);
+  return (n == 7 && !memcmp(ts, "\"grant\"", 7))  ||
+         (n == 8 && !memcmp(ts, "\"revoke\"", 8)) ||
+         (n == 8 && !memcmp(ts, "\"tx_ack\"", 8));
+}
+
+// Standard base64 decode (RFC 4648, with '=' padding), the encoding cryptography uses for the
+// `sig` value. Returns the number of bytes written, or -1 on any malformed input.
+static inline int orbit_b64_val(uint8_t c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+static inline int orbit_b64_decode(const uint8_t *in, size_t inlen, uint8_t *out, size_t outcap) {
+  if (inlen % 4) return -1;
+  size_t o = 0;
+  for (size_t i = 0; i < inlen; i += 4) {
+    const int a = orbit_b64_val(in[i]), b = orbit_b64_val(in[i + 1]);
+    const int pad2 = in[i + 2] == '=', pad3 = in[i + 3] == '=';
+    const int c = pad2 ? 0 : orbit_b64_val(in[i + 2]);
+    const int d = pad3 ? 0 : orbit_b64_val(in[i + 3]);
+    if (a < 0 || b < 0 || c < 0 || d < 0) return -1;
+    if (pad2 && !pad3) return -1;                       // "xx=y" is not valid padding
+    const uint32_t v = ((uint32_t)a << 18) | ((uint32_t)b << 12) | ((uint32_t)c << 6) | (uint32_t)d;
+    if (o < outcap) { out[o] = (uint8_t)(v >> 16); }
+    o++;
+    if (!pad2) {
+      if (o < outcap) { out[o] = (uint8_t)(v >> 8); }
+      o++;
+    }
+    if (!pad3) {
+      if (o < outcap) { out[o] = (uint8_t)v; }
+      o++;
+    }
+  }
+  return o <= outcap ? (int)o : -1;
+}
+
+// Detached Ed25519 verify via TweetNaCl's combined crypto_sign_open: build sm = sig(64) || msg
+// and treat a clean open as a valid detached signature. Static scratch (single-threaded event
+// loop) keeps 3 KB off the task stack. Returns 1 if the signature is valid, 0 otherwise.
+static inline int orbit_ed25519_verify(const uint8_t pk[32], const uint8_t *msg, size_t mlen,
+                                       const uint8_t sig[64]) {
+  static uint8_t sm[64 + ORBIT_CANON_MAX];
+  static uint8_t mo[64 + ORBIT_CANON_MAX];
+  unsigned long long molen = 0;
+  if (mlen > ORBIT_CANON_MAX) return 0;
+  memcpy(sm, sig, 64);
+  memcpy(sm + 64, msg, mlen);
+  return crypto_sign_open(mo, &molen, sm, (unsigned long long)(64 + mlen), pk) == 0;
 }
 
 // `name` compared against the raw `from` LITERAL, so a sender whose hostname arrives
@@ -686,8 +769,12 @@ static inline int orbit_unhex(uint8_t c) {
 // A repeat of a datagram already accepted (BUS_TX_REPEAT sends four copies of each) fails with
 // ORBIT_ERR_REPLAY because its seq is no longer greater -- which is the correct outcome, the
 // copies exist to survive loss and must be acted on exactly once.
+// ``ground_pk`` is the ground's 32-byte Ed25519 public key, or NULL to skip the signature check.
+// When set, a grant/revoke/tx_ack must additionally carry a valid Ed25519 `sig` from the ground:
+// this is what a leaked shared HMAC key cannot forge.
 static inline OrbitAuthResult orbit_auth_accept(const uint8_t *buf, size_t len, const char *key,
-                                                const char *ground, OrbitAuthState *st) {
+                                                const char *ground, const uint8_t *ground_pk,
+                                                OrbitAuthState *st) {
   static uint8_t canon[ORBIT_CANON_MAX];
   uint8_t want[ORBIT_TAG_BYTES], got[ORBIT_TAG_BYTES], mac[32];
   OrbitEnvelope env;
@@ -697,7 +784,7 @@ static inline OrbitAuthResult orbit_auth_accept(const uint8_t *buf, size_t len, 
   // the ground. Not an optimisation: it is the guarantee that a board flashed from
   // secrets.h.example behaves precisely as it did before this header existed, right down to a
   // malformed datagram reaching ArduinoJson and being dropped there rather than here.
-  if ((!key || !*key) && (!ground || !*ground)) return ORBIT_OK;
+  if ((!key || !*key) && (!ground || !*ground) && !ground_pk) return ORBIT_OK;
   clen = orbit_canonical(buf, len, canon, sizeof(canon), &env);
   if (clen == 0) return ORBIT_ERR_CANON;
 
@@ -715,6 +802,16 @@ static inline OrbitAuthResult orbit_auth_accept(const uint8_t *buf, size_t len, 
     orbit_hmac_sha256((const uint8_t *)key, strlen(key), canon, clen, mac);
     memcpy(want, mac, ORBIT_TAG_BYTES);
     if (!orbit_ct_eq(want, got, ORBIT_TAG_BYTES)) return ORBIT_ERR_BAD_TAG;
+  }
+
+  // A state-changing ground command must carry a valid Ed25519 signature over the same canonical
+  // bytes as the HMAC. The `sig` value is 64 bytes base64 (88 chars incl. padding, in quotes).
+  if (ground_pk && orbit_is_signed_type(env.type_s, env.type_e)) {
+    uint8_t sig[64];
+    if (!env.sig_s || (size_t)(env.sig_e - env.sig_s) < 2) return ORBIT_ERR_NO_SIG;
+    if (orbit_b64_decode(env.sig_s + 1, (size_t)(env.sig_e - env.sig_s) - 2, sig, sizeof(sig)) != 64)
+      return ORBIT_ERR_BAD_SIG;
+    if (!orbit_ed25519_verify(ground_pk, canon, clen, sig)) return ORBIT_ERR_BAD_SIG;
   }
 
   // The watermark needs the MAC. Without one, "seq must increase" is not anti-replay at all --
