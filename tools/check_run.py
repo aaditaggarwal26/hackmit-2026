@@ -18,7 +18,11 @@ ground station's, and it verifies what the live screen relies on:
              queue rebuilt from the stream; depth never exceeds queue_limit;
              queue_window entries are real, sorted, and match node_status
   grants     the winner is a ready bidder; reason agrees with the bids; one
-             frame_arrived per grant, same slot and node
+             frame_arrived per grant, same slot and node. A revoked or failed
+             grant delivers nothing, keeps the frame with the satellite, and
+             re-arbitrates the same slot_id without that node
+  nodes      a satellite the roster never mentioned may still turn up, with the
+             next node_id and a node_event announcing it
   window     used/remaining bytes equal the sum of arrivals against the budget
   usable     follows cloud_frac and usable_rule only, never score
   run_end    totals equal what the events said
@@ -27,11 +31,17 @@ Errors are contract violations. Warnings are places the contract leaves open
 (what `busy` means, what frames_evicted counts, ...) where the file differs
 from the reading the display uses. They deserve a message in the group chat,
 not a failed check.
+
+Counts a node reports about itself (node_status, queue_window, frame_scored)
+are its own, and the frame it just sent leaves it at the ground's tx_ack, not
+at frame_arrived. Exactly one report per delivery may still count that frame;
+the next one must agree with the ground.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import Counter, OrderedDict
 from collections.abc import Iterable
@@ -58,6 +68,13 @@ LEVELS = ("info", "warn", "error")
 MODES = ("live", "replay")
 EMPTY_TOP_ID = (None, 0xFFFF)  # top_frame_id of an empty queue: null, or 0xFFFF as the wire protocol has it
 WINDOW_CAP = 5  # queue_window: "Cap at 5 entries"
+
+# node_event messages that say the open grant ended with nothing delivered and the round was
+# re-arbitrated on the same slot_id: a revoke ("grant for #14 revoked: grant_timeout") or a failed
+# transmission ("transmission of #14 failed: <reason>; frame kept"). The frame is kept by the
+# satellite either way. This message text is the only signal the contract gives the display.
+GRANT_ENDED = re.compile(r"grant for #\d+ revoked\b|transmission of #\d+ failed\b")
+JOINED = re.compile(r"\bjoined the bus\b")
 
 Int, Num, Bool, Str, List, Dict = "int", "num", "bool", "str", "list", "dict"
 NULLABLE = "?"
@@ -158,6 +175,16 @@ def is_type(v: Any, spec: str) -> bool:
     return isinstance(v, {Str: str, List: list, Dict: dict}[spec])
 
 
+def ranked_of(queue: OrderedDict[Any, float]) -> list[tuple[Any, float]]:
+    order = {fid: i for i, fid in enumerate(queue)}
+    return sorted(queue.items(), key=lambda kv: (-kv[1], order[kv[0]]))
+
+
+def head_of(queue: OrderedDict[Any, float]) -> tuple[Any, float] | None:
+    """(frame_id, score) of the head: highest score, earliest insert among equals."""
+    return ranked_of(queue)[0] if queue else None
+
+
 class NodeState:
     def __init__(self, label: str) -> None:
         self.label = label
@@ -167,19 +194,35 @@ class NodeState:
         self.last_status_t: float | None = None
         self.max_quiet = 0.0  # longest gap between node_status events, stream seconds
         self.link_ok: bool | None = None
-        # (frame_id, score) of the head when this node was granted; None when idle
-        self.in_flight: tuple[Any, float] | None = None
+        # (frame_id, score, position in the queue) of the frame this node was granted; None when idle
+        self.in_flight: tuple[Any, float, int] | None = None
+        # The satellite drops a frame when the ground's tx_ack reaches it, which is after the ground
+        # emitted frame_arrived, so its own next report can still count the frame. This is that frame,
+        # and ack_lag_t the stream time of the one report allowed to still show it.
+        self.ack_pending: tuple[Any, float, int] | None = None
+        self.ack_lag_t: float | None = None
 
     def head(self) -> tuple[Any, float] | None:
-        """(frame_id, score) of the head: highest score, earliest insert among equals."""
-        if not self.queue:
-            return None
-        ranked = sorted(self.queue.items(), key=lambda kv: (-kv[1], list(self.queue).index(kv[0])))
-        return ranked[0]
+        return head_of(self.queue)
 
     def ranked(self) -> list[tuple[Any, float]]:
-        order = {fid: i for i, fid in enumerate(self.queue)}
-        return sorted(self.queue.items(), key=lambda kv: (-kv[1], order[kv[0]]))
+        return ranked_of(self.queue)
+
+    def with_frame(self, held: tuple[Any, float, int]) -> OrderedDict[Any, float]:
+        """The queue with `held` put back where it was: the satellite's own view of itself."""
+        fid, score, pos = held
+        q: OrderedDict[Any, float] = OrderedDict()
+        for i, (k, v) in enumerate(self.queue.items()):
+            if i == pos:
+                q[fid] = score
+            q[k] = v
+        if fid not in q:
+            q[fid] = score
+        return q
+
+    def sat_queue(self) -> OrderedDict[Any, float] | None:
+        """The queue as the satellite still sees it while a delivery is waiting for its tx_ack."""
+        return None if self.ack_pending is None else self.with_frame(self.ack_pending)
 
 
 class Report:
@@ -213,6 +256,13 @@ class Checker:
             None  # "grant" or "arrival": when the sent frame leaves the queue. Learned from the file.
         )
         self.last_slot: Any = None
+        # slot_id -> the nodes whose grant on that slot was revoked or failed. The contract lets a
+        # revoked slot re-use its slot_id with a new grant; the arbiter re-runs the same round's bids
+        # without that node, so it must not win the slot again.
+        self.revoked_from: dict[Any, set[Any]] = {}
+        self.late_joiners: set[Any] = set()  # node_ids admitted without a run_start roster entry
+        self.announced: set[Any] = set()  # node_ids a node_event said joined the bus
+        self.ack_note_done = False
         self.winners: list[Any] = []
         self.n_arrived = self.n_usable = self.bytes_used = 0
         self.base_sent: set[Any] = set()
@@ -245,12 +295,37 @@ class Checker:
             return self.GROUND
         if nid in self.nodes:
             return self.nodes[nid]
-        if self.run is not None:
-            self.E(seq, f"{ev.get('type')}: node_id {nid!r} is not in run_start.nodes")
-        else:
+        label = ev.get("label") if is_type(ev.get("label"), Str) else None
+        if self.run is None:
             self.W(seq, f"{ev.get('type')}: node_id {nid!r} seen before run_start")
-        st = self.nodes.setdefault(nid, NodeState(f"node {nid}"))
+        elif nid == len(self.nodes):
+            # event_stream.md, run_start: "a satellite that appears with another hostname gets the
+            # next node_id and a node_event announcing it". Nothing has to precede it on the stream.
+            self.late_joiners.add(nid)
+            self.N(seq, f"{ev.get('type')}: node {nid} ({label or '?'}) joined late, after run_start")
+        else:
+            self.E(seq, f"{ev.get('type')}: node_id {nid!r} is neither in run_start.nodes nor the next node_id")
+        st = self.nodes.setdefault(nid, NodeState(label or f"node {nid}"))
         return st
+
+    def ack_lag(self, seq: int | None, st: NodeState, t: float | None, ground_ok: bool, sat_ok: bool) -> bool:
+        """Is this the tx_ack lag? A satellite-sourced count can disagree with the ground for exactly
+        one report after a delivery: frame_arrived fires on tx_done, while the satellite drops the
+        frame and bumps frames_sent when the ground's tx_ack gets back to it (protocol/messages.py:
+        Heartbeat.frames_sent is "since boot, confirmed by tx_ack"). Returns True when the report
+        matches the satellite's pre-ack view and is the first one since the delivery."""
+        if st.ack_pending is None or ground_ok:
+            st.ack_pending = st.ack_lag_t = None  # caught up: strict from here
+            return False
+        if not sat_ok or (st.ack_lag_t is not None and t != st.ack_lag_t):
+            st.ack_pending = st.ack_lag_t = None  # a second stale report is not the ack lag
+            return False
+        if st.ack_lag_t is None:
+            st.ack_lag_t = t
+            if not self.ack_note_done:
+                self.ack_note_done = True
+                self.N(seq, f"{st.label} reported its queue once more before the tx_ack landed (one report behind)")
+        return True
 
     def resolve_depth(self, seq: int | None, st: NodeState, observed: int, what: str) -> None:
         """A depth observation while a grant is open decides when the sent frame leaves the
@@ -272,6 +347,20 @@ class Checker:
             )
         if self.pop_at == "grant":
             del st.queue[st.in_flight[0]]
+
+    def end_grant(self, st: NodeState) -> None:
+        """A grant ended with nothing delivered (revoke or failed transmission). The satellite keeps
+        the frame — `orbit/arbiter/fsm.py` re-runs the same round's bids without that node — so the
+        slot is free, the node is idle again, and the frame goes back in the queue if we popped it."""
+        g = self.open_grant
+        if g is not None:
+            self.revoked_from.setdefault(g["slot_id"], set()).add(g["node_id"])
+        if st.in_flight is not None:
+            if st.in_flight[0] not in st.queue:
+                st.queue = st.with_frame(st.in_flight)
+            st.in_flight = None
+        self.open_grant = None
+        self.grant_t = None
 
     # -- entry points
     def feed_line(self, line: str) -> None:
@@ -381,10 +470,20 @@ class Checker:
         st.last_status_t = t
         st.link_ok = ev["link_ok"]
         self.resolve_depth(seq, st, ev["queue_depth"], "node_status")
-        depth = len(st.queue)
+        queue, sent = st.queue, st.n_sent
+        sat = st.sat_queue()
+        if sat is not None and self.ack_lag(
+            seq,
+            st,
+            t,
+            ev["queue_depth"] == len(st.queue) and ev["frames_sent"] == st.n_sent,
+            ev["queue_depth"] == len(sat) and ev["frames_sent"] == st.n_sent - 1,
+        ):
+            queue, sent = sat, st.n_sent - 1
+        depth = len(queue)
         if ev["queue_depth"] != depth:
             self.E(seq, f"node_status {st.label}: queue_depth {ev['queue_depth']} but the stream implies {depth}")
-        head = st.head()
+        head = head_of(queue)
         if head is None:
             if ev["top_frame_id"] not in EMPTY_TOP_ID:
                 self.E(seq, f"node_status {st.label}: queue is empty but top_frame_id is {ev['top_frame_id']}")
@@ -406,8 +505,8 @@ class Checker:
             self.E(
                 seq, f"node_status {st.label}: frames_scored {ev['frames_scored']} but {st.n_scored} frame_scored seen"
             )
-        if ev["frames_sent"] != st.n_sent:
-            self.E(seq, f"node_status {st.label}: frames_sent {ev['frames_sent']} but {st.n_sent} frame_arrived seen")
+        if ev["frames_sent"] != sent:
+            self.E(seq, f"node_status {st.label}: frames_sent {ev['frames_sent']} but {sent} frame_arrived seen")
         if ev["frames_evicted"] != st.n_evicted:
             self.W(
                 seq,
@@ -428,13 +527,17 @@ class Checker:
     def on_queue_window(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         self.resolve_depth(seq, st, ev["depth"], "queue_window")
-        depth = len(st.queue)
+        queue = st.queue
+        sat = st.sat_queue()
+        if sat is not None and self.ack_lag(seq, st, t, ev["depth"] == len(st.queue), ev["depth"] == len(sat)):
+            queue = sat
+        depth = len(queue)
         if ev["depth"] != depth:
             self.E(seq, f"queue_window {st.label}: depth {ev['depth']} but the stream implies {depth}")
         top = ev["top"]
         if len(top) > WINDOW_CAP:
             self.E(seq, f"queue_window {st.label}: {len(top)} entries, cap is {WINDOW_CAP}")
-        ranked = st.ranked()
+        ranked = ranked_of(queue)
         prev = None
         for i, e in enumerate(top):
             if (
@@ -445,13 +548,13 @@ class Checker:
             ):
                 self.E(seq, f"queue_window {st.label}: bad entry {e!r}")
                 continue
-            if e["frame_id"] not in st.queue:
+            if e["frame_id"] not in queue:
                 self.E(seq, f"queue_window {st.label}: frame {e['frame_id']} is not in the queue")
-            elif e["score"] != st.queue[e["frame_id"]]:
+            elif e["score"] != queue[e["frame_id"]]:
                 self.E(
                     seq,
                     f"queue_window {st.label}: frame {e['frame_id']} score {e['score']}"
-                    f" != scored {st.queue[e['frame_id']]}",
+                    f" != scored {queue[e['frame_id']]}",
                 )
             if prev is not None and e["score"] > prev:
                 self.E(seq, f"queue_window {st.label}: top is not sorted by score (entry {i})")
@@ -511,10 +614,13 @@ class Checker:
                 )
         if self.queue_limit is not None and len(st.queue) > self.queue_limit:
             self.E(seq, f"frame_scored {st.label}: queue depth {len(st.queue)} exceeds queue_limit {self.queue_limit}")
-        if ev["queue_depth"] != len(st.queue):
-            self.E(
-                seq, f"frame_scored {st.label}: queue_depth {ev['queue_depth']} but the stream implies {len(st.queue)}"
-            )
+        depth = len(st.queue)
+        if st.ack_pending is not None and self.ack_lag(
+            seq, st, t, ev["queue_depth"] == depth, ev["queue_depth"] == depth + 1
+        ):
+            depth += 1
+        if ev["queue_depth"] != depth:
+            self.E(seq, f"frame_scored {st.label}: queue_depth {ev['queue_depth']} but the stream implies {depth}")
 
     def on_grant(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
@@ -524,8 +630,17 @@ class Checker:
                 f"grant slot {ev['slot_id']} while slot {self.open_grant['slot_id']} "
                 f"(node {self.open_grant['node_id']}) has no frame_arrived yet",
             )
-        if self.last_slot is not None and ev["slot_id"] <= self.last_slot:
+        # "slot_id is the ground's round id (unique, increasing; a revoked slot re-uses it with a
+        # new grant)": re-using the slot of a revoked grant is the re-arbitration, not a repeat.
+        revoked = self.revoked_from.get(ev["slot_id"], set())
+        if self.last_slot is not None and ev["slot_id"] <= self.last_slot and not revoked:
             self.W(seq, f"grant: slot_id {ev['slot_id']} does not increase (last {self.last_slot})")
+        if ev["node_id"] in revoked:
+            self.E(
+                seq,
+                f"grant: slot {ev['slot_id']} re-granted to node {ev['node_id']}, "
+                "whose grant on that slot was revoked (the re-run sets its bid aside)",
+            )
         self.last_slot = ev["slot_id"]
         if ev["reason"] not in REASONS:
             self.E(seq, f"grant: reason {ev['reason']!r} not in {REASONS}")
@@ -580,7 +695,22 @@ class Checker:
                     )
         for b in bids.values():
             bs = self.nodes.get(b["node_id"])
-            if bs is not None and b["ready"] and bs.queue:
+            if bs is None or not b["ready"]:
+                continue
+            # A bid names its frame (event_stream.md, grant.bids[].frame_id). Hold the bid against
+            # that frame's own score, not against the node's head now: bids are collected when the
+            # round opens, and a re-arbitrated slot replays them after newer frames were scored.
+            bf = b.get("frame_id")
+            if bf is not None and bf in bs.scored:
+                if b["top_score"] != bs.scored[bf]["score"]:
+                    self.E(
+                        seq,
+                        f"grant: bid of {bs.label} for frame {bf} is {b['top_score']}"
+                        f" but that frame was scored {bs.scored[bf]['score']}",
+                    )
+            elif bf is not None:
+                self.E(seq, f"grant: bid of {bs.label} names frame {bf}, which it never frame_scored")
+            elif bs.queue:
                 h = bs.head()
                 if h is not None and b["top_score"] != h[1]:
                     self.W(
@@ -589,9 +719,24 @@ class Checker:
         self.winners.append(ev["node_id"])
         self.open_grant = ev
         self.grant_t = t
-        st.in_flight = st.head()
+        st.in_flight = self.granted_frame(seq, st, ev)
         if self.pop_at == "grant" and st.in_flight is not None:
             del st.queue[st.in_flight[0]]
+
+    def granted_frame(self, seq: int | None, st: NodeState, ev: Event) -> tuple[Any, float, int] | None:
+        """Which frame this grant is for, and where it sits in the queue. The grant says so itself
+        (event_stream.md, grant.frame_id); only a file that omits the field falls back to the head."""
+        order = list(st.queue)
+        fid = ev.get("frame_id")
+        if fid is None:
+            h = st.head()
+            return None if h is None else (h[0], h[1], order.index(h[0]))
+        if fid not in st.queue:
+            # not a violation: `grant_unknown_item` is a registered anomaly (event_stream.md, fault 8).
+            # A node can bid, evict the frame under memory pressure, then be granted it and fault.
+            self.W(seq, f"grant to {st.label}: frame {fid} is not in its queue in the stream")
+            return None
+        return (fid, st.queue[fid], order.index(fid))
 
     def on_frame_arrived(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
@@ -632,10 +777,13 @@ class Checker:
         if flight is not None and flight[0] != fid:
             self.W(
                 seq,
-                f"frame_arrived {st.label}: sent frame {fid} but the head at the grant was {flight[0]} ({flight[1]})",
+                f"frame_arrived {st.label}: sent frame {fid} but the grant was for {flight[0]} ({flight[1]})",
             )
         if fid in st.queue:
+            held = (fid, st.queue[fid], list(st.queue).index(fid))
             del st.queue[fid]
+            # the satellite only drops it when the tx_ack gets back: one more report may still count it
+            st.ack_pending, st.ack_lag_t = held, None
         elif flight is None or flight[0] != fid:
             self.E(
                 seq,
@@ -704,10 +852,16 @@ class Checker:
         self.last_window = ev
 
     def on_node_event(self, seq: int | None, t: float | None, ev: Event) -> None:
-        self.node(seq, ev)
+        st = self.node(seq, ev)
         if ev["level"] not in LEVELS:
             self.E(seq, f"node_event: level {ev['level']!r} not in {LEVELS}")
         self.levels[ev["level"]] += 1
+        msg = ev["message"]
+        if ev.get("node_id") is not None and JOINED.search(msg):
+            self.announced.add(ev["node_id"])
+        g = self.open_grant
+        if g is not None and g["node_id"] == ev.get("node_id") and GRANT_ENDED.search(msg):
+            self.end_grant(st)
 
     def on_run_end(self, seq: int | None, t: float | None, ev: Event) -> None:
         self.ended = True
@@ -760,6 +914,8 @@ class Checker:
             self.E(None, "no run_start")
         elif not self.ended:
             self.W(None, "no run_end (partial run?)")
+        for nid in sorted(self.late_joiners - self.announced):
+            self.W(None, f"node {nid} joined after run_start but no node_event announced it")
         s = self.r.summary
         s["lines"] = self.n_lines
         s["bad_lines"] = self.bad_lines
