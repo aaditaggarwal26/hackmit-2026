@@ -117,10 +117,10 @@ static inline AckDecision ack_decide(bool await_ack, uint16_t await_item,
 // uppercase, a stand-in — is a frame silently marked bad, so the formatting is pinned here and
 // tested rather than written inline at the call site.
 static inline void orbit_hex64(const uint8_t digest[32], char out[65]) {
-  static const char HEX[] = "0123456789abcdef";
+  static const char HEXDIGITS[] = "0123456789abcdef";  // not HEX: Print.h defines that as 16
   for (int i = 0; i < 32; i++) {
-    out[i * 2]     = HEX[digest[i] >> 4];
-    out[i * 2 + 1] = HEX[digest[i] & 0x0F];
+    out[i * 2]     = HEXDIGITS[digest[i] >> 4];
+    out[i * 2 + 1] = HEXDIGITS[digest[i] & 0x0F];
   }
   out[64] = '\0';
 }
