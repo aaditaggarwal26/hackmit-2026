@@ -1,8 +1,11 @@
 """Bus behaviour that the WiFi will test for us if we don't: duplicates, garbage, own echoes, reordering."""
 
+from orbit.bus import multicast
 from orbit.bus.base import Deduper
 from orbit.bus.loopback import Faults, LoopbackBus, LoopbackHub
 from orbit.protocol import messages as M
+
+GROUP, PORT = "239.255.42.99", 50007  # the real group, a port no running node uses
 
 
 def offers(sender, seq):
@@ -96,3 +99,20 @@ def test_restarted_ground_is_heard_on_the_loopback_bus():
     ground2.send(M.OffersOpen("ground", 1, 5, round_id=1, window_remaining_bytes=1, collect_ms=1))
     hub.deliver()
     assert len(sat.poll()) == 1 and sat.stats.dropped_dup == 0
+
+
+def test_a_real_multicast_socket_can_send_to_its_own_group():
+    """The bind that makes a node deaf and mute, caught on the machine it breaks on.
+
+    ``open_socket`` binds the group on Linux, where that filters, and the wildcard everywhere
+    else, where binding the group would give the socket a source address that is not a local
+    one: the join still succeeds, receiving still works, and only ``sendto`` fails, with
+    EADDRNOTAVAIL on the very first datagram. Nothing above the socket can see that -- the
+    arbiter simply never hears a bid -- so it is checked here, against a real socket, rather
+    than by reading the platform back out of the module.
+    """
+    sock = multicast.open_socket(GROUP, PORT, "127.0.0.1", ttl=0)  # ttl 0: stays on this host
+    try:
+        sock.sendto(b"orbit-bind-check", (GROUP, PORT))
+    finally:
+        sock.close()

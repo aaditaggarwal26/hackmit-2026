@@ -13,6 +13,9 @@ Points that bit during bring-up on this machine and are therefore explicit here:
 * ``SO_REUSEADDR`` is what lets those processes share the port; on Linux multicast is
   delivered to every such socket. ``SO_REUSEPORT`` is set too where available for
   BSD-family hosts, but nothing depends on its load-balancing semantics.
+* The bind address is not the same on every platform; see ``BIND_GROUP`` below. Getting this
+  wrong is silent in one direction: the node still joins the group and still receives, and only
+  its sends fail.
 * TTL 1. Nothing here should ever be routed.
 """
 
@@ -22,6 +25,7 @@ import asyncio
 import logging
 import socket
 import struct
+import sys
 from typing import Any
 
 from orbit.bus.base import Bus
@@ -33,6 +37,15 @@ lg = logging.getLogger("orbit.bus.mcast")
 
 
 OFFLINE_IP = "127.0.0.1"
+
+# Bind the group itself, or the wildcard? Linux takes the group and then delivers only datagrams
+# addressed to it, which is the tighter filter and is what the ground station runs on. BSD and
+# macOS cannot: the socket's source address would be the group, which is not a local address, so
+# the first sendto fails with EADDRNOTAVAIL and the node is deaf and mute on its own bus. There
+# the wildcard is the only working bind and IP_ADD_MEMBERSHIP does the filtering instead. The
+# wider bind also admits unicast sent to this port, which costs nothing: _ingest authenticates,
+# decodes and drops by hostname before anything reaches the arbiter, and counts what it dropped.
+BIND_GROUP = sys.platform.startswith("linux")
 
 
 def default_route_ip() -> str:
@@ -56,7 +69,7 @@ def open_socket(group: str, port: int, iface_ip: str, ttl: int) -> socket.socket
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT"):
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind((group, port))  # Linux: only datagrams addressed to the group land here
+    sock.bind((group if BIND_GROUP else "", port))
     mreq = struct.pack("4s4s", socket.inet_aton(group), socket.inet_aton(iface_ip))
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(iface_ip))
