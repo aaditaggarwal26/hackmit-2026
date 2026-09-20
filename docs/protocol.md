@@ -137,6 +137,7 @@ ground cannot disagree about what a number means.
 | 9 | `scoring_latency_high` | satellite | degraded | `bus` | ground + peers | active | one frame took longer through the kernel than the capture cadence can absorb |
 | 10 | `ground_down` | ground | anomaly | `event-stream` | laptop | reserved | the bus went quiet or its health thresholds were breached: the ground is not arbitrating |
 | 11 | `auth_reject` | security | anomaly | `event-stream` | laptop | reserved | a datagram was rejected by the authentication layer |
+| 12 | `flash_image_corrupt` | satellite | fatal | `bus` | ground + peers | active | a flashed blob does not match the CRC its manifest records; the image is not what was built |
 <!-- registry:faults:end -->
 
 A satellite fault rides the bus as a `fault` datagram and is therefore heard by its peers as well as

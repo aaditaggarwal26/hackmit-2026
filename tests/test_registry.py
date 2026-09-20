@@ -40,6 +40,7 @@ EXPECTED_FAULT_IDS = {
     9: "scoring_latency_high",
     10: "ground_down",
     11: "auth_reject",
+    12: "flash_image_corrupt",
 }
 
 

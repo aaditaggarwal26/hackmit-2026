@@ -438,6 +438,7 @@ laptop on this stream only.
 | 9 | `scoring_latency_high` | degraded | `fault` → `node_event` | yes |
 | 10 | `ground_down` | anomaly | `node_event` (ground-side only) | no |
 | 11 | `auth_reject` | anomaly | `node_event` (ground-side only) | no |
+| 12 | `flash_image_corrupt` | fatal | `fault` → `node_event` | yes |
 <!-- registry:off-bus:end -->
 
 The `fault` bus message itself (`docs/protocol.md`) is a satellite → all type: the display never

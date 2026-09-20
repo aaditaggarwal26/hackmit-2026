@@ -26,6 +26,7 @@
 #include "orbit_score.h"
 #include "orbit_queue.h"
 #include "orbit_sat.h"
+#include "orbit_fsimage.h"
 
 // Identity comes in as a bare token (-DSAT_ID=c) and is stringified here, so the build
 // flag needs no nested quotes and cannot be mangled by a shell.
@@ -62,6 +63,10 @@ static uint8_t  scratch[FRAME_BYTES];       // one frame in flight from LittleFS
 
 static const int MAX_FRAMES = 128;
 static uint16_t  frameRef[MAX_FRAMES];      // frame index -> reference id
+// The manifest's CRC-32 of each blob's exact bytes, checked once at boot (orbit_fsimage.h).
+static uint32_t  frameCrc[MAX_FRAMES];      // frame index -> crc32 of /frames/NNN.bin
+static uint32_t  refCrc[MAX_FRAMES];        // frame index -> crc32 of ITS /refs/RRR.bin
+static uint32_t  manifestFmt = 0;           // 0 = nothing read
 
 static uint32_t g_seq = 0;
 static uint16_t g_next_item_id = 1;
@@ -314,6 +319,13 @@ static bool loadBlob(const char *path, uint8_t *dst) {
   f.close();
   if (n != FRAME_BYTES) { Serial.printf("[fs] %s short: %u\n", path, (unsigned)n); return false; }
   return true;
+}
+
+// Printed for every blob that fails the boot sweep. Serial only: the per-blob detail is for the
+// operator holding the USB cable, and 54 fault datagrams is not a thing to put on the bus.
+static void fsReport(FsVerdict v, const char *path, uint32_t want, uint32_t got) {
+  Serial.printf("FATAL: %s %s (manifest %08x, flash %08x)\n",
+                orbit_fs_verdict_name(v), path, (unsigned)want, (unsigned)got);
 }
 
 static bool loadFrame(uint16_t idx, uint8_t *dst) {
@@ -728,11 +740,40 @@ void setup() {
         g_boot_faults.push(ORBIT_FAULT_MANIFEST_CORRUPT, "/manifest.json is not valid JSON");
       } else {
         JsonArray arr = md["frames"].as<JsonArray>();
+        manifestFmt = md["fmt"] | 0u;
         for (JsonObject e : arr) {
           const uint16_t i = e["frame"] | 0;
-          if (i < MAX_FRAMES) { frameRef[i] = e["ref"] | 0; if (i + 1 > g_frame_count) g_frame_count = i + 1; }
+          if (i < MAX_FRAMES) {
+            frameRef[i] = e["ref"] | 0;
+            // .as<uint32_t>(), NOT `| 0`: ArduinoJson's default there is a SIGNED int, and half
+            // of all CRCs are above 2^31 -- this image has 2834247424 at frame 1. A sign-mangled
+            // expectation would fail every one of those frames at boot.
+            frameCrc[i] = e["crc32"].as<uint32_t>();
+            refCrc[i]   = e["ref_crc32"].as<uint32_t>();
+            if (i + 1 > g_frame_count) g_frame_count = i + 1;
+          }
         }
         Serial.printf("[fs] manifest: %u frames, satellite %s\n", g_frame_count, (const char *)(md["sat"] | "?"));
+        // Verify the flashed image before anything is captured from it. orbit_fsimage.h has the
+        // reasoning: why at boot rather than lazily at load, and what it costs.
+        const int bad = orbit_fs_verify(manifestFmt, frameRef, frameCrc, refCrc, g_frame_count,
+                                        scratch, loadBlob, fsReport);
+        if (bad != 0) {
+          // Loud, and then inert. g_frame_count = 0 makes capture() return immediately, so no
+          // frame from this image is ever scored, bid on or transmitted -- the whole point, since
+          // a silently scored bad frame reaches the ground as a re-score mismatch nobody can read.
+          // Nothing blocks or reboots: the node still joins the bus and still heartbeats, so it
+          // appears on the dashboard at captured=0 with this fault beside it.
+          char detail[PendingFaults::DETAIL_LEN];   // push() truncates past this; both fit
+          if (bad < 0) snprintf(detail, sizeof(detail), "manifest fmt %u, firmware needs %u: reflash",
+                                (unsigned)manifestFmt, (unsigned)ORBIT_MANIFEST_FMT);
+          else         snprintf(detail, sizeof(detail), "%d blob(s) failed CRC: reflash the image", bad);
+          Serial.printf("FATAL: flash image integrity: %s\n", detail);
+          g_boot_faults.push(ORBIT_FAULT_FLASH_IMAGE_CORRUPT, detail);
+          g_frame_count = 0;
+        } else {
+          Serial.printf("[fs] integrity: %u frames + references verified (crc32)\n", g_frame_count);
+        }
       }
       m.close();
     }

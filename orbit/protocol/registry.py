@@ -220,6 +220,7 @@ class FaultCode(IntEnum):
     SCORING_LATENCY_HIGH = 9
     GROUND_DOWN = 10
     AUTH_REJECT = 11
+    FLASH_IMAGE_CORRUPT = 12
 
 
 @dataclass(frozen=True)
@@ -311,6 +312,11 @@ FAULTS: dict[FaultCode, FaultSpec] = {
         "a datagram was rejected by the authentication layer",
         "stub: there is no auth layer yet. The id is burned now so adding one is not a renumbering",
         Status.RESERVED,
+    ),
+    FaultCode.FLASH_IMAGE_CORRUPT: _sat(
+        Severity.FATAL,
+        "a flashed blob does not match the CRC its manifest records; the image is not what was built",
+        "firmware/satellite_esp32/satellite_esp32.ino setup(), orbit_fs_verify returned a bad count",
     ),
 }
 

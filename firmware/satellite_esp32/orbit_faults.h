@@ -21,10 +21,11 @@ enum OrbitFaultCode {
   ORBIT_FAULT_SCORING_LATENCY_HIGH  =  9,  // degraded, satellite, active
   ORBIT_FAULT_GROUND_DOWN           = 10,  // anomaly, ground, reserved
   ORBIT_FAULT_AUTH_REJECT           = 11,  // anomaly, security, reserved
+  ORBIT_FAULT_FLASH_IMAGE_CORRUPT   = 12,  // fatal, satellite, active
 };
 
-#define ORBIT_FAULT_COUNT  11
-#define ORBIT_FAULT_MAX_ID 11
+#define ORBIT_FAULT_COUNT  12
+#define ORBIT_FAULT_MAX_ID 12
 
 // The registry's severity name for a code. Call sites pass this to sendFault() rather than a
 // literal: a hand-typed "warn" is exactly the drift this registry exists to prevent.
@@ -42,6 +43,7 @@ static inline const char *orbit_fault_severity(int code_id) {
     case ORBIT_FAULT_SCORING_LATENCY_HIGH: return "degraded";
     case ORBIT_FAULT_GROUND_DOWN: return "anomaly";
     case ORBIT_FAULT_AUTH_REJECT: return "anomaly";
+    case ORBIT_FAULT_FLASH_IMAGE_CORRUPT: return "fatal";
     default: return "";
   }
 }
@@ -61,6 +63,7 @@ static inline const char *orbit_fault_slug(int code_id) {
     case ORBIT_FAULT_SCORING_LATENCY_HIGH: return "scoring_latency_high";
     case ORBIT_FAULT_GROUND_DOWN: return "ground_down";
     case ORBIT_FAULT_AUTH_REJECT: return "auth_reject";
+    case ORBIT_FAULT_FLASH_IMAGE_CORRUPT: return "flash_image_corrupt";
     default: return "?";
   }
 }
@@ -77,6 +80,7 @@ static inline bool orbit_fault_is_satellite(int code_id) {
     case ORBIT_FAULT_PSRAM_FALLBACK:
     case ORBIT_FAULT_GRANT_UNKNOWN_ITEM:
     case ORBIT_FAULT_SCORING_LATENCY_HIGH:
+    case ORBIT_FAULT_FLASH_IMAGE_CORRUPT:
       return true;
     default: return false;
   }
