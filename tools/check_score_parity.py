@@ -1,13 +1,18 @@
 """Hold the ESP32 firmware's scoring kernel to the Python golden model, bit for bit.
 
-The firmware header is compiled by g++ into firmware/test/score_host and fed the same
-corpus frame/ref pairs the satellite would score. Every intermediate is compared, not
-just the final score, so a failure names the term that drifted.
+The firmware header is compiled by g++ into firmware/test/score_host -- by this script, on
+demand -- and fed the same corpus frame/ref pairs the satellite would score. Every
+intermediate is compared, not just the final score, so a failure names the term that drifted.
 
-The golden side is imported from the ground-station branch verbatim -- this compares the
-firmware against the real spec, never against a second transcription of it.
+The golden side is read out of git rather than imported from the working tree, so what the
+firmware is held to is a committed revision of orbit/config.py and orbit/golden/score.py and
+never a second transcription of them. That revision is HEAD by default; set ORBIT_GOLDEN_REF
+to compare against another branch (ORBIT_GOLDEN_REF=origin/ground-station).
 
   uv run --with numpy python tools/check_score_parity.py [--n 40]
+
+ORBIT_SCORE_HOST moves the compiled harness off its default path in the tree, which is how the
+tests build one without disturbing anyone else's.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,23 +30,73 @@ from types import ModuleType
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "firmware/test/score_host.cpp"
+INC = ROOT / "firmware/satellite_esp32"
+# Where the compiled harness lands. In the tree by default -- .gitignore covers firmware/test/*_host,
+# so it is never committed -- and anywhere ORBIT_SCORE_HOST points otherwise.
+EXE = Path(os.environ["ORBIT_SCORE_HOST"]) if os.environ.get("ORBIT_SCORE_HOST") else ROOT / "firmware/test/score_host"
+# Same flags the pytest harnesses build their host binaries with (tests/test_firmware_codec.py,
+# test_firmware_sat.py, test_firmware_fsimage.py, test_crypto_parity.py). score_host.cpp is clean
+# under -Werror, so nothing is relaxed here: a new warning in the firmware header is a failure.
+CXXFLAGS = ["-O2", "-std=c++17", "-Wall", "-Wextra", "-Werror"]
 # Which revision the ground's own modules are read from. Integration work lives on the branch
 # this file sits on, so HEAD is the authoritative source; override to compare against another
 # branch: ORBIT_GOLDEN_REF=origin/ground-station.
 GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
 
 
+class CheckError(RuntimeError):
+    """The comparison could not be made at all, as opposed to being made and failing.
+
+    No g++, a harness that will not compile, a golden ref this clone does not have: all of them
+    mean "unknown", which is exit 2, and none of them may be reported as parity.
+    """
+
+
+def _sources() -> list[Path]:
+    """Everything the binary is built from: the harness and every header it can include."""
+    return [SRC, *sorted(INC.glob("*.h"))]
+
+
+def build_host(exe: Path = EXE) -> Path:
+    """Compile score_host.cpp when ``exe`` is missing or older than any of its sources.
+
+    The same header the ESP32 builds, built here by g++ -- so the thing being compared with the
+    golden model is the firmware itself and not a copy of it that drifted since someone last
+    remembered to rebuild by hand.
+    """
+    sources = _sources()
+    fresh = exe.exists() and exe.stat().st_mtime >= max(p.stat().st_mtime for p in sources)
+    if fresh:
+        return exe
+    if shutil.which("g++") is None:
+        raise CheckError(
+            f"no g++ on PATH to build {SRC.relative_to(ROOT)} with"
+            + (f", and {exe.relative_to(ROOT)} is older than its sources" if exe.exists() else "")
+        )
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(
+        ["g++", *CXXFLAGS, f"-I{INC}", str(SRC), "-o", str(exe)], capture_output=True, text=True, cwd=SRC.parent
+    )
+    if r.returncode != 0:
+        raise CheckError(f"g++ failed to build {SRC.relative_to(ROOT)}:\n{r.stdout}{r.stderr}".rstrip())
+    return exe
+
+
 def load_golden(tmp: Path) -> tuple[ModuleType, ModuleType]:
-    """Materialise orbit.config and orbit.golden.score from the ground-station branch."""
+    """Materialise orbit.config and orbit.golden.score from GOLDEN_REF."""
     pkg = tmp / "orbit"
     (pkg / "golden").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     (pkg / "golden" / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/golden/score.py"):
-        blob = subprocess.run(
-            ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True, check=True
-        ).stdout
-        (tmp / path).write_text(blob)
+        show = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"], capture_output=True, text=True)
+        if show.returncode != 0:
+            raise CheckError(
+                f"cannot read {path} from ref {GOLDEN_REF!r}: {show.stderr.strip() or 'git show failed'}\n"
+                "set ORBIT_GOLDEN_REF to a ref this clone has, or leave it unset for HEAD"
+            )
+        (tmp / path).write_text(show.stdout)
     sys.path.insert(0, str(tmp))
     from orbit import config
     from orbit.golden import score
@@ -53,14 +109,14 @@ def main() -> int:
     ap.add_argument("--n", type=int, default=40, help="frame/ref pairs to compare")
     a = ap.parse_args()
 
-    exe = ROOT / "firmware/test/score_host"
-    if not exe.exists():
-        print("build it first:  g++ -O2 -I../satellite_esp32 score_host.cpp -o score_host", file=sys.stderr)
-        return 2
-
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        _config, score = load_golden(tmp)
+        try:
+            exe = build_host()
+            _config, score = load_golden(tmp)
+        except CheckError as err:  # no compiler, no such ref: unknown, which is not parity
+            print(err, file=sys.stderr)
+            return 2
 
         npz = np.load(ROOT / "corpus/frames.npz")
         frames = npz[npz.files[0]]

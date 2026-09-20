@@ -15,14 +15,19 @@ Two headers restate facts owned elsewhere, and both are checked rather than trus
 
   uv run python tools/check_firmware_sync.py
 
-The config side is read from ``origin/ground-station``, where config.py is owned. The registry is
-not on that ref -- it is owned here -- so it is imported.
+The config side is read out of git rather than off disk, so the firmware is held to a committed
+revision of ``orbit/config.py`` and not to whatever the working tree happens to hold. That revision
+is ``HEAD`` by default; set ``ORBIT_GOLDEN_REF`` to compare against another branch
+(``ORBIT_GOLDEN_REF=origin/ground-station``), exactly as the other two checkers do. The registry is
+owned here rather than on any other ref, so it is imported.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from orbit.protocol import registry as R
@@ -30,7 +35,8 @@ from orbit.protocol import registry as R
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "firmware/satellite_esp32/orbit_config.h"
 FAULTS_HEADER = ROOT / "firmware/satellite_esp32/orbit_faults.h"
-GOLDEN_REF = "origin/ground-station"
+# Which revision orbit/config.py is read from; HEAD is the authoritative source on this branch.
+GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
 
 # firmware name -> (python name, where it lives: "const" = module level, "setting" = Settings default)
 CHECKS = {
@@ -105,9 +111,16 @@ def fault_drift() -> list[str]:
 
 
 def main() -> int:
-    py = subprocess.run(
-        ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:orbit/config.py"], capture_output=True, text=True, check=True
-    ).stdout
+    show = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:orbit/config.py"], capture_output=True, text=True
+    )
+    if show.returncode != 0:
+        # A fresh clone has no origin/ground-station; say so instead of raising CalledProcessError.
+        print(f"cannot read orbit/config.py from ref {GOLDEN_REF!r}:", file=sys.stderr)
+        print("  " + (show.stderr.strip() or "git show failed"), file=sys.stderr)
+        print("  set ORBIT_GOLDEN_REF to a ref this clone has, or leave it unset for HEAD", file=sys.stderr)
+        return 2
+    py = show.stdout
     fw = firmware_values(HEADER.read_text())
 
     consts = dict(re.findall(r"^([A-Z_][A-Z0-9_]*)\s*=\s*([^#\n]+)", py, re.M))
