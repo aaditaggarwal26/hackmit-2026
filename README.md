@@ -1,130 +1,95 @@
-# Orbit — onboard image scoring and downlink prioritization on an FPGA
+# Orbit — satellites score their own imagery; the ground decides who downlinks
 
-Two Arty A7-100T boards are two Earth-observation satellites running the same
-bitstream. Each scores every captured frame on the FPGA (cloud fraction, Sobel
-sharpness, change against a reference) in one streaming pass, keeps a priority
-queue of frame ids ordered by score, and offers its top score to a ground
-orchestrator on a laptop. When a contact window opens, the ground grants one
-slot at a time to the satellite with the best frame; a starvation guard stops
-one satellite monopolising the pass. The claim defended on stage is energy per
-frame scored at the edge; every figure carries where it was measured, and
-anything unmeasured says TBD. HackMIT 2026, Sustainability track.
+Earth-observation satellites capture far more than they can send. A satellite only
+downlinks while passing over a ground station, a few minutes at a time, and most
+frames are worthless — cloud, blur, nothing changed. So the scarce contact window gets
+spent on junk while good frames sit unsent.
 
-What crosses the wire is scores, grants and accounting, never downlink pixels:
-the ground holds the same corpus and debits a modelled window. Cloud lowers a
-frame's score; whether a satellite can transmit at all is line of sight, which
-the ground models as the contact window. Both points are on the dashboard.
+Orbit: **each satellite scores every frame onboard, keeps a priority queue, and bids
+its best frame when the ground opens a slot. The ground grants one slot to one
+satellite, that satellite transmits to completion, and arbitration runs again.**
+ESA's Φ-sat-1 (2020) proved one satellite can filter its own imagery onboard; the
+multi-satellite arbitration is the part nobody has flown.
 
-Read `ARCHITECTURE.md` for how it fits together and `docs/protocol.md` for
-every byte on the wire.
+Three ESP32-S3 satellites (simulated in software today, firmware is a separate task)
+share one ground station — this repository — over a UDP multicast bus. HackMIT 2026.
 
-## macOS development
+## How a slot is decided
 
-```sh
-brew install verilator                          # RTL simulation (cocotb runs on it)
-uv sync                                          # Python env; add --extra corpus for Pillow (corpus fetch only)
-uv run pytest                                    # tests/ (Python) + tb/ (cocotb under Verilator), ~5 min
-uv run pytest -m slow                            # Verilator virtual board end to end (run alone)
-uv run python tb/run_all.py                      # verilator --lint-only -Wall x4, params check, every bench
-uv run python tools/offline_check.py             # proves the demo needs no network
+```
+priority = score
+         + item_age_seconds       × ITEM_AGING_RATE    (0.5)
+         + satellite_wait_seconds × SAT_AGING_RATE     (0.3)
 ```
 
-Everything runs through `uv run`; nothing is installed globally.
+Per slot, event driven, on each satellite's **top item only**. No time slicing, no
+round robin, no preemption: a satellite that keeps winning genuinely holds the best
+frames. Fairness comes from the two aging terms — item aging stops a frame being
+stranded behind newer arrivals; satellite aging stops a whole satellite that scores a
+little lower from being locked out, which item aging alone can never fix. Ties go to
+the lowest hostname, so a run replays identically from its seed.
 
-### Corpus and the gate
+The bid also carries a *window* of the next few queue entries. It is diagnostic: the
+arbiter never reads it, the display does — it is how an operator sees queue shape.
 
-The frames are a committed corpus: 194 NASA GIBS MODIS Terra true-colour tiles
-over 14 fixed scenes and 16 dates in 2024, converted to 128×128 grayscale
-(`corpus/frames.npz`, thumbnails in `corpus/png/`, provenance and licence text in
-`corpus/manifest.json`). Nothing needs the network unless you rebuild it:
+## Run it
 
-```sh
-uv run python -m orbit.corpus.fetch             # refetch from GIBS (needs --extra corpus)
-uv run python -m orbit.corpus.gate              # golden model over the corpus -> corpus/gate_result.json
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh          # once; uv brings its own Python 3.13
+uv sync                                                 # add --extra gpu for the torch benchmark tier
+
+uv run orbit sim --scenario memory_pressure --rounds 50 --seed 42   # deterministic 50-slot table
+uv run orbit demo --scenario nominal --display          # ground + 3 satellites + dashboard, real multicast
+uv run orbit bench --tier cpu,gpu                       # energy/efficiency baseline (see results/)
+uv run orbit bus-smoke --listen      # on a second device on the same WiFi …
+uv run orbit bus-smoke --send        # … then here: does client-to-client multicast work?
 ```
 
-The gate picks the demo pacing by rule: a pass captures 12
-frames per satellite, the scaled window fits 3. The dashboard labels the window
-as scaled and says where the pacing came from.
+Live pieces, each its own process (a real satellite replaces an `orbit sat`):
 
-### Dashboard and orchestrator
-
-```sh
-uv run python -m viz.server --scenario lead_change --speed 2      # http://localhost:8000
-uv run python -m orbit.orchestrator.main --scenario starvation --passes 3   # headless summary
-```
-
-Scenarios: `nominal`, `lead_change`, `starvation`, `filtered_vs_fifo`, `scaling`
-(`--nodes sim://0 … sim://N`). Which nodes it talks to is a transport chosen
-purely by path scheme (`orbit/protocol/transport.py`); nothing else changes:
-
-| node path | what runs |
+| command | what |
 |---|---|
-| `sim://<n>` | `SimulatedNode`: the bit-exact NumPy golden model, in-process |
-| `verilator://<n>` | `VerilatorNode`: the real RTL compiled by Verilator, UART over a pty (`sim/`, built on first use) |
-| `/dev/tty.usbserial-<serial>B` | `HardwareNode`: pyserial to an Arty |
+| `orbit ground` | the arbiter on `239.255.42.99:50000`; JSONL event stream on `ws://:8766` and `runs/<run_id>.jsonl`; UDP telemetry to `display.local:50010` |
+| `orbit sat --profile sat-a` | one simulated satellite: fixed frame pool, local eviction, onboard scoring on the committed MODIS corpus |
+| `orbit display` | the monitoring page (normally on the laptop), fed only by telemetry — never in the control path |
+| `python -m viz.replay runs/x.jsonl` | replay a recorded run into the display; no radio, no hardware |
 
-Set them with `--nodes`, e.g. `--nodes verilator://0 sim://1` or
-`--nodes /dev/tty.usbserial-XXXXXXB /dev/tty.usbserial-YYYYYYB`. The dashboard's
-"+ simulated sats" control adds `sim://` nodes to whatever is physical, labelled
-SIMULATED everywhere they appear.
+Any setting: `--set name=value` anywhere on the command line, or `ORBIT_<NAME>=…`.
+Everything tunable is one frozen dataclass in `orbit/config.py`.
 
-### FTDI ttys on macOS
+Scenarios: `nominal`, `memory_pressure` (one satellite captures 8× faster than the
+link drains and evicts constantly), `low_scorer` (one satellite scores 15 points
+lower; watch satellite aging lift it), `revoke` (a satellite accepts grants and never
+transmits), `lossy` (20 % duplicates, 10 % reorder, 2 % drop), `late_joiner`.
 
-Each Arty's FT2232H shows up as **two** ttys, `/dev/tty.usbserial-<serial>A` and
-`...B`. The UART is channel **B**; channel A is JTAG. Pick ports by FTDI serial
-number, not by glob order. `ls /dev/tty.usbserial-*` lists both channels of every board.
+## What is measured
 
-## Windows: headless Vivado build
+`results/bench.jsonl` holds the identical scoring kernel timed on the GX10 CPU and
+GPU with the same 194 real MODIS frames. Every figure carries `method`, `scope` and
+`measured`; anything this machine cannot measure says `"unavailable"` and why. On
+the GX10 only GPU-die power is instrumented (NVML); CPU and whole-board power need
+an inline USB-C PD meter and are reported as unavailable, not estimated.
 
-Vivado ML Standard (free, covers Artix-7) on a Windows machine. No GUI:
+The demo's headline is `run_end` in every run file: usable frames downlinked by Orbit
+versus a first-in-first-out baseline given the *same byte budget*, where "usable"
+is cloud fraction ≤ 0.35 — never the score that did the ranking.
 
-```bat
-vivado -mode batch -source vivado/build.tcl
+## Map
+
+```
+orbit/config.py            every constant and tunable
+orbit/protocol/messages.py the bus wire protocol            docs/protocol.md
+orbit/protocol/auth.py     control-bus authenticity (HMAC + ground Ed25519)  docs/security.md
+orbit/arbiter/             priority formula, ground FSM, contact window, flags
+orbit/bus/                 multicast bus, loopback twin, dedup with restart detection
+orbit/sim/                 simulated satellites, scenarios, deterministic harness
+orbit/ground/              live station, telemetry, display event stream   docs/event_stream.md
+orbit/bench/               energy/efficiency benchmark
+orbit/golden/              the scoring kernel (integers, bit-exact) and queue
+corpus/                    194 NASA GIBS MODIS frames, offline
+viz/                       the monitoring page + replay
+tests/                     184 tests: uv run pytest
 ```
 
-Synthesises `rtl/*.v` with `top_edge_node` on `xc7a100tcsg324-1`, fails loudly on
-negative slack, and writes `vivado/build/orbit.bit` plus `vivado/reports/{utilization,timing,power}.txt`.
-Then `uv run python -m tools.vivado_reports` turns the reports into
-`vivado/reports/summary.json`, which the dashboard's efficiency panel reads
-(commit the reports and the summary). See `vivado/README.md`.
-
-## Flashing (macOS)
-
-```sh
-brew install openfpgaloader
-openFPGALoader -b arty_a7_100t -f vivado/build/orbit.bit      # volatile; -f with the .mcs and JP1 set for QSPI boot
-```
-
-Board LEDs: `led0` heartbeat blink, `led1` link ok, `led2` queue has data,
-`led3` busy (scoring or bench); RGB blue idle, green scoring, red bench.
-
-## Benchmarks
-
-```sh
-uv run python -m orbit.bench.arty_run --port /dev/tty.usbserial-XXXXB --seconds 20   # Arty, INA219 on the supply input
-sh orbit/bench/jetson_run.sh 20                                                       # Jetson Orin Nano: NumPy (and CuPy) baseline
-uv run python -m orbit.bench.run --platform none --seconds 5                          # any machine: throughput only, energy TBD
-```
-
-Reports land in `bench/results/<stamp>.{md,json}` with a provenance label per row
-(`whole-board`, `device-level`, `module-level`, `estimate`, `TBD`); rows are
-comparable only where the labels match. The dashboard shows the newest.
-
-## Repo map
-
-| path | what |
-|---|---|
-| `orbit/params.py` | every constant; generates `rtl/orbit_params.vh` |
-| `orbit/protocol/` | COBS + CRC framing, message set (generates `docs/protocol.md` §4), transports |
-| `orbit/golden/` | bit-exact scoring kernel, priority queue, node model, worked example |
-| `orbit/corpus/` | corpus loader, fetch CLI (the only network code), the gate |
-| `orbit/orchestrator/` | arbitration, contact window, scenarios, main loop |
-| `orbit/bench/` | energy samplers, CPU/GPU baseline, Arty runner, report |
-| `rtl/` | plain Verilog: kernel, composite, queue, controller, UART/framers, board top |
-| `tb/` | cocotb benches (kernel PPC 1 and 8, queue, whole node, wrapper) |
-| `sim/` | Verilator virtual board (UART on a pty) |
-| `vivado/` | headless build script, XDC |
-| `viz/` | FastAPI + WebSocket server and the single-file dashboard |
-| `tools/` | params check, Vivado report parser, offline check |
-| `corpus/` | committed frames, thumbnails, manifest, gate result |
+`uv run pytest`, `uv run mypy`, `uv run ruff check` and `uv run ruff format --check` are all expected clean; tests run with warnings as errors.
+See `ARCHITECTURE.md` for the design and the reasons behind it.

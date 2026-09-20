@@ -1,4 +1,5 @@
 """Offline checks on corpus/ and the orbit.corpus loader. No network."""
+
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,8 @@ def test_sequence(c):
 
 def test_loader_imports_no_network_modules():
     # A subprocess: in-process sys.modules already holds urllib.request via httpx/TestClient.
-    code = ("import sys, orbit.corpus; oc = orbit.corpus.load(); "
-            "bad = {'urllib.request', 'requests', 'orbit.corpus.fetch'} & set(sys.modules); assert not bad, bad")
+    code = (
+        "import sys, orbit.corpus; oc = orbit.corpus.load(); "
+        "bad = {'urllib.request', 'requests', 'orbit.corpus.fetch'} & set(sys.modules); assert not bad, bad"
+    )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).resolve().parents[1])

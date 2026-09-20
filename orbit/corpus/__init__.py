@@ -2,33 +2,35 @@
 
 NumPy only; never imports the fetcher, so the demo has no path to the network.
 """
+
 from __future__ import annotations
 
 import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-SYNTHETIC = False                 # real MODIS imagery, not generated
+SYNTHETIC = False  # real MODIS imagery, not generated
 ROOT = Path(__file__).resolve().parents[2] / "corpus"
 
 
 @dataclass
 class Corpus:
-    frames: np.ndarray            # uint8, N x 128 x 128
-    ids: np.ndarray               # uint16, N; id == row index
-    manifest: dict
+    frames: np.ndarray  # uint8, N x 128 x 128
+    ids: np.ndarray  # uint16, N; id == row index
+    manifest: dict[str, Any]
 
     def by_id(self, id: int) -> np.ndarray:
-        return self.frames[id]
+        return np.asarray(self.frames[id])
 
     def scene_of(self, id: int) -> str:
-        return self.manifest["frames"][id]["scene"]
+        return str(self.manifest["frames"][id]["scene"])
 
     def reference_for(self, id: int) -> int:
-        return self.manifest["scenes"][self.scene_of(id)]["reference_id"]
+        return int(self.manifest["scenes"][self.scene_of(id)]["reference_id"])
 
     def png_path(self, id: int) -> Path:
         return ROOT / "png" / f"{id:04d}.png"
@@ -42,7 +44,7 @@ class Corpus:
             ref = self.manifest["scenes"][name]["reference_id"]
             rest = [f["id"] for f in self.manifest["frames"] if f["scene"] == name and f["id"] != ref]
             rng.shuffle(rest)
-            queues.append([ref] + rest)
+            queues.append([ref, *rest])
         rng.shuffle(queues)
         order = []
         while queues:
@@ -59,6 +61,7 @@ def load(root: Path = ROOT) -> Corpus:
     return Corpus(z["frames"], z["ids"], json.loads((root / "manifest.json").read_text()))
 
 
-def provenance(root: Path = ROOT) -> dict:
+def provenance(root: Path = ROOT) -> dict[str, Any]:
     m = json.loads((root / "manifest.json").read_text())
-    return {k: m[k] for k in ("source", "layer", "licence", "fetched_utc")} | {"frames": len(m["frames"]), "synthetic": SYNTHETIC}
+    keys = ("source", "layer", "licence", "fetched_utc")
+    return {k: m[k] for k in keys} | {"frames": len(m["frames"]), "synthetic": SYNTHETIC}

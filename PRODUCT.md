@@ -39,10 +39,11 @@ is that the app "looked like a mess" until an AI explained it.
 
 ## Product Purpose
 
-Orbit shows an FPGA deciding, onboard a satellite, which captured images are
-worth sending home — and a ground station arbitrating which satellite gets the
-next transmission slot. Two Digilent Arty A7-100T boards stand in for two
-Earth-observation satellites; a laptop is the ground station.
+Orbit shows a satellite deciding, onboard, which captured images are worth
+sending home — and a ground station arbitrating which satellite gets the next
+transmission slot. Three ESP32-S3 boards stand in for three Earth-observation
+satellites, sharing one ground station over a UDP multicast bus; a laptop
+watches and is never on the control path.
 
 Success is a live, running demonstration that a first-time viewer understands
 unaided, and that survives hostile technical questioning without a single
@@ -57,11 +58,12 @@ sight. Most captured frames are worthless (cloud, blur, nothing changed) but the
 satellite cannot tell, so the scarce window is spent on whatever is next in the
 buffer.
 
-Orbit scores every frame *where it was captured*, on the FPGA, in one streaming
-pass, and spends the window best-first. The defensible claim is energy per frame
-scored at the edge, not throughput: Qasaimeh et al. 2019 (arXiv 1906.11879)
-measures 1.2–22.3× lower energy per frame for FPGA over CPU/GPU on vision
-kernels. **The project explicitly does not claim to beat a datacentre GPU on
+Orbit scores every frame *where it was captured*, onboard, in one streaming
+pass, and spends the window best-first. The defensible claim is **usable frames
+delivered per byte of contact window** — `run_end` in every run file, Orbit's
+priority queue against an unfiltered FIFO baseline given the same byte budget,
+where "usable" is cloud fraction ≤ 0.35 and never the score that did the
+ranking. **The project explicitly does not claim to beat a datacentre GPU on
 throughput and must never invite that comparison.**
 
 ## Operating Context
@@ -78,13 +80,14 @@ throughput and must never invite that comparison.**
 - **Two policies run side by side on the same frames and the same window**: the
   scored priority queue, and an unfiltered FIFO baseline computed on the ground.
   The gap between them is the pitch.
-- **Fallbacks are part of the scene**: a satellite can be a real board
-  (`/dev/tty.usbserial-*`), compiled RTL under Verilator (`verilator://`), or
-  the NumPy golden model (`sim://`). The dashboard must say which, per
-  satellite, at all times — a board may die on stage and the demo continues.
-- Vivado (utilisation, timing, power) and energy-bench results land in files and
-  may be absent; the dashboard reads them live and must show `TBD` rather than
-  an estimate dressed as a measurement.
+- **Fallbacks are part of the scene**: a satellite can be a real ESP32-S3 on
+  the multicast bus or a simulated `orbit sat` running the same scoring kernel.
+  The display must say which, per satellite, at all times — a board may die on
+  stage and the demo continues, because nothing about arbitration depends on
+  who is real.
+- Energy-bench results land in `results/` and may be absent; the display reads
+  them live and must show `TBD` rather than an estimate dressed as a
+  measurement.
 
 ## Capabilities and Constraints
 
@@ -123,17 +126,22 @@ throughput and must never invite that comparison.**
 - `corpus/manifest.json` — provenance and NASA's usage statement verbatim.
 - `corpus/gate_result.json` — the measured pacing decision (12 frames per pass,
   3 slots per pass, 10 s window).
-- `FINDINGS.md` — every parameter decided by measurement, including the honest
-  choice of a clear-frame reference (gain 1.26× rather than the inflated 1.73×).
-- `JUDGE_QA.md` — the hostile questions and their on-screen answers.
-- **Absent, must not be fabricated**: Vivado utilisation/timing/power (Windows
-  build has not run), and energy per 1000 frames (no INA219 or Jetson run yet).
-  Both render as `TBD` today and that is correct behaviour.
+- `results/bench.{md,jsonl}` — the identical scoring kernel timed on the GX10
+  CPU and GPU over the same 194 MODIS frames, every figure carrying `method`,
+  `scope` and `measured`.
+- `docs/event_stream.md` — the contract between the ground station and the
+  display; `docs/security.md` — how keys are provisioned.
+- **Absent, must not be fabricated**: CPU and whole-board power on the GX10
+  (only GPU-die power is instrumented, via NVML; the rest needs an inline USB-C
+  PD meter), and per-frame energy on the satellite itself (no board is
+  instrumented). These read `unavailable`, with the reason, and that is correct
+  behaviour.
 
 ## Product Principles
 
 1. **Never invent a number.** Every performance, power or resource figure comes
-   from a measurement, a Vivado report, or a cited source. Otherwise `TBD`.
+   from a measurement, a recorded benchmark run, or a cited source. Otherwise
+   it says `TBD` or `unavailable`, with the reason.
 2. **Label what is modelled, simulated or scaled** — in the interface, at the
    place the number appears, not in a footnote or a README.
 3. **Legible at two metres.** The one thing a stranger must take away gets the

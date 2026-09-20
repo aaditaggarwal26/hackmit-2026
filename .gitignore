@@ -3,20 +3,19 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .hypothesis/
-sim_build/
-tb/sim_build/
-tb/results.xml
-tb/**/results.xml
-sim/obj_dir/
-*.vcd
-*.fst
-vivado/build/
-vivado/*.jou
-vivado/*.log
-vivado/.Xil/
 .DS_Store
 *.png
 !viz/static/**/*.png
-tb/*.result.xml
 .coverage
 !corpus/png/*.png
+results/raw/
+runs/*
+!runs/sample.jsonl
+!runs/demo-*.jsonl
+
+# the WiFi credentials, the ground hostname and the pre-shared control-bus key live here
+firmware/satellite_esp32/secrets.h
+
+# the host harnesses g++ builds out of firmware/test/*.cpp, per the commands in their headers
+firmware/test/*_host
+firmware/test/*.o

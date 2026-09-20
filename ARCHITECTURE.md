@@ -1,93 +1,127 @@
-# Orbit v3 — architecture, plainly
+# Orbit v4 — architecture, plainly
 
 ## The shape
 
 ```
-  Satellite A (Arty A7-100T)        Satellite B (Arty A7-100T)     Satellites C..N (simulated,
-    frame + ref stores (BRAM)         same bitstream                 golden model in-process,
-    scoring kernel, 8 px/clk                                         labelled SIMULATED)
-    priority queue (32 ids)
-         │  UART: rows in; scores, grants, accounting out
-         └──────────────┬──────────────────────┘
-                        │
-            ┌───────────▼────────────┐
-            │  Ground orchestrator   │  Python, laptop
-            │  per-slot arbitration  │  starvation guard
-            │  contact window model  │  bytes debited, never sent
-            │  golden model mirror   │  board vs model checked live
-            │  dashboard             │  FastAPI + WebSocket, one HTML file
-            └────────────────────────┘
+  sat-a                 sat-b                 sat-c            ESP32-S3 (simulated today)
+  score · buffer ·      score · buffer ·      score · buffer ·  fully autonomous
+  queue · bid · send    queue · bid · send    queue · bid · send
+      │                     │                     │
+      └─────────────────────┼─────────────────────┘
+                            │  UDP multicast 239.255.42.99:50000 — every node hears everything
+                    ┌───────▼────────┐
+                    │  ground (GX10) │  arbiter · READY/BUSY/COMPLETE/CLOSED · window budget · flags
+                    └───┬────────┬───┘
+      telemetry (UDP,   │        │  event stream (WebSocket + runs/<run_id>.jsonl)
+      fire-and-forget)  │        │
+                    ┌───▼────────▼───┐
+                    │ display laptop │  watches; can never block a decision
+                    └────────────────┘
 ```
 
-One pass = an ingest phase (each satellite captures `frames_per_pass` frames) then a
-contact window (slots granted one at a time until the byte budget is spent). The
-lead changes hands mid-window because a satellite that wins depletes its best frames.
+The ground decides. The laptop watches. Satellites manage themselves.
 
-## What the FPGA does (`rtl/`)
+## What a satellite does (and the ground never does)
 
-1. **Ingest.** FRAME_INGEST carries one 128-pixel row per message. The controller
-   copies the row into the frame store (BRAM, 64-bit words = 8 pixels). Row 127
-   starts the kernel. REF_FRAME_SET fills the reference store the same way.
-2. **Kernel** (`score_kernel.v`). One streaming pass at `PIXELS_PER_CYCLE` = 8:
-   per pixel a cloud comparison, a change comparison against the reference, and a
-   3×3 Sobel via two line buffers and a three-word window shift. Sobel taps are ±1
-   and ±2, so it is subtractions, one shift and adds: **no multipliers**. Interior
-   centres only (the border is masked). 2055 clocks per frame under Verilator.
-3. **Composite** (`score_composite.v`). Three saturating normalisations to u16,
-   three weight multiplies (the only multipliers in the design), one shift.
-4. **Queue** (`priority_queue.v`). 32 systolic cells of `{score, frame_id}`; insert,
-   pop and limit change are each one clock, all comparisons in parallel. Full and
-   the newcomer beats the tail → tail evicted and reported; else the newcomer is lost.
-5. **Controller** (`node_ctrl.v`). A job FSM: score → insert → FRAME_SCORED with no
-   idle gap (so the ground's mirror never sees a half-state), GRANT → TX_FRAME →
-   pop → TX_DONE, CONFIG_SET validation, BENCH_RUN (re-score the resident frame N
-   times with the UART idle), heartbeats, INA219 power telemetry.
+Captures, scores each frame itself (cloud fraction, Sobel sharpness, change against a
+stored reference — `orbit/golden/score.py`, integers, bit-exact on every tier), and
+admits it to a **fixed frame pool allocated once at boot**. The priority queue is a
+separate, small structure of references into that pool. When the pool is full, a new
+frame that beats the worst held frame evicts it; otherwise the new frame is rejected.
+Either way something is lost *to onboard storage*, which is a different failure from
+losing arbitration, and every loss is announced on the bus.
 
-The whole node is bit-exact against `orbit/golden/` under cocotb at PPC 1 and 8,
-and under Verilator as a virtual board with the real orchestrator.
+On `offers_open` a satellite bids its top item (plus a diagnostic window). On
+`grant` it sends the frame in paced chunks and `tx_done` with a sha256. It pops the
+item **only** on `tx_ack{ok}`. A failed or revoked transmission keeps the frame. A
+lost ack cannot wedge it: after a timeout, or when the ground opens a later round, it
+stops waiting and bids again — and if the ground already has the frame it answers
+the re-offer with an ack instead of a grant, so nothing is ever sent or counted twice.
 
-## What the ground does (`orbit/orchestrator/`)
+`orbit/sim/satellite.py` is this behaviour as a pure event machine, driven by a
+virtual clock in the simulator and by asyncio in the live demo. The ESP32 firmware
+will implement the same rules (`docs/protocol.md` §"Satellite rules").
 
-- **Arbitration** (`arbitration.py`): candidates = nodes with data; highest top
-  score wins; ties to the lowest id; after `STARVATION_N` consecutive wins the
-  best other candidate is granted and the slot is marked "starvation".
-- **Window** (`window.py`): `capacity = duration × rate / 8` bytes; each grant
-  debits `FRAME_BYTES`. The demo window is scaled (a 600 s × 10 Mbit/s window fits
-  45,776 frames and shows no contention); the snapshot says so.
-- **Mirror**: every FRAME_SCORED is inserted into a ground copy of the node's queue
-  and re-scored with the golden model; every TX_FRAME pops it; every STATUS_REPLY
-  is compared. `mismatches` on the dashboard must read 0 with real boards.
-- **FIFO baseline**: the same captures through a same-depth FIFO with round-robin
-  grants and no scoring, computed on the ground. Delivered value = sum of scores
-  of transmitted frames, both ways. The gap is the headline chart.
-- **Scaling**: N simulated satellites on the same window, headless, plotted as a
-  table; demand (N × frames per pass) crosses capacity (slots per pass) where the
-  curve flattens.
+## What the ground does
 
-## The two links, kept apart on purpose
+`orbit/arbiter/fsm.py` is a pure event machine too: `on_message(msg, now)` and
+`on_tick(now)` return messages to broadcast; it owns no timers and no sockets.
 
-| | real UART (115200 baud) | modelled downlink |
-|---|---|---|
-| carries | frame rows (the stand-in camera), scores, grants, accounting | nothing; it is a byte budget |
-| rate | ~11.5 KB/s, ~1.5 s per frame in | scaled from 600 s × 10 Mbit/s to a handful of frames per pass |
-| limits | how fast the satellite "captures" | how many frames a pass can deliver |
+```
+READY     broadcast offers_open, collect bids for BID_COLLECT_MS, price the top item of each,
+          grant the highest priority (ties → lowest hostname)
+BUSY      one satellite transmits to completion; bids ignored; no preemption
+COMPLETE  all chunks in and the digest matches → tx_ack{ok}, debit one frame from the window
+CLOSED    the next frame no longer fits the byte budget
+```
 
-If pixels went out over the UART for accounting, the cable would be the bottleneck
-and the model decoration. So the ground keeps the corpus and the node reports
-`frame_id, score, byte_count`. The dashboard shows both rates side by side.
+Granted but silent → `revoke` after a timeout and re-arbitrate the *same round's bids*
+without that satellite. Missing chunks or a digest mismatch → `tx_ack{ok:false}`,
+nothing debited, same re-arbitration. `tx_done` that overtakes the last chunk gets a
+short grace. Every (satellite, item) confirmed is remembered for the pass.
 
-## Source of truth chain
+Fairness is entirely the aging terms (`orbit/arbiter/priority.py`). An earlier design
+had time slices; they were removed on purpose and must not come back — a slot handed
+out because it is someone's turn is spent on whatever that satellite happens to hold.
 
-`orbit/params.py` → `rtl/orbit_params.vh` (generated, checked) and `docs/protocol.md`
-§1 (checked). `orbit/protocol/messages.py` → `docs/protocol.md` §4 and
-`docs/protocol_vectors.json` (generated, checked) and `rtl/framer_rx.v`'s length
-table (checked). `orbit/golden/score.py` = `docs/protocol.md` §5.2 = `rtl/score_kernel.v`
-+ `score_composite.v` (cocotb). `corpus/gate_result.json` → scenario pacing.
+**Flags** (`orbit/arbiter/flags.py`) separate *soft* (long wait, aging is working — a
+note) from *hard* (aging should have won by now and did not — an anomaly), and
+classify a satellite as starved / idle / never-transmitted / memory-pressured /
+silent, because wait time alone makes those look identical and a flag that fires on
+ordinary aging teaches people to ignore the panel.
 
-## Honesty labels the UI carries
+The **contact window** (`orbit/arbiter/window.py`) is one byte budget for the whole
+pass: `duration × rate / 8`, one fixed frame debited per confirmed transmission. It is
+capacity, not allocation; there are no per-satellite slices.
 
-- SIMULATED / HARDWARE per satellite; hardware count in the provenance strip.
-- "SCALED for the demo" on the window, with the unscaled default beside it.
-- synthetic: no (corpus source, layer and licence from the manifest).
-- Every efficiency figure is `measured` (with its report) or `TBD — pending …`.
-- "board vs golden mismatches" count, always visible.
+## The bus
+
+One multicast group; every node joins; every message carries its sender's hostname
+and a per-sender seq. Nodes drop their own echoes by hostname (several processes on
+one box share the port), deduplicate by `(from, seq)`, and forget a sender whose
+uptime collapses — a reboot must be heard immediately, not treated as duplicates for
+minutes. Malformed, oversize, non-finite or wrong-version datagrams are counted and
+dropped; they never reach the arbiter. Satellites hear each other, which is the seed
+of relay (not built). A fourth satellite needs no configuration anywhere. With no
+default route the bus falls back to loopback so the demo runs unplugged.
+
+`orbit/bus/loopback.py` is the same bus in-process, through the same codec, with
+seeded duplication/reordering/loss for the simulator and the tests.
+
+The bus authenticates the control path, and can encrypt the imagery: HMAC on every datagram, an
+Ed25519 signature on the ground's `grant`/`revoke`/`tx_ack` (so even a leaked shared key cannot
+forge a command), sender pinning, anti-replay, and optional AES-256-GCM on the frame payload —
+all off by default, since this repo's MODIS corpus is public placeholder data and the bus log is
+worth keeping readable. The reasoning, what is implemented vs. the firmware port, and the
+per-node-key / X25519-ECDH forward-secrecy path for a real constellation, are in
+`docs/security.md`.
+
+## Observation, never control
+
+Two outputs, both fire-and-forget:
+
+* **Telemetry** (`orbit/ground/telemetry.py`): UDP JSON to `display.local`, bounded
+  queue, oldest dropped, hostname resolved off the event loop. Feeds `viz/`.
+* **Event stream** (`orbit/ground/stream.py`, contract in `docs/event_stream.md`):
+  seq-numbered JSONL over a WebSocket the ground hosts, mirrored line for line to
+  `runs/<run_id>.jsonl`. It also runs the **FIFO baseline** — same frames, same byte
+  budget, no scoring, round-robin — and decides `usable` from cloud fraction alone.
+  `run_end` is the pitch's number.
+
+A sink that raises costs a log line, never a slot. A slow WebSocket client is closed,
+not waited for. An unwritable `runs/` or a busy port does not stop the arbiter.
+
+## Determinism and honesty
+
+The simulator steps a virtual clock; every random choice is seeded; the same seed
+yields the same table and a byte-identical run file, five times for five judges.
+
+Every benchmark figure names its method and scope. The GX10 exposes GPU-die power
+only; CPU and board power say `"unavailable"` rather than quoting a datasheet.
+Scores are 0–100; "usable" is a cloud-fraction rule, never the score, because ranking
+by a number and then measuring that number is circular.
+
+## What is deliberately not here
+
+FPGA/HDL (the previous design), orbital propagation, an NPU tier (HailoRT is gated),
+relay, time-sliced scheduling, a message broker. One box, two days.

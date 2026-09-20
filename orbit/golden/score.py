@@ -1,14 +1,16 @@
 """The scoring kernel, protocol.md §5.2, as integers. `score_frame` is the fast NumPy
 form used everywhere; `score_frame_ref` is the per-pixel pure-Python transcription of
 the spec that the tests hold NumPy to. Both are pure functions of (frame, ref, config)
-and must match the RTL bit for bit."""
+and must match the ESP32 kernel in firmware/satellite_esp32/orbit_score.h bit for bit.
+tools/check_score_parity.py checks it."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
 
-from orbit import params
+from orbit import config as params
 
 U16 = 0xFFFF
 
@@ -59,14 +61,17 @@ def sobel_sum(frame: np.ndarray) -> int:
     return int((np.abs(gx) + np.abs(gy)).sum())
 
 
-def score_frame(frame: np.ndarray, ref: np.ndarray, cfg: Config = Config()) -> Scored:
+DEFAULT_CONFIG = Config()
+
+
+def score_frame(frame: np.ndarray, ref: np.ndarray, cfg: Config = DEFAULT_CONFIG) -> Scored:
     assert frame.shape == ref.shape == (params.FRAME_H, params.FRAME_W) and frame.dtype == ref.dtype == np.uint8
     cloud_px = int((frame > cfg.cloud_thr).sum())
     changed_px = int((np.abs(frame.astype(np.int16) - ref.astype(np.int16)) > cfg.change_thr).sum())
     return composite(cloud_px, changed_px, sobel_sum(frame), cfg)
 
 
-def score_frame_ref(frame, ref, cfg: Config = Config()) -> Scored:
+def score_frame_ref(frame: np.ndarray, ref: np.ndarray, cfg: Config = DEFAULT_CONFIG) -> Scored:
     """protocol.md §5.2 line by line, Python ints only. Slow (~0.1 s); tests only."""
     H, W = params.FRAME_H, params.FRAME_W
     p = [[int(frame[y][x]) for x in range(W)] for y in range(H)]
@@ -76,8 +81,16 @@ def score_frame_ref(frame, ref, cfg: Config = Config()) -> Scored:
     s = 0
     for y in range(1, H - 1):
         for x in range(1, W - 1):
-            gx = (p[y - 1][x + 1] - p[y - 1][x - 1]) + 2 * (p[y][x + 1] - p[y][x - 1]) + (p[y + 1][x + 1] - p[y + 1][x - 1])
-            gy = (p[y + 1][x - 1] - p[y - 1][x - 1]) + 2 * (p[y + 1][x] - p[y - 1][x]) + (p[y + 1][x + 1] - p[y - 1][x + 1])
+            gx = (
+                (p[y - 1][x + 1] - p[y - 1][x - 1])
+                + 2 * (p[y][x + 1] - p[y][x - 1])
+                + (p[y + 1][x + 1] - p[y + 1][x - 1])
+            )
+            gy = (
+                (p[y + 1][x - 1] - p[y - 1][x - 1])
+                + 2 * (p[y + 1][x] - p[y - 1][x])
+                + (p[y + 1][x + 1] - p[y - 1][x + 1])
+            )
             s += abs(gx) + abs(gy)
     return composite(cloud_px, changed_px, s, cfg)
 

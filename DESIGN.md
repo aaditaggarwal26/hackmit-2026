@@ -1,6 +1,6 @@
 ---
 name: Orbit
-description: A live test-report sheet for an FPGA deciding which satellite images go home first.
+description: A live test-report sheet for satellites deciding which images go home first.
 colors:
   stock: "#edf0f3"
   plate: "#ffffff"
@@ -261,7 +261,8 @@ meaning and each also carried by a second, non-colour channel.
   `Sending now` chip, a fault chip, a failed timing tag, and the lost-link
   banner.
 - **Measured Green** (`{colors.green}`): a number that came off real hardware —
-  a Vivado report, a counter on the board, a stopwatch on the link. It appears
+  a counter on the board, a stopwatch on the link, an instrumented power rail.
+  It appears
   only as a tag or a provenance chip, never as a fill or a curve.
 - **Modelled Amber** (`{colors.amber}`): a number that came from a model, a
   simulation, a scaling estimate, or does not exist yet. The dashed vertical rule

@@ -3,1630 +3,354 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orbit: which images a satellite sends home</title>
+<title>Orbit — ground station monitor</title>
 <style>
-/* ───────────────────────────────────────────────────────────────────────────
-   Type. Archivo, variable (wght 400–800, wdth 62–125), committed under
-   /static/fonts so the dashboard renders identically with the network off.
-   ─────────────────────────────────────────────────────────────────────────── */
-@font-face {
-  font-family: 'Archivo';
-  font-style: normal;
-  font-weight: 400 800;
-  font-stretch: 62% 125%;
-  font-display: block;
-  src: url('/static/fonts/archivo-latin.woff2') format('woff2');
-}
-
-/* ───────────────────────────────────────────────────────────────────────────
-   The pen carousel. Five inks, each with exactly one job, and satellites are
-   never one of them: a satellite is a numbered lane, not a hue.
-     blue    Orbit's own result
-     pencil  the baseline it beats (counterfactual, always also dashed)
-     red     live right now, or an intervention the ground forced
-     green   measured on real hardware
-     amber   modelled, scaled, simulated, or not measured yet
-   ─────────────────────────────────────────────────────────────────────────── */
-:root {
-  --stock:      #edf0f3;
-  --plate:       #ffffff;
-  --plate-sunk:  #f4f6f8;
-  --ink:         #11161b;
-  --ink-2:       #4e5a66;
-  --rule:        #c9d2da;
-  --rule-soft:   #e2e8ed;
-
-  --blue:        #1b54c8;
-  --blue-wash:   rgba(27, 84, 200, .10);
-  --blue-soft:   rgba(27, 84, 200, .16);
-  --pencil:      #6e7a85;
-  --red:         #c0271f;
-  --red-wash:    rgba(192, 39, 31, .10);
-  --green:       #15704a;
-  --amber:       #8a5a00;
-  --amber-wash:  rgba(138, 90, 0, .10);
-
-  --sh: 0 1px 2px rgba(17, 22, 27, .05), 0 6px 18px -12px rgba(17, 22, 27, .30);
-
-  /* type ramp: the responsive steps live here so each role is declared once */
-  --t-hero: clamp(34px, 3.6vw, 54px);
-  --t-title: 24px;
-  --t-pass: clamp(24px, 2.3vw, 31px);
-  --t-lede: 13px;
-  --t-standfirst: 15px;
-
-  --gap: 12px;
-  --pad: 15px;
-  --ease: cubic-bezier(.16, 1, .3, 1);
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --stock:     #10151a;
-    --plate:      #171e25;
-    --plate-sunk: #131a20;
-    --ink:        #eef2f6;
-    --ink-2:      #9daab6;
-    --rule:       #2f3a45;
-    --rule-soft:  #222b34;
-
-    --blue:       #5a8af5;
-    --blue-wash:  rgba(90, 138, 245, .14);
-    --blue-soft:  rgba(90, 138, 245, .22);
-    --pencil:     #93a0ac;
-    --red:        #ff8a7e;
-    --red-wash:   rgba(255, 138, 126, .14);
-    --green:      #4fc48d;
-    --amber:      #e0a33a;
-    --amber-wash: rgba(224, 163, 58, .14);
-    --sh: 0 1px 2px rgba(0, 0, 0, .40), 0 8px 22px -14px rgba(0, 0, 0, .70);
-    color-scheme: dark;
+  :root { --bg:#fcfcfb; --panel:#ffffff; --ink:#0b0b0b; --ink2:#52514e; --line:#e6e5e1; --grid:#ececea;
+          --accent:#4a3aa7; --warn:#c98500; --bad:#e34948; --good:#008300; --mem:#eb6834;
+          --c0:#2a78d6; --c1:#eb6834; --c2:#1baf7a; --c3:#eda100; --c4:#e87ba4; --c5:#008300; --c6:#4a3aa7; --c7:#e34948;
+          --term-score:#4a3aa7; --term-age:#eda100; --term-wait:#1baf7a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1a1a19; --panel:#232322; --ink:#ffffff; --ink2:#c3c2b7; --line:#3a3a38; --grid:#2e2e2c;
+            --accent:#9085e9; --warn:#e0a020; --bad:#e66767; --good:#3cba3c; --mem:#d95926;
+            --c0:#3987e5; --c1:#d95926; --c2:#199e70; --c3:#c98500; --c4:#d55181; --c6:#9085e9; --c7:#e66767;
+            --term-score:#9085e9; --term-age:#c98500; --term-wait:#199e70; }
   }
-}
-:root[data-theme="dark"] {
-  --stock:     #10151a;
-  --plate:      #171e25;
-  --plate-sunk: #131a20;
-  --ink:        #eef2f6;
-  --ink-2:      #9daab6;
-  --rule:       #2f3a45;
-  --rule-soft:  #222b34;
-
-  --blue:       #5a8af5;
-  --blue-wash:  rgba(90, 138, 245, .14);
-  --blue-soft:  rgba(90, 138, 245, .22);
-  --pencil:     #93a0ac;
-  --red:        #ff8a7e;
-  --red-wash:   rgba(255, 138, 126, .14);
-  --green:      #4fc48d;
-  --amber:      #e0a33a;
-  --amber-wash: rgba(224, 163, 58, .14);
-  --sh: 0 1px 2px rgba(0, 0, 0, .40), 0 8px 22px -14px rgba(0, 0, 0, .70);
-  color-scheme: dark;
-}
-
-* { box-sizing: border-box; }
-html, body { height: 100%; }
-body {
-  margin: 0;
-  background: var(--stock);
-  color: var(--ink);
-  font: 400 14.5px/1.45 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  font-variant-numeric: tabular-nums;
-  overflow: hidden;
-}
-::selection { background: var(--blue-soft); color: var(--ink); }
-:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
-* { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
-*::-webkit-scrollbar { width: 9px; height: 9px; }
-*::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 9px; border: 2px solid transparent; background-clip: content-box; }
-*::-webkit-scrollbar-track { background: transparent; }
-
-/* ── the sheet ─────────────────────────────────────────────────────────── */
-#app {
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
-  gap: 11px;
-  padding: 11px 16px 13px;
-}
-
-/* ── title block ───────────────────────────────────────────────────────── */
-.titleblock {
-  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  padding-bottom: 7px; border-bottom: 1px solid var(--rule);
-}
-.wordmark {
-  font-size: var(--t-title); font-weight: 800; font-stretch: 112%;
-  letter-spacing: -.012em; margin: 0; line-height: 1;
-}
-.standfirst { color: var(--ink-2); font-size: var(--t-standfirst); letter-spacing: -.005em; }
-.standfirst b { color: var(--ink); font-weight: 600; }
-.titleblock .spacer { flex: 1 1 24px; }
-
-.sheets { display: flex; gap: 2px; align-self: center; align-items: center; }
-.sheets .btn { margin-left: 10px; font-size: 12px; letter-spacing: .06em; padding: 5px 10px; background: transparent; }
-.sheets button {
-  font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .085em; text-transform: uppercase;
-  color: var(--ink-2); background: transparent; border: 1px solid transparent;
-  padding: 5px 11px; border-radius: 3px; cursor: pointer;
-  transition: color .16s var(--ease), background-color .16s var(--ease);
-}
-.sheets button:hover { color: var(--ink); background: var(--plate); }
-.sheets button[aria-selected="true"] { color: var(--plate); background: var(--ink); }
-
-/* ── control rail ──────────────────────────────────────────────────────── */
-.rail { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
-.grp {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px;
-  padding: 4px 9px; min-height: 36px; box-shadow: var(--sh);
-}
-.grp > .lab {
-  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-2); white-space: nowrap;
-}
-.transport { display: flex; gap: 3px; }
-.transport button, .btn {
-  font: inherit; font-size: 13px; font-weight: 600;
-  color: var(--ink); background: var(--plate-sunk);
-  border: 1px solid var(--rule-soft); border-radius: 3px;
-  padding: 5px 11px; cursor: pointer; white-space: nowrap;
-  transition: background-color .14s var(--ease), border-color .14s var(--ease), color .14s var(--ease);
-}
-.transport button:hover, .btn:hover { border-color: var(--rule); background: var(--stock); }
-.transport button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--plate); }
-.transport button:disabled, .btn:disabled { opacity: .4; cursor: default; }
-select, input[type="number"] {
-  font: inherit; font-size: 13px; color: var(--ink);
-  background: var(--plate-sunk); border: 1px solid var(--rule-soft);
-  border-radius: 3px; padding: 5px 7px; max-width: 220px;
-}
-input[type="number"] { width: 52px; text-align: center; }
-input[type="range"] { width: 92px; accent-color: var(--blue); }
-.hint { font-size: 12px; color: var(--ink-2); max-width: 30ch; line-height: 1.25; }
-.val { font-size: 13px; font-weight: 700; min-width: 2.4em; }
-
-/* ── conditions line ───────────────────────────────────────────────────── */
-.conditions {
-  grid-column: 1 / -1;
-  display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline;
-  font-size: 12px; color: var(--ink-2); padding: 1px 2px;
-}
-.conditions .k { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 10px; }
-.conditions b { color: var(--ink); font-weight: 600; }
-
-/* ── plates ────────────────────────────────────────────────────────────── */
-.plate {
-  background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px;
-  box-shadow: var(--sh); padding: var(--pad); min-width: 0; min-height: 0;
-  display: flex; flex-direction: column;
-}
-.plate > h2 {
-  margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .11em;
-  text-transform: uppercase; color: var(--ink-2);
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.plate > h2 .n { color: var(--ink); font-stretch: 118%; }
-.plate > h2 .thin { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 12px; }
-.caption { font-size: 12px; line-height: 1.35; color: var(--ink-2); margin-top: 7px; }
-.caption b { color: var(--ink); font-weight: 600; }
-
-/* ── live sheet grid ───────────────────────────────────────────────────── */
-.sheet { min-height: 0; display: none; }
-.sheet[data-active] { display: grid; }
-#sheet-live {
-  grid-template-columns: minmax(0, 1.5fr) minmax(244px, .8fr) minmax(246px, .74fr);
-  grid-template-rows: minmax(300px, 1fr) auto minmax(200px, .85fr);
-  gap: var(--gap);
-}
-#sheet-live > .plate { overflow: hidden; }
-#p-figure  { grid-column: 1; grid-row: 1; }
-#p-compare { grid-column: 2; grid-row: 1; }
-#p-window  { grid-column: 3; grid-row: 1; }
-#p-slots   { grid-column: 1 / -1; grid-row: 2; }
-#p-sats    { grid-column: 1 / -1; grid-row: 3; min-height: 0; display: grid; }
-
-/* ── hero ──────────────────────────────────────────────────────────────── */
-.hero { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 2px; flex: none; }
-.hero .fig {
-  font-size: var(--t-hero); font-weight: 800; font-stretch: 108%;
-  line-height: .88; letter-spacing: -.035em; color: var(--blue);
-  font-variant-numeric: proportional-nums;
-}
-.hero .say { font-size: var(--t-lede); line-height: 1.26; padding-top: 2px; max-width: 40ch; }
-.hero .say b { font-weight: 700; }
-.hero .tot { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
-.chartbox { position: relative; flex: 1 1 auto; min-height: 104px; margin-top: 4px; }
-.chartbox svg { display: block; width: 100%; height: 100%; }
-.chartbox svg text { font-family: inherit; font-size: 12px; fill: var(--ink-2); font-variant-numeric: tabular-nums; }
-/* a direct label sits on top of its own line, so it carries a plate-coloured
-   outline and reads cleanly wherever the curve happens to be */
-.chartbox svg text.lbl { font-size: 12px; font-weight: 700;
-  paint-order: stroke; stroke: var(--plate); stroke-width: 4px; stroke-linejoin: round; }
-.tip {
-  position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%, -100%);
-  background: var(--ink); color: var(--plate); font-size: 12px; line-height: 1.45;
-  padding: 6px 9px; border-radius: 3px; white-space: nowrap; z-index: 6;
-  transition: opacity .12s linear;
-}
-.tip b { font-weight: 700; }
-.tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
-
-/* ── key / legend ──────────────────────────────────────────────────────── */
-.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); align-items: center; }
-.key span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.key i { display: block; width: 16px; height: 0; border-top: 2.5px solid var(--blue); border-radius: 2px; }
-.key i.pencil { border-top: 2.5px dashed var(--pencil); }
-.key i.dot { width: 9px; height: 9px; border: 0; border-radius: 50%; background: var(--red); }
-.key i.blk { width: 11px; height: 13px; border: 0; border-radius: 2px; background: var(--blue); }
-
-/* ── compare plate (the two images) ────────────────────────────────────── */
-.versus { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
-.versus figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; align-items: center; }
-.versus .who {
-  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-  display: flex; align-items: flex-start; gap: 5px; min-height: 2.4em; align-self: stretch; flex: none;
-}
-.versus .who i { margin-top: 2px; }
-.versus .who i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
-.versus .shot {
-  /* height comes from the flex row, width follows the square, capped by the column:
-     the pair stay square whether the plate is short or narrow. */
-  flex: 1 1 auto; aspect-ratio: 1; width: auto; max-width: 100%; min-height: 44px;
-  border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk);
-}
-.shot img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; display: block; border-radius: 1px; }
-.versus figcaption { font-size: 12px; color: var(--ink-2); line-height: 1.3; align-self: stretch; flex: none; }
-.versus .sc { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.02em; }
-.versus .sc small { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
-
-/* ── window plate ──────────────────────────────────────────────────────── */
-.passno {
-  font-size: var(--t-pass); font-weight: 800; font-stretch: 106%;
-  letter-spacing: -.025em; line-height: 1; font-variant-numeric: proportional-nums;
-}
-.passno small { font-size: .46em; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
-.phase {
-  display: inline-flex; align-items: center; gap: 7px; margin-top: 6px;
-  font-size: 13px; font-weight: 700; letter-spacing: .02em;
-  padding: 4px 10px 4px 8px; border-radius: 3px;
-  background: var(--plate-sunk); border: 1px solid var(--rule-soft); color: var(--ink);
-}
-.phase .lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--pencil); flex: none; }
-.phase[data-live] { background: var(--red-wash); border-color: transparent; color: var(--red); }
-.phase[data-live] .lamp { background: var(--red); animation: breathe 1.9s var(--ease) infinite; }
-@keyframes breathe { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
-
-.meter { margin-top: 7px; }
-.meter .track {
-  height: 20px; border-radius: 2px; background: var(--plate-sunk);
-  border: 1px solid var(--rule-soft); display: flex; gap: 2px; padding: 2px; overflow: hidden;
-}
-.meter .track i { flex: 1 1 0; border-radius: 1px; background: var(--rule-soft); transition: background-color .25s var(--ease); }
-.meter .track i[data-used] { background: var(--blue); }
-.meter .track i[data-now] { background: var(--rule-soft); box-shadow: inset 0 0 0 2px var(--red); }
-.meter .cap { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 4px; }
-.meter .cap b { color: var(--ink); font-weight: 700; }
-
-.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; align-items: baseline; }
-.kv dt { color: var(--ink-2); }
-.kv dd { margin: 0; text-align: right; font-weight: 600; }
-
-/* ── slot ledger (lanes) ───────────────────────────────────────────────── */
-.lanes { display: flex; flex-direction: column; gap: 3px; }
-.lane { display: flex; align-items: center; gap: 8px; }
-.lane .name {
-  width: 74px; flex: none; font-size: 12px; font-weight: 700; letter-spacing: .05em;
-  color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.lane .cells { flex: 1 1 auto; display: flex; gap: 2px; min-width: 0; }
-.lane .cells b {
-  flex: 1 1 0; min-width: 4px; height: var(--lane-h, 17px); border-radius: 2px;
-  background: var(--rule-soft); position: relative;
-}
-.lanes[data-many] .lane .name { font-size: 10px; }
-.lane .cells b[data-won]  { background: var(--blue); }
-.lane .cells b[data-forced] { background: var(--red); }
-.lane .cells b[data-live] { box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red); z-index: 2; }
-.lane .cells b[data-new] { animation: land .45s var(--ease) both; }
-@keyframes land { from { transform: scaleY(.25); opacity: .2; } to { transform: scaleY(1); opacity: 1; } }
-.axis { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
-.axis .name { width: 74px; flex: none; }
-.axis .rng { flex: 1 1 auto; display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-2); }
-
-/* ── satellite strips ──────────────────────────────────────────────────── */
-#sats { display: grid; gap: 12px; min-height: 0; height: 100%; grid-auto-rows: minmax(0, 1fr); }
-.sat { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
-  gap: 4px 12px; overflow: hidden; }
-.sat .head {
-  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin: 0 0 2px; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2);
-}
-.sat .head .n { font-size: 13px; letter-spacing: .04em; color: var(--ink); font-stretch: 112%; }
-.chip {
-  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-  padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap;
-}
-.chip.hw     { color: var(--green); }
-.chip.sim    { color: var(--amber); }
-.chip.bad    { color: var(--red); border-color: transparent; background: var(--red-wash); }
-.chip.plain  { color: var(--ink-2); border-color: var(--rule); }
-.chip.solid  { color: var(--plate); background: var(--red); border-color: transparent; }
-
-.sat .now { display: flex; flex-direction: column; gap: 5px; width: 96px; }
-.sat .now .shot {
-  width: 96px; height: 96px;
-  border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk);
-}
-.sat .now .meta { font-size: 12px; color: var(--ink-2); line-height: 1.25; }
-.sat .body { display: flex; flex-direction: column; gap: 7px; min-width: 0; min-height: 0; overflow: hidden; }
-.sat .barswrap, .sat .sentwrap { flex: none; }
-.sat .qwrap { flex: 1 1 auto; min-height: 38px; overflow: hidden; display: flex; flex-direction: column; gap: 3px; }
-
-.bars { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
-.bar { display: grid; grid-template-columns: 82px minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: 13px; }
-.bar .t { color: var(--ink-2); white-space: nowrap; }
-.bar .track { height: 10px; border-radius: 5px; background: var(--plate-sunk); overflow: hidden; }
-.triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-top: 5px; }
-.triplet .m { display: grid; grid-template-columns: auto minmax(14px, 1fr) 28px; gap: 5px; align-items: center; font-size: 12px; }
-.triplet .m .t { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.triplet .m .track { height: 5px; border-radius: 3px; background: var(--plate-sunk); overflow: hidden; }
-.triplet .m .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft);
-  transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
-.triplet .m .v { font-weight: 700; text-align: right; }
-.bar .track i { display: block; height: 100%; width: 100%; border-radius: 5px; background: var(--blue);
-  transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
-.bar .v { text-align: right; font-weight: 700; }
-
-.queue { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden;
-  -webkit-mask-image: linear-gradient(black calc(100% - 9px), transparent);
-  mask-image: linear-gradient(black calc(100% - 9px), transparent); }
-.queue .qrow { display: grid; grid-template-columns: minmax(0, 1fr) 34px 38px; gap: 7px; align-items: center; font-size: 12px; }
-.queue .qrow .track { height: 9px; border-radius: 2px; background: var(--plate-sunk); overflow: hidden; }
-.queue .qrow .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft);
-  transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
-.queue .qrow:first-child .track i { background: var(--blue); }
-.queue .qrow .v { text-align: right; font-weight: 700; color: var(--ink); }
-.queue .qrow .id { text-align: right; color: var(--ink-2); }
-
-.sentrow { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, black calc(100% - 22px), transparent);
-  mask-image: linear-gradient(90deg, black calc(100% - 22px), transparent); }
-.sentrow figure { margin: 0; text-align: center; flex: none; }
-.sentrow .shot { width: 36px; height: 36px; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); display: block; }
-.sentrow figcaption { font-size: 10px; color: var(--ink-2); margin-top: 2px; }
-.sentwrap .none { font-size: 12px; color: var(--ink-2); }
-.micro { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
-.qline { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.qdetail { font-size: 12px; color: var(--ink-2); }
-
-/* More than three satellites: one line each, and the list scrolls inside its own
-   panel rather than pushing the figures off the screen. */
-#sats[data-compact] { grid-auto-rows: 46px; overflow-y: auto; align-content: start; gap: 6px; }
-#sats[data-compact] .sat {
-  display: flex; flex-direction: row; align-items: center; gap: 12px; padding: 5px 10px;
-}
-#sats[data-compact] .sat .head { margin: 0; width: 204px; flex: none; flex-wrap: nowrap; gap: 6px; }
-/* At this density the row itself shows whether a satellite is working; what a
-   viewer still needs per row is which are real boards and which have faults. */
-#sats[data-compact] .sat .head .n { white-space: nowrap; }
-#sats[data-compact] .sat .head .state { display: none; }
-#sats[data-compact] .sat .qline { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
-#sats[data-compact] .sat .now { width: auto; flex: none; flex-direction: row; align-items: center; gap: 8px; }
-#sats[data-compact] .sat .now .shot { width: 34px; height: 34px; }
-#sats[data-compact] .sat .now .meta { display: none; }
-#sats[data-compact] .sat .body { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 20px; overflow: hidden; }
-#sats[data-compact] .sat .barswrap { flex: 1 1 42%; min-width: 0; }
-#sats[data-compact] .sat .barswrap .micro, #sats[data-compact] .sat .triplet { display: none; }
-#sats[data-compact] .sat .bars { margin: 0; }
-#sats[data-compact] .sat .qwrap { flex: 1 1 58%; min-height: 0; min-width: 0; }
-#sats[data-compact] .sat .queue, #sats[data-compact] .sat .sentwrap { display: none; }
-
-/* ── tables (device / scaling sheets) ──────────────────────────────────── */
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-thead th {
-  text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--ink-2); padding: 0 12px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap;
-}
-tbody td { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: baseline; }
-tbody tr:last-child td { border-bottom: 0; }
-td.num, th.num { text-align: right; font-weight: 600; white-space: nowrap; }
-td.unit { color: var(--ink-2); white-space: nowrap; }
-td.how { color: var(--ink-2); }
-tbody td:first-child { padding-right: 16px; }
-tbody tr[data-mark] { background: var(--amber-wash); }
-tbody tr[data-mark] td { font-weight: 700; }
-.tag { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
-.tag.m { color: var(--green); }
-.tag.e { color: var(--amber); }
-.tag.x { color: var(--red); }
-.scroll { overflow: auto; min-height: 0; flex: 1 1 auto; }
-/* sheets 2 and 3 scroll as a whole, so their tables must not also scroll inside a
-   plate - nesting the two hides rows behind a scrollbar nobody looks for */
-#sheet-device .scroll, #sheet-scaling .scroll { overflow: visible; flex: none; }
-.log {
-  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre; color: var(--ink-2); overflow: auto; min-height: 0; flex: 1 1 auto;
-}
-
-#sheet-device { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: max-content max-content max-content;
-  gap: 12px; align-items: start; align-content: start; overflow-y: auto; padding-right: 4px; }
-#sheet-device > .plate { overflow: visible; }
-#d-state  { grid-column: 1 / -1; grid-row: 1; }
-#d-engine { grid-column: 1; grid-row: 2; }
-#d-link   { grid-column: 2; grid-row: 2; }
-#d-health { grid-column: 1; grid-row: 3; }
-#d-log    { grid-column: 2; grid-row: 3; }
-#d-log .log { height: 260px; flex: none; }
-#sheet-scaling { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-rows: max-content max-content max-content;
-  gap: 12px; align-items: start; align-content: start; }
-#s-lede    { grid-column: 1 / -1; grid-row: 1; }
-#s-chart   { grid-column: 1; grid-row: 2; }
-#s-quality { grid-column: 2; grid-row: 2; }
-#s-table   { grid-column: 1 / -1; grid-row: 3; }
-#sheet-scaling { overflow-y: auto; padding-right: 4px; }
-#sheet-scaling > .plate { overflow: visible; }
-#sweepbox, #qualbox { height: clamp(200px, 30vh, 300px); flex: none; }
-
-/* the sweep runs for the better part of a minute, so it has to look alive */
-.sweeprun { margin: 2px 0 10px; }
-.sweeprun .track { height: 6px; border-radius: 3px; background: var(--plate-sunk); overflow: hidden; }
-.sweeprun .track i { display: block; height: 100%; width: 100%; background: var(--blue);
-  transform-origin: left center; transform: scaleX(0); transition: transform .4s var(--ease); }
-.runline { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-2); margin-top: 5px; }
-.runline b { color: var(--ink); font-weight: 700; }
-
-/* the three numbers this whole sheet is about */
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 24px; margin: 2px 0 6px; }
-.stats .s { min-width: 0; }
-.stats .s .v { font-size: clamp(23px, 2.3vw, 31px); font-weight: 800; font-stretch: 106%;
-  letter-spacing: -.025em; line-height: 1; font-variant-numeric: proportional-nums; }
-.stats .s .t { font-size: 12px; color: var(--ink-2); line-height: 1.3; margin-top: 5px; }
-.stats .s .t b { color: var(--ink); font-weight: 600; }
-
-/* ── connection banner ─────────────────────────────────────────────────── */
-#offline {
-  position: fixed; left: 50%; top: 14px; transform: translateX(-50%);
-  background: var(--red); color: #fff; font-size: 13px; font-weight: 700;
-  padding: 7px 14px; border-radius: 3px; z-index: 40; box-shadow: var(--sh); display: none;
-}
-#offline[data-show] { display: block; }
-.boot { display: grid; place-items: center; height: 100%; color: var(--ink-2); font-size: 14.5px; }
-
-@media (prefers-reduced-motion: reduce) {
-  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
-}
-@media (max-height: 900px) and (min-width: 1181px) {
-  /* Where the sheet is fixed to one screen, height is spent in this order: the
-     figures and the priority queue keep their room, the haul of already-sent
-     photos goes first, and the caption that teaches what a score is goes last.
-     Narrow layouts scroll, so they keep everything. */
-  #sats:not([data-compact]) .sat .sentwrap { display: none; }
-}
-@media (max-height: 800px) and (min-width: 1181px) {
-  #p-compare .caption { display: none; }
-  :root { --t-pass: clamp(22px, 2.1vw, 27px); }
-}
-@media (max-height: 759px) and (min-width: 1181px) {
-  /* Shorter than the fixed sheet needs: scroll rather than clip a figure in half.
-     Every sheet's rows become content-sized, or a `minmax(0, 1fr)` row with no
-     container height to divide collapses its plate to nothing. */
-  body { overflow: auto; }
-  #app { height: auto; min-height: 100%; }
-  #sheet-live { grid-template-rows: minmax(300px, auto) auto minmax(200px, auto); }
-  #sheet-device { grid-template-rows: max-content max-content max-content; }
-  #sheet-device > .plate { max-height: none; }
-  #d-engine, #d-link { min-height: 280px; }
-  #d-log .log { height: 220px; flex: none; }
-  #sweepbox { height: 260px; }
-}
-@media (max-height: 860px) {
-  :root { --t-hero: 42px; }
-  .sat .now, .sat .now .shot { width: 88px; }
-  .sat .now .shot { height: 88px; }
-  #sheet-live { grid-template-rows: minmax(252px, 1fr) auto minmax(196px, .82fr); }
-}
-@media (max-width: 1180px) {
-  body { overflow: auto; }
-  #app { height: auto; min-height: 100%; }
-  /* Stacked layouts place themselves in source order: clear every explicit row
-     the fixed one-screen grid sets, or the plates land on top of each other. */
-  #sheet-live { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
-  #sheet-live > * { grid-row: auto; }
-  #p-figure { grid-column: 1 / -1; min-height: 300px; }
-  #p-compare { grid-column: 1; }
-  #p-window { grid-column: 2; }
-  #p-slots, #p-sats { grid-column: 1 / -1; }
-  #sats[data-compact] { overflow: visible; grid-auto-rows: auto; }
-  #p-sats { min-height: 0; }
-  #sheet-live > .plate { overflow: visible; }
-  .sat { overflow: visible; }
-  #sheet-device > .plate, #sheet-scaling > .plate { overflow: visible; max-height: none; }
-  #d-engine, #d-link, #d-log, #s-chart, #s-table, #s-notes { grid-column: 1 / -1; grid-row: auto; }
-  #sheet-device, #sheet-scaling { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
-    grid-auto-rows: max-content; }
-  #d-engine { grid-row: auto; }
-  .chartbox { min-height: 220px; }
-}
-@media (max-width: 720px) {
-  #app { padding: 10px; gap: 8px; }
-  .triplet { grid-template-columns: minmax(0, 1fr); gap: 3px; }
-  /* the page scrolls here, so the gain figure gets bigger, not smaller */
-  :root { --t-title: 21px; --t-standfirst: var(--t-lede); --t-hero: 46px; }
-  #sheet-live { grid-template-columns: minmax(0, 1fr); }
-  #p-figure, #p-compare, #p-window, #p-slots, #p-sats { grid-column: 1; }
-  .hero { flex-direction: column; gap: 6px; }
-  .lane .name, .axis .name { width: 54px; font-size: 10px; }
-  .grp { flex: 0 1 auto; min-height: 32px; padding: 3px 8px; gap: 6px; }
-  .rail { gap: 6px; }
-  #scenario-hint { display: none; }
-  .sat { grid-template-columns: minmax(0, 1fr); }
-  .sat .now { width: 100%; flex-direction: row; align-items: center; }
-  .sat .now img, .sat .now .blank { width: 76px; height: 76px; }
-}
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.35 -apple-system,Segoe UI,Helvetica,Arial,sans-serif; padding:12px 16px 24px }
+  header { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-bottom:8px }
+  h1 { font-size:20px; margin:0 8px 0 0 }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink2); margin:0 0 8px }
+  .strip { font-size:12px; color:var(--ink2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; margin:6px 0 12px; display:flex; flex-wrap:wrap; gap:6px 18px }
+  .strip b, .kv b { color:var(--ink) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:12px }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0 }
+  .wide { grid-column:1 / -1 }
+  .num { font-variant-numeric:tabular-nums }
+  .muted { color:var(--ink2) }
+  .big { font-size:28px; font-weight:600; line-height:1; letter-spacing:-.02em }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--line); color:var(--ink2); vertical-align:middle; white-space:nowrap }
+  .badge.state { font-weight:600; color:var(--ink); border-color:var(--ink2) }
+  .badge.READY { border-color:var(--good); color:var(--good) } .badge.BUSY { border-color:var(--c0); color:var(--c0) }
+  .badge.COMPLETE { border-color:var(--accent); color:var(--accent) } .badge.CLOSED { border-color:var(--ink2) }
+  .badge.bad { border-color:var(--bad); color:var(--bad); font-weight:600 } .badge.ok { border-color:var(--good); color:var(--good) }
+  .badge.warn { border-color:var(--warn); color:var(--warn) } .badge.mem { border-color:var(--mem); color:var(--mem); font-weight:600 }
+  .badge.hard { background:var(--bad); border-color:var(--bad); color:#fff; font-weight:600 }
+  .badge.soft { color:var(--warn); border-color:transparent; padding-left:0 }
+  .badge.quiet { border-color:transparent; padding-left:0 }
+  .sat { border-left:6px solid var(--c0) } .sat.hard { border:2px solid var(--bad); border-left-width:6px }
+  .sat.silent h2 .name { text-decoration:line-through; color:var(--ink2) }
+  .sat.unknown { opacity:.55 } .sat.unknown .kv, .sat.unknown .bars { filter:grayscale(1) }
+  .sat h2 { color:var(--ink); text-transform:none; letter-spacing:0; font-size:15px; display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; font-size:13px }
+  .kv span:nth-child(odd) { color:var(--ink2) }
+  .meter { height:14px; border-radius:4px; overflow:hidden; background:var(--grid); margin:4px 0 }
+  .meter i { display:block; height:100%; background:var(--accent); border-radius:0 4px 4px 0 }
+  .meter i.occ { background:var(--c0) } .meter i.hot { background:var(--mem) }
+  .bars { display:flex; flex-direction:column; gap:3px; margin-top:6px }
+  .bar { display:flex; align-items:center; gap:8px; font-size:12px }
+  .bar i { display:block; height:8px; border-radius:0 3px 3px 0; background:var(--c0); min-width:2px }
+  .bar.head { font-weight:600 } .bar.head i { height:12px }
+  .reason { font-size:11px; color:var(--ink2); margin-top:6px }
+  table { border-collapse:collapse; font-size:12px; width:100% }
+  td, th { text-align:right; padding:3px 8px 3px 0; border-bottom:1px solid var(--grid); font-variant-numeric:tabular-nums; white-space:nowrap }
+  td:first-child, th:first-child, td.l, th.l { text-align:left }
+  th { color:var(--ink2); font-weight:500 }
+  tr.dec { cursor:pointer } tr.dec:hover td { background:var(--grid) }
+  tr.detail td { padding:6px 8px 10px 16px; background:var(--bg) }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle }
+  .stack { display:flex; height:12px; gap:2px; border-radius:3px; overflow:visible; margin:2px 0 }
+  .stack i { display:block; height:100%; min-width:1px } .stack i:last-child { border-radius:0 3px 3px 0 }
+  .stack .s { background:var(--term-score) } .stack .a { background:var(--term-age) } .stack .w { background:var(--term-wait) }
+  .cand { display:grid; grid-template-columns:90px 1fr 260px; gap:10px; align-items:center; font-size:12px; margin:2px 0 }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--ink2); margin-top:4px }
+  .legend i { display:inline-block; width:12px; height:8px; vertical-align:middle; margin-right:4px; border-radius:2px }
+  .out { font-weight:600 } .out.complete { color:var(--good) } .out.failed { color:var(--bad) } .out.revoked { color:var(--warn) } .out.pending { color:var(--ink2); font-weight:400 }
+  .feed { font-size:12px; max-height:360px; overflow:auto } .feed div { padding:3px 0; border-bottom:1px solid var(--grid) }
+  .feed .k { display:inline-block; min-width:96px; font-weight:600 } .feed .k.bad { color:var(--bad) } .feed .k.warn { color:var(--warn) } .feed .k.mem { color:var(--mem) }
+  .log { font:11px/1.45 ui-monospace,Menlo,Consolas,monospace; max-height:360px; overflow:auto; white-space:pre; color:var(--ink2) }
+  .log b { color:var(--ink); font-weight:600 }
+  .formula { font:13px ui-monospace,Menlo,Consolas,monospace; color:var(--ink) }
+  .stale { color:var(--bad); font-weight:600 }
 </style>
 </head>
 <body>
-<!--
-  DIRECTION CONTRACT — seed c04507a2
+<header>
+  <h1>Orbit</h1>
+  <span class="muted">ground station monitor · observational only, never in the control path</span>
+  <span id="state" class="badge state">—</span>
+  <span class="num">round <b id="round">—</b></span>
+  <span>granted to <b id="granted">—</b></span>
+  <span id="age" class="num">no telemetry yet</span>
+  <span id="watchdog" class="badge">watching</span>
+  <span id="link" class="badge">connecting</span>
+  <span id="ground" class="muted"></span>
+</header>
+<div class="strip" id="counters"></div>
 
-  THESIS: this is a test report being written live: every quantity carries a
-  plain name, a unit and how we know it, and anything unmeasured says so in the
-  same breath. It refuses the mission-control console with neon telemetry that
-  every space demo ships, and the rounded-card dashboard this replaced.
-
-  OWN-WORLD: cool bond stock, white plates lifted by one whisper of ambient
-  shadow, hairline rules doing the rest. No card chrome, no hover lift, no
-  second elevation step. Archivo alone, width axis for plate headings,
-  weight and size for hierarchy. Five pens with one job each: blue = Orbit's
-  result, pencil = the baseline it beats, red = live or forced, green =
-  measured on hardware, amber = modelled / simulated / not yet measured.
-  Satellites are numbered lanes, never hues.
-
-  STORY: a stranger at two metres reads the gain, sees the gap widen, then sees
-  two satellites taking turns. An operator drives it from one rail.
-
-  FIRST VIEWPORT: title block, control rail, conditions line; then FIG 1 (gain
-  + two curves, gap shaded) left, the two compared images centre, the pass and
-  contact window right; the slot ledger full width; satellite strips beneath.
-  No page scroll above 1180px.
-
-  FORM: semiconductor datasheet and test-report spread, candidate 7 of the
-  ordered grounded list. Raised by the festival lineup sheet (billing carried by
-  size alone) and the drum-machine step row (one unbroken lit row of steps).
-
-  FINISH: unreviewed and undocumented is unfinished; this build ends with the
-  finish review, the verdict, DESIGN.md, and every shipping raster carrying its
-  provenance.
--->
-<div id="offline">Lost the link to the ground station. Retrying…</div>
-
-<div id="app">
-  <header class="titleblock">
-    <h1 class="wordmark">ORBIT</h1>
-    <div class="standfirst">A satellite takes far more photos than it can send home.
-      <b>Which ones go first?</b></div>
-    <div class="spacer"></div>
-    <div class="sheets" role="tablist" aria-label="Sheets">
-      <button role="tab" id="tab-live" aria-selected="true" data-sheet="live" title="Press 1">1 · Live run</button>
-      <button role="tab" id="tab-device" aria-selected="false" data-sheet="device" title="Press 2">2 · Hardware</button>
-      <button role="tab" id="tab-scaling" aria-selected="false" data-sheet="scaling" title="Press 3">3 · How far it scales</button>
-      <button class="btn" id="theme" title="Switch between light and dark">Dark</button>
-    </div>
-  </header>
-
-  <div>
-    <div class="rail">
-      <div class="grp">
-        <span class="lab">Run</span>
-        <div class="transport">
-          <button id="play" aria-pressed="false" title="Space">Play</button>
-          <button id="pause" aria-pressed="false" title="Space">Pause</button>
-          <button id="step" title="Right arrow: advance one step">Step</button>
-        </div>
-      </div>
-      <div class="grp">
-        <span class="lab">Speed</span>
-        <input id="speed" type="range" min="0.25" max="16" step="0.25" aria-label="Playback speed">
-        <span class="val" id="speedv">2×</span>
-      </div>
-      <div class="grp" style="flex:1 1 260px">
-        <span class="lab">Scenario</span>
-        <select id="scenario" aria-label="Scenario"></select>
-        <span class="hint" id="scenario-hint"></span>
-      </div>
-      <div class="grp">
-        <span class="lab">Fairness</span>
-        <span class="hint" style="max-width:none">force a switch after</span>
-        <input id="starv" type="number" min="1" max="20" aria-label="Wins in a row before a forced switch">
-        <span class="hint" style="max-width:none">wins in a row</span>
-        <span class="hint" id="starv-warn" style="max-width:22ch;color:var(--amber)" hidden></span>
-      </div>
-      <div class="grp">
-        <span class="lab">Extra satellites</span>
-        <input id="simn" type="number" min="0" max="12" aria-label="Extra simulated satellites">
-        <span class="hint" style="max-width:none">simulated</span>
-      </div>
-    </div>
-    <div class="conditions" id="conditions"></div>
-  </div>
-
-  <!-- ── SHEET 1 · LIVE ─────────────────────────────────────────────── -->
-  <section class="sheet" id="sheet-live" data-active role="tabpanel" aria-labelledby="tab-live">
-
-    <section class="plate" id="p-figure">
-      <h2><span class="n">Fig 1</span> <span class="thin">Useful imagery delivered, same photos, same window</span>
-        <span class="chip" id="gain-src" style="margin-left:auto"></span></h2>
-      <div class="hero">
-        <div class="fig" id="gain">—</div>
-        <div>
-          <div class="say" id="gain-say">more useful imagery reaches the ground, through exactly the same contact window.</div>
-          <div class="tot" id="gain-tot"></div>
-        </div>
-      </div>
-      <div class="chartbox" id="chartbox">
-        <svg id="chart" aria-label="Cumulative score delivered, Orbit versus the send-oldest-first baseline"></svg>
-        <div class="tip" id="tip"></div>
-      </div>
-      <div class="key" style="margin-top:8px">
-        <span><i></i> Orbit: best photos first</span>
-        <span><i class="pencil"></i> Baseline: oldest photos first</span>
-        <span id="chartnote"></span>
-      </div>
-    </section>
-
-    <section class="plate" id="p-compare">
-      <h2><span class="n">Fig 2</span> <span class="thin">The last photo sent, and what the baseline would have sent</span></h2>
-      <div class="versus">
-        <figure>
-          <div class="who" style="color:var(--blue)"><i style="background:var(--blue)"></i>Orbit sent</div>
-          <div class="shot" id="cmp-a"></div>
-          <figcaption><span class="sc" id="cmp-a-sc">—<small> / 100</small></span><br><span id="cmp-a-meta">waiting for the first send slot</span></figcaption>
-        </figure>
-        <figure>
-          <div class="who" style="color:var(--pencil)"><i style="background:var(--pencil)"></i>Baseline would have sent</div>
-          <div class="shot" id="cmp-b"></div>
-          <figcaption><span class="sc" id="cmp-b-sc">—<small> / 100</small></span><br><span id="cmp-b-meta">same slot, same airtime</span></figcaption>
-        </figure>
-      </div>
-      <div class="caption">Both cost the same airtime. The score rates
-        <b>cloud-free, detailed, changed since last time</b>.</div>
-    </section>
-
-    <section class="plate" id="p-window">
-      <h2>Where the run is</h2>
-      <div class="passno" id="passno">—</div>
-      <div><span class="phase" id="phase"><i class="lamp"></i><span id="phase-t">connecting…</span></span></div>
-      <div class="meter">
-        <div class="track" id="wtrack"></div>
-        <div class="cap"><span id="wcap">—</span><span id="wcap2"></span></div>
-      </div>
-      <dl class="kv" style="margin-top:6px" id="wkv"></dl>
-      <div class="caption" id="wcaption" style="margin-top:auto"></div>
-    </section>
-
-    <section class="plate" id="p-slots">
-      <h2><span class="n">Fig 3</span> <span class="thin">Who got each send slot</span>
-        <span class="key" style="margin-left:auto">
-          <span><i class="blk"></i> won the slot</span>
-          <span><i class="blk" style="background:var(--red)"></i> fairness forced the switch</span>
-        </span>
-      </h2>
-      <div class="lanes" id="lanes"></div>
-      <div class="axis"><span class="name"></span><span class="rng"><span id="slot-from"></span><span id="slot-to"></span></span></div>
-      <div class="caption" id="why"></div>
-    </section>
-
-    <div id="p-sats"><div id="sats"></div></div>
+<div class="grid">
+  <section class="panel">
+    <h2>Contact window <span id="scaled"></span></h2>
+    <div class="meter"><i id="wbar" style="width:0"></i></div>
+    <div class="kv" id="win"><span class="muted">waiting for a snapshot</span></div>
+  </section>
+  <section class="panel">
+    <h2>Priority formula</h2>
+    <div class="formula">priority = score + item_age_s × ITEM_AGING_RATE + satellite_wait_s × SAT_AGING_RATE</div>
+    <div id="rates" class="muted" style="font-size:12px;margin-top:6px"></div>
+    <div class="legend"><span><i style="background:var(--term-score)"></i>score</span><span><i style="background:var(--term-age)"></i>item age term</span><span><i style="background:var(--term-wait)"></i>satellite wait term</span></div>
+    <div class="kv" style="margin-top:8px" id="telem"></div>
   </section>
 
-  <!-- ── SHEET 2 · HARDWARE ─────────────────────────────────────────── -->
-  <section class="sheet" id="sheet-device" role="tabpanel" aria-labelledby="tab-device">
-    <section class="plate" id="d-state">
-      <h2>What has been measured, and what is still waiting</h2>
-      <div class="stats" id="d-stats"></div>
-      <div class="caption" id="d-state-note"></div>
-    </section>
+  <div id="sats" class="wide" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px"></div>
 
-    <section class="plate" id="d-engine">
-      <h2><span class="n">Table 1</span> <span class="thin">The scoring engine on the board</span></h2>
-      <div class="scroll"><table>
-        <thead><tr><th>What</th><th class="num">Value</th><th>Unit</th><th>How we know</th></tr></thead>
-        <tbody id="t-engine"></tbody>
-      </table></div>
-      <div class="caption">Anything that says <b class="tag e">not measured yet</b> is a number nobody has taken.
-        We would rather show that than a figure we made up.</div>
-    </section>
-
-    <section class="plate" id="d-link">
-      <h2><span class="n">Table 2</span> <span class="thin">What actually travels down the cable</span></h2>
-      <div class="scroll"><table>
-        <thead><tr><th>What</th><th class="num">Value</th><th>Unit</th><th>How we know</th></tr></thead>
-        <tbody id="t-link"></tbody>
-      </table></div>
-      <div class="caption">The cable between the laptop and each board carries photo rows in, and scores,
-        grants and accounting out. It <b>never carries the downlink itself</b>. The contact window is a byte budget
-        the ground keeps, scaled down so one pass holds a handful of photos instead of tens of thousands.</div>
-    </section>
-
-    <section class="plate" id="d-health">
-      <h2><span class="n">Table 3</span> <span class="thin">Is the link behaving? One column per satellite</span></h2>
-      <div class="scroll"><table>
-        <thead><tr id="t-health-head"></tr></thead>
-        <tbody id="t-health"></tbody>
-      </table></div>
-      <div class="caption">These are counted live, board or no board. Every score a satellite reports is
-        re-computed on the ground from the same photo, so <b>disagreements with the model</b> is the row that
-        proves the two are doing the same arithmetic. It should read zero.</div>
-    </section>
-
-    <section class="plate" id="d-log">
-      <h2>Message log <span class="thin">every message between the ground and the satellites, newest last</span></h2>
-      <div class="log" id="log"></div>
-    </section>
+  <section class="panel wide">
+    <h2>Arbitration — one row per granted slot (click a row for every candidate's terms)</h2>
+    <div id="arb" class="muted">no decisions yet</div>
   </section>
 
-  <!-- ── SHEET 3 · SCALING ──────────────────────────────────────────── -->
-  <section class="sheet" id="sheet-scaling" role="tabpanel" aria-labelledby="tab-scaling">
-    <section class="plate" id="s-lede">
-      <h2>What happens when the sky gets crowded
-        <button class="btn" id="sweep" style="margin-left:auto">Run the test</button></h2>
-      <div class="sweeprun" id="s-run" hidden>
-        <div class="track"><i id="s-bar"></i></div>
-        <div class="runline"><span id="s-runtext"></span><span id="s-runelapsed" class="num"></span></div>
-      </div>
-      <div class="stats" id="s-stats"></div>
-      <div class="caption" id="s-note"></div>
-    </section>
-
-    <section class="plate" id="s-chart">
-      <h2><span class="n">Fig 4</span> <span class="thin">Photos taken, and photos that actually got home</span></h2>
-      <div class="chartbox" id="sweepbox">
-        <svg id="sweepchart" aria-label="Photos taken and photos sent home, against the number of satellites"></svg>
-        <div class="tip" id="sweeptip"></div>
-      </div>
-      <div class="key" style="margin-top:8px">
-        <span><i class="pencil"></i> Photos taken by the fleet</span>
-        <span><i></i> Photos sent home</span>
-        <span><i class="dot" style="background:var(--amber)"></i> the window fills here</span>
-      </div>
-      <div class="caption">The window does not grow. Everything in the shaded gap is imagery that
-        was captured and never left orbit.</div>
-    </section>
-
-    <section class="plate" id="s-quality">
-      <h2><span class="n">Fig 5</span> <span class="thin">How good the photos that got home were</span></h2>
-      <div class="chartbox" id="qualbox">
-        <svg id="qualchart" aria-label="Average score of the photos delivered, Orbit against the baseline"></svg>
-        <div class="tip" id="qualtip"></div>
-      </div>
-      <div class="key" style="margin-top:8px">
-        <span><i></i> Orbit: best photos first</span>
-        <span><i class="pencil"></i> Baseline: oldest photos first</span>
-      </div>
-      <div class="caption">Same window, same airtime, every fleet size. The more there is to choose
-        from, the better Orbit's choices get, and the baseline's do not move.</div>
-    </section>
-
-    <section class="plate" id="s-table">
-      <h2><span class="n">Table 3</span> <span class="thin">The same runs, as numbers</span></h2>
-      <div class="scroll"><table>
-        <thead><tr><th class="num">Satellites</th><th class="num">Photos taken</th><th class="num">Sent home</th>
-          <th class="num">Never sent</th><th class="num">Share sent</th>
-          <th class="num">Orbit points</th><th class="num">Baseline points</th><th class="num">Gain</th></tr></thead>
-        <tbody id="t-scaling"><tr><td colspan="8" style="color:var(--ink-2)">Not run yet.</td></tr></tbody>
-      </table></div>
-      <div class="caption" id="s-table-note"></div>
-    </section>
+  <section class="panel">
+    <h2>Events</h2>
+    <div class="feed" id="feed"></div>
   </section>
-</section>
+  <section class="panel wide">
+    <h2>Bus log <span class="muted" style="text-transform:none;letter-spacing:0">← from a satellite · → from the ground</span></h2>
+    <div class="log" id="log"></div>
+  </section>
 </div>
 
 <script>
-'use strict';
 const $ = id => document.getElementById(id);
-const U16 = 65535;
-const pct = v => v == null ? null : v * 100 / U16;
-const d1 = v => v == null ? '—' : v.toFixed(1);
-const num = v => v == null ? '—' : Number(v).toLocaleString('en-US');
-const pad4 = id => String(id).padStart(4, '0');
-const frameSrc = id => `/corpus/${pad4(id)}.png`;
-const scene = name => (name || '').replace(/_/g, ' ');
+const COLORS = ['var(--c0)','var(--c1)','var(--c2)','var(--c3)','var(--c4)','var(--c5)','var(--c6)','var(--c7)'];
+const FEED_KINDS = new Set(['revoke','tx_failed','eviction','no_bids','window_closed','sat_seen','late_bid','unexpected_tx']);
+const STALE_S = 5, ARB_ROWS = 30, FEED_ROWS = 80, BUS_ROWS = 100;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f1 = v => (typeof v === 'number') ? v.toFixed(1) : '—';
+const f2 = v => (typeof v === 'number') ? v.toFixed(2) : '—';
+const fmt = v => (typeof v === 'number') ? v.toLocaleString() : '—';
+const has = v => v !== undefined && v !== null;
 
-/* Plain names for everything the server calls by its internal name. The precise
-   term still appears where a judge would look for it; it never leads. */
-const SCENARIOS = {
-  nominal:          ['Even match',            'Both satellites see a comparable mix of photos.'],
-  lead_change:      ['Lead changes hands',    'Satellite 1 starts with its best photos, runs out, and satellite 2 takes over.'],
-  starvation:       ['One satellite hogs it', 'Satellite 2 always holds better photos. Watch fairness force a switch.'],
-  filtered_vs_fifo: ['Long run',              'Twice the passes. The clearest version of the chart.'],
-  scaling:          ['Crowded sky',           'Same run, but built for adding more satellites.'],
-};
-const PHASES = {
-  setup:  ['Starting up',            false],
-  ingest: ['Taking photos',          false],
-  window: ['In range, sending now', true],
-  idle:   ['Run complete',           false],
-};
+// The page is a view of the server's state: everything below arrives on the socket or from /api/state.
+let S = { snapshot:null, decisions:[], recent:[], bus:[], flags:{}, rates:null, telemetry_stats:null, bus_stats:null, stats:{} };
+let lastRxWall = null, wsState = 'connecting', dirty = true, backoff = 500;
+// Watchdog. The ground heartbeats to the laptop — a snapshot, flags, bus and telemetry stats every
+// second — so silence means a crash, not a quiet pass. Staleness is measured on *this* clock: a
+// timestamp the ground stamped cannot tell us the ground stopped stamping. liveSince covers the case
+// where the socket is up and nothing has ever arrived, and the check only runs while the socket is
+// live, so a display-server outage is never reported as a dead ground.
+let liveSince = null, groundDown = false;
+const satColor = {}, expanded = new Set();
+const colorOf = h => { if (!(h in satColor)) satColor[h] = COLORS[Object.keys(satColor).length % COLORS.length]; return satColor[h]; };
 
-let ws = null, snap = null, prevSlots = 0, booted = false;
-const sats = [];                                   // satellite strip elements, by index
-const lanes = [];                                  // slot-ledger lane elements, by index
+function adopt(state) {
+  S = { ...S, snapshot: state.snapshot, decisions: state.decisions || [], recent: state.recent_events || [],
+        bus: state.bus || [], flags: state.flags || {}, rates: state.rates, telemetry_stats: state.telemetry_stats,
+        bus_stats: state.bus_stats, stats: state.stats || {} };
+  if (has(S.stats.age_s)) lastRxWall = Date.now() - S.stats.age_s * 1000;
+  dirty = true;
+}
 
-function send(cmd, value) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ cmd, value })); }
+function applyPush(m) {
+  const e = m.event; if (!e) return;
+  lastRxWall = Date.now();
+  if (m.reset) { S.decisions = []; S.snapshot = null; S.flags = {}; expanded.clear(); }
+  if (m.decisions) S.decisions = m.decisions;
+  if (m.rates) S.rates = m.rates;
+  switch (e.kind) {
+    case 'snapshot': if (!S.snapshot || m.reset || (e.t ?? 0) >= (S.snapshot.t ?? 0)) S.snapshot = e; break;
+    case 'flags': if (e.sats) S.flags = e.sats; break;
+    case 'telemetry_stats': S.telemetry_stats = e; break;
+    case 'bus_stats': S.bus_stats = e; break;
+    case 'bus': pushBus(e); break;
+  }
+  if (e.kind !== 'bus' || e.type !== 'tx_chunk') { S.recent.push(e); if (S.recent.length > 200) S.recent.shift(); }
+  dirty = true;
+}
 
+function pushBus(e) {
+  if (e.type === 'tx_chunk') {  // heartbeats interleave with chunks; still one line per item
+    for (const prev of S.bus.slice(-8)) {
+      if (prev.type === 'tx_chunk' && prev.from === e.from && prev.item_id === e.item_id) { prev.count = (prev.count || 1) + 1; prev.t = e.t; return; }
+    }
+  }
+  S.bus.push(e.type === 'tx_chunk' ? { ...e, count: 1 } : e);
+  if (S.bus.length > BUS_ROWS) S.bus.shift();
+}
+
+// --- transport: auto-reconnect with backoff; the page never asks the ground for anything ---------
 function connect() {
-  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
-  ws.onopen = () => $('offline').removeAttribute('data-show');
-  ws.onmessage = e => {
-    const m = JSON.parse(e.data);
-    if (m.type === 'snapshot') { snap = m; render(m); }
-  };
-  ws.onclose = () => { $('offline').setAttribute('data-show', ''); setTimeout(connect, 1000); };
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  // lastRxWall is cleared on connect: the age of an event from *before* the outage says nothing about
+  // the ground now, and adopt() restores it from the state message that arrives within milliseconds.
+  ws.onopen = () => { wsState = 'live'; liveSince = Date.now(); lastRxWall = null; backoff = 500; dirty = true; };
+  ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.type === 'state') adopt(m); else applyPush(m); };
+  ws.onclose = () => { wsState = 'reconnecting'; liveSince = null; dirty = true; setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 8000); };
   ws.onerror = () => ws.close();
 }
-
-/* ── controls ──────────────────────────────────────────────────────────── */
-$('play').onclick = () => send('play');
-$('pause').onclick = () => send('pause');
-$('step').onclick = () => send('step');
-$('speed').oninput = e => { $('speedv').textContent = (+e.target.value) + '×'; send('speed', +e.target.value); };
-$('starv').onchange = e => send('starvation', +e.target.value);
-$('simn').onchange = e => send('sim_nodes', +e.target.value);
-$('scenario').onchange = e => { send('scenario', e.target.value); hintFor(e.target.value); };
-$('sweep').onclick = () => send('scaling_sweep');
-
-function hintFor(k) { $('scenario-hint').textContent = (SCENARIOS[k] || ['', ''])[1] || ''; }
-
-document.querySelectorAll('.sheets [role=tab]').forEach(b => b.onclick = () => showSheet(b.dataset.sheet));
-function showSheet(name) {
-  document.querySelectorAll('.sheets [role=tab]').forEach(b =>
-    b.setAttribute('aria-selected', String(b.dataset.sheet === name)));
-  document.querySelectorAll('.sheet').forEach(s => {
-    if (s.id === 'sheet-' + name) s.setAttribute('data-active', ''); else s.removeAttribute('data-active');
-  });
-  if (snap) render(snap);
-}
-
-const THEME_KEY = 'orbit-theme';
-function applyTheme(t) {
-  if (t) document.documentElement.setAttribute('data-theme', t);
-  else document.documentElement.removeAttribute('data-theme');
-  const dark = t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches);
-  $('theme').textContent = dark ? 'Light' : 'Dark';
-  if (snap) render(snap);
-}
-$('theme').onclick = () => {
-  const dark = document.documentElement.getAttribute('data-theme') === 'dark' ||
-    (!document.documentElement.hasAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
-  const next = dark ? 'light' : 'dark';
-  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private window */ }
-  applyTheme(next);
-};
-try { applyTheme(localStorage.getItem(THEME_KEY)); } catch (e) { applyTheme(null); }
-
-addEventListener('keydown', e => {
-  if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
-  if (e.key === ' ') { e.preventDefault(); send(snap && snap.paused ? 'play' : 'pause'); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); send('step'); }
-  else if (e.key === '1') showSheet('live');
-  else if (e.key === '2') showSheet('device');
-  else if (e.key === '3') showSheet('scaling');
-});
-
-/* ── render ────────────────────────────────────────────────────────────── */
-function render(s) {
-  booted = true;
-  renderRail(s);
-  renderConditions(s);
-  const live = $('sheet-live').hasAttribute('data-active');
-  if (live) { renderHeadline(s); renderCompare(s); renderWindow(s); renderLanes(s); renderSats(s); }
-  if ($('sheet-device').hasAttribute('data-active')) renderDevice(s);
-  if ($('sheet-scaling').hasAttribute('data-active')) renderScaling(s);
-  prevSlots = s.n_slots;
-}
-
-function renderRail(s) {
-  const sel = $('scenario');
-  if (sel.options.length !== Object.keys(s.scenarios).length) {
-    sel.innerHTML = Object.keys(s.scenarios)
-      .map(k => `<option value="${k}">${(SCENARIOS[k] || [k])[0]}</option>`).join('');
-  }
-  if (document.activeElement !== sel) { sel.value = s.scenario; hintFor(s.scenario); }
-  if (document.activeElement !== $('speed')) { $('speed').value = s.speed; $('speedv').textContent = s.speed + '×'; }
-  if (document.activeElement !== $('starv')) $('starv').value = s.starvation_n;
-  // A satellite's winning streak resets when a window opens, so a threshold at or
-  // above the slots in a window can never be reached. Say so rather than letting
-  // the knob look live while doing nothing.
-  const warn = $('starv-warn'), dead = s.starvation_n >= s.window.slots_total;
-  warn.hidden = !dead;
-  if (dead) warn.textContent = `never fires: a pass only grants ${s.window.slots_total}`;
-  if (document.activeElement !== $('simn')) $('simn').value = s.sim_extra;
-  $('play').setAttribute('aria-pressed', String(!s.paused && !s.done));
-  $('pause').setAttribute('aria-pressed', String(s.paused));
-  $('play').disabled = s.done;
-  $('step').disabled = s.done;
-}
-
-function renderConditions(s) {
-  const p = s.provenance, phys = s.physical_nodes.length, sim = s.nodes.length - phys;
-  const mm = s.nodes.reduce((a, n) => a + n.mismatches, 0);
-  const parts = [
-    ['Satellites', phys ? `<b>${phys} real board${phys > 1 ? 's' : ''}</b>${sim ? ` + ${sim} simulated` : ''}`
-                        : `<b style="color:var(--amber)">${sim} simulated</b> <span style="color:var(--amber)">(no boards connected)</span>`],
-    ['Photos', `<b>${p.frames} real NASA satellite photos</b> (MODIS, ${p.synthetic ? 'SYNTHETIC' : 'nothing made up'})`],
-    ['Contact window', s.window.scaled ? '<b style="color:var(--amber)">scaled down for the demo</b>' : '<b>unscaled</b>'],
-    // With no board on the wire there is nothing to compare, so this must not
-    // claim agreement it never checked.
-    ['Board vs model', !phys ? '<b style="color:var(--amber)">no board connected, not checked</b>'
-      : mm ? `<b style="color:var(--red)">${mm} disagreements</b>`
-           : '<b style="color:var(--green)">agrees exactly</b>'],
-  ];
-  const html = '<span class="k">Conditions</span>' +
-    parts.map(([k, v]) => `<span>${k} ${v}</span>`).join('');
-  if ($('conditions').innerHTML !== html) $('conditions').innerHTML = html;
-}
-
-/* ── Fig 1 — the headline ──────────────────────────────────────────────── */
-function renderHeadline(s) {
-  const f = s.value.filtered, q = s.value.fifo;
-  const gain = q ? f / q : null;
-  $('gain').textContent = gain ? (gain >= 1 ? '+' : '') + Math.round((gain - 1) * 100) + '%' : '—';
-  $('gain-say').innerHTML = gain
-    ? 'more useful imagery reaches the ground, through <b>exactly the same contact window</b>.'
-    : 'Nothing has been sent yet. Press <b>Play</b>.';
-  $('gain-tot').textContent = gain
-    ? `Orbit ${num(Math.round(f / 655.35))} points · baseline ${num(Math.round(q / 655.35))} points · every photo is worth up to 100`
-    : '';
-  const phys = s.physical_nodes.length, src = $('gain-src');
-  src.textContent = phys ? `${phys} real board${phys > 1 ? 's' : ''}` : 'simulated run';
-  src.className = 'chip ' + (phys ? 'hw' : 'sim');
-  $('chartnote').textContent = s.n_slots
-    ? `${s.n_slots} photo${s.n_slots > 1 ? 's' : ''} sent` +
-      (s.value.fifo_dropped ? ` · the baseline discarded ${s.value.fifo_dropped} it had no room for` : '')
-    : '';
-  drawChart(s);
-}
-
-/* ── Fig 2 — the two photos ────────────────────────────────────────────────
-   A .shot is an empty sunken plate until a real corpus frame exists for it;
-   the image element is created the moment there is something to put in it, so
-   the page never holds a picture with nothing behind it. */
-function setShot(shot, frameId, alt) {
-  let img = shot.firstElementChild;
-  if (frameId == null) { if (img) shot.removeChild(img); return; }
-  if (!img) { img = document.createElement('img'); shot.appendChild(img); }
-  const src = frameSrc(frameId);
-  if (!img.getAttribute('src') || !img.src.endsWith(src)) img.setAttribute('src', src);
-  img.alt = alt || '';
-}
-function renderCompare(s) {
-  const last = s.slots.length ? s.slots[s.slots.length - 1] : null;
-  if (!last) {
-    setShot($('cmp-a'), null); setShot($('cmp-b'), null);
-    $('cmp-a-sc').innerHTML = '—<small> / 100</small>'; $('cmp-b-sc').innerHTML = '—<small> / 100</small>';
-    $('cmp-a-meta').textContent = 'waiting for the first send slot';
-    $('cmp-b-meta').textContent = 'same slot, same airtime';
-    return;
-  }
-  setShot($('cmp-a'), last.frame_id, `Photo ${last.frame_id}, the one Orbit chose to send`);
-  $('cmp-a-sc').innerHTML = `${d1(last.display)}<small> / 100</small>`;
-  $('cmp-a-meta').textContent = `photo ${last.frame_id} · from satellite ${last.node + 1}`;
-  const fq = last.fifo;
-  if (fq) {
-    setShot($('cmp-b'), fq.frame_id, `Photo ${fq.frame_id}, the one the baseline would have sent instead`);
-    $('cmp-b-sc').innerHTML = `${d1(fq.display)}<small> / 100</small>`;
-    $('cmp-b-meta').textContent = `photo ${fq.frame_id} · from satellite ${fq.node + 1}`;
-  } else {
-    setShot($('cmp-b'), null);
-    $('cmp-b-sc').innerHTML = '—<small> / 100</small>';
-    $('cmp-b-meta').textContent = 'the baseline had nothing left to send';
-  }
-}
-
-/* ── where the run is ──────────────────────────────────────────────────── */
-function renderWindow(s) {
-  const w = s.window, open = s.phase === 'window' && !s.done;
-  $('passno').innerHTML = s.pass_idx < 0
-    ? `<small>starting up</small>`
-    : `Pass ${s.pass_idx + 1} <small>of ${s.n_passes}</small>`;
-  const [text, isLive] = PHASES[s.done ? 'idle' : s.phase] || ['—', false];
-  $('phase-t').textContent = s.paused && !s.done ? text + ' · paused' : text;
-  if (isLive && !s.paused) $('phase').setAttribute('data-live', ''); else $('phase').removeAttribute('data-live');
-
-  // Between passes the satellites are photographing and no window is open, so the
-  // meter shows the window that is coming rather than the one that just closed.
-  const between = !open && !s.done && (s.phase === 'ingest' || s.phase === 'setup');
-  const total = Math.max(1, w.slots_total);
-  const track = $('wtrack');
-  if (track.children.length !== total) {
-    track.innerHTML = '';
-    for (let i = 0; i < total; i++) track.appendChild(document.createElement('i'));
-  }
-  [...track.children].forEach((c, i) => {
-    const used = !between && i < w.slots_used;
-    const now = open && i === w.slots_used;
-    used ? c.setAttribute('data-used', '') : c.removeAttribute('data-used');
-    now ? c.setAttribute('data-now', '') : c.removeAttribute('data-now');
-  });
-  $('wcap').innerHTML = between
-    ? `next window: <b>${w.slots_total}</b> send slots`
-    : `<b>${w.slots_used}</b> of ${w.slots_total} send slots used`;
-  $('wcap2').innerHTML = open ? `<b>${w.slots_remaining}</b> left this pass` : '';
-
-  const kv = [
-    ['Photos taken this pass', `${s.frames_per_pass} each`],
-    ['Fairness switches', `${s.starvation_switches}`],
-  ];
-  const html = kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-  if ($('wkv').innerHTML !== html) $('wkv').innerHTML = html;
-  // Two short lines rather than a paragraph: this plate is the tightest on the
-  // sheet and the scaled-window admission must never be the thing that gets cut.
-  $('wcaption').innerHTML = `A <b>pass</b> is one flyover of a ground station.` +
-    (w.scaled ? `<br><span style="color:var(--amber)"><b>Scaled for the demo:</b> ${w.slots_total} photos a pass,
-      not ${num(Math.floor(s.params.WINDOW_DURATION_S * s.params.LINK_RATE_BPS / 8 / s.params.FRAME_BYTES))}.</span>` : '');
-}
-
-/* ── Fig 3 — the slot ledger ───────────────────────────────────────────── */
-const LEDGER_MAX = 48;
-function renderLanes(s) {
-  const wrap = $('lanes'), n = s.nodes.length;
-  while (lanes.length > n) { wrap.removeChild(lanes.pop().row); }
-  while (lanes.length < n) {
-    const row = document.createElement('div'); row.className = 'lane';
-    const name = document.createElement('span'); name.className = 'name';
-    const cells = document.createElement('div'); cells.className = 'cells';
-    row.append(name, cells); wrap.appendChild(row);
-    lanes.push({ row, name, cells, blocks: [] });
-  }
-  wrap.style.setProperty('--lane-h', n > 6 ? '11px' : n > 3 ? '14px' : '17px');
-  n > 3 ? wrap.setAttribute('data-many', '') : wrap.removeAttribute('data-many');
-  const shown = s.slots.slice(-LEDGER_MAX);
-  const firstShown = s.n_slots - shown.length;
-  const grew = s.n_slots > prevSlots;
-  lanes.forEach((L, i) => {
-    L.name.textContent = `Satellite ${i + 1}`;
-    while (L.blocks.length > shown.length) L.cells.removeChild(L.blocks.pop());
-    while (L.blocks.length < shown.length) { const b = document.createElement('b'); L.cells.appendChild(b); L.blocks.push(b); }
-    shown.forEach((t, k) => {
-      const b = L.blocks[k], won = t.node === i, forced = won && t.reason === 'starvation';
-      won ? b.setAttribute('data-won', '') : b.removeAttribute('data-won');
-      forced ? b.setAttribute('data-forced', '') : b.removeAttribute('data-forced');
-      const isLast = k === shown.length - 1;
-      (won && isLast && s.phase === 'window' && !s.done) ? b.setAttribute('data-live', '') : b.removeAttribute('data-live');
-      if (won && isLast && grew) { b.removeAttribute('data-new'); void b.offsetWidth; b.setAttribute('data-new', ''); }
-      b.title = `Slot ${t.slot_id} · satellite ${t.node + 1} sent photo ${t.frame_id} scoring ${d1(t.display)}` +
-        (forced ? ' · fairness forced this switch' : '');
-    });
-  });
-  $('slot-from').textContent = s.n_slots ? `slot ${firstShown + 1}` : 'no slots granted yet';
-  $('slot-to').textContent = s.n_slots ? `slot ${s.n_slots}` : '';
-
-  // Why the last slot went where it did, in a sentence. This is the whole
-  // arbitration rule; a judge should not have to be told it out loud.
-  const a = s.arbitration;
-  if (!a || a.winner == null) {
-    $('why').innerHTML = s.n_slots
-      ? 'No satellite has anything left to send.'
-      : 'Before every slot the ground asks each satellite for its best score, and gives the slot to the highest.';
-  } else {
-    const offers = a.candidates.map(c =>
-      `satellite ${c.node + 1} offered <b>${c.has_data ? d1(pct(c.top_score)) : 'nothing'}</b>`).join(', ');
-    $('why').innerHTML = a.reason === 'starvation'
-      ? `Last slot: ${offers}. Satellite ${a.runner_up + 1} had won ${s.starvation_n} in a row, so
-         <b style="color:var(--red)">fairness handed the slot to satellite ${a.winner + 1}</b> instead.`
-      : `Last slot: ${offers}. <b>Satellite ${a.winner + 1} won</b> on the highest score.
-         It has now sent that photo, so next time it offers a different one.`;
-  }
-}
-
-/* ── satellite strips ──────────────────────────────────────────────────── */
-const QUEUE_ROWS = 6, SENT_MAX = 8;
-function buildSat() {
-  const el = document.createElement('section');
-  el.className = 'plate sat';
-  el.innerHTML = `
-    <div class="head">
-      <span class="n"></span><span class="chip kind"></span><span class="chip plain state"></span>
-      <span class="chip bad warn" hidden></span><span class="chip solid sending" hidden>Sending now</span>
-    </div>
-    <div class="now">
-      <div class="shot"></div>
-      <div class="meta"></div>
-    </div>
-    <div class="body">
-      <div class="barswrap">
-        <div class="micro">Score of the photo it just took</div>
-        <div class="bars"></div>
-        <div class="triplet"></div>
-      </div>
-      <div class="qwrap" style="min-height:0">
-        <div class="qline"><span class="micro">Waiting to be sent</span> <span class="qdetail"></span></div>
-        <div class="queue"></div>
-      </div>
-      <div class="sentwrap">
-        <div class="micro">Already sent home</div>
-        <div class="sentrow"></div>
-        <div class="none" hidden>Nothing yet: it keeps losing the slot.</div>
-      </div>
-    </div>`;
-  const bars = el.querySelector('.bars');
-  const overall = document.createElement('div'); overall.className = 'bar'; overall.dataset.k = 'score';
-  overall.innerHTML = `<span class="t">Worth sending</span><span class="track"><i></i></span><span class="v">—</span>`;
-  bars.appendChild(overall);
-  const trip = el.querySelector('.triplet');
-  [['Cloud-free', 'clear'], ['Detail', 'sharp'], ['New', 'change']].forEach(([t, k]) => {
-    const m = document.createElement('div'); m.className = 'm'; m.dataset.k = k;
-    m.innerHTML = `<span class="t">${t}</span><span class="track"><i></i></span><span class="v">—</span>`;
-    trip.appendChild(m);
-  });
-  const q = el.querySelector('.queue');
-  for (let i = 0; i < QUEUE_ROWS; i++) {
-    const r = document.createElement('div'); r.className = 'qrow';
-    r.innerHTML = `<span class="track"><i></i></span><span class="v">—</span><span class="id"></span>`;
-    q.appendChild(r);
-  }
-  const sr = el.querySelector('.sentrow');
-  for (let i = 0; i < SENT_MAX; i++) {
-    const f = document.createElement('figure');
-    f.innerHTML = `<span class="shot"></span><figcaption></figcaption>`;
-    sr.appendChild(f);
-  }
-  return el;
-}
-
-function renderSats(s) {
-  const wrap = $('sats'), n = s.nodes.length;
-  const compact = n > 3;
-  compact ? wrap.setAttribute('data-compact', '') : wrap.removeAttribute('data-compact');
-  // A strip needs about 330px to keep its labels readable; below that, fewer columns.
-  const fits = Math.max(1, Math.floor((wrap.clientWidth || 1200) / 330));
-  const cols = compact ? 1 : Math.max(1, Math.min(n, 3, fits));
-  wrap.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-  while (sats.length > n) wrap.removeChild(sats.pop());
-  while (sats.length < n) { const el = buildSat(); wrap.appendChild(el); sats.push(el); }
-
-  const lastSlot = s.slots.length ? s.slots[s.slots.length - 1] : null;
-  const sendingNow = (s.phase === 'window' && !s.done && !s.paused && lastSlot) ? lastSlot.node : -1;
-
-  s.nodes.forEach((nd, i) => {
-    const el = sats[i], q = sel => el.querySelector(sel);
-    q('.n').textContent = `Satellite ${i + 1}`;
-    const kind = q('.kind');
-    kind.textContent = nd.simulated ? 'Simulated' : 'Real board';
-    kind.className = 'chip kind ' + (nd.simulated ? 'sim' : 'hw');
-    q('.state').textContent = nd.state === 'SCORING' ? 'Scoring a photo' : nd.state === 'IDLE' ? 'Not scoring' :
-      nd.state === 'BENCH' ? 'Benchmarking' : 'No contact';
-    const warn = q('.warn');
-    const issue = !nd.link_ok ? 'No link' : nd.mismatches ? `${nd.mismatches} disagreements with the model` : '';
-    warn.textContent = issue; warn.hidden = !issue;
-    q('.sending').hidden = sendingNow !== i;
-
-    const lc = nd.last_capture;
-    setShot(q('.now .shot'), lc ? lc.frame_id : null,
-      lc ? `Photo ${lc.frame_id} of ${scene(lc.scene)}, the most recent one this satellite scored` : '');
-    q('.now .meta').textContent = lc ? `photo ${lc.frame_id} · ${scene(lc.scene)}` : 'no photo yet';
-
-    const comp = nd.scored.length ? nd.scored[nd.scored.length - 1] : null;
-    el.querySelectorAll('.bar, .triplet .m').forEach(r => {
-      const v = comp ? pct(comp[r.dataset.k]) : null;
-      r.querySelector('i').style.transform = `scaleX(${(v == null ? 0 : v) / 100})`;
-      r.querySelector('.v').textContent = v == null ? '—' : v.toFixed(v < 100 ? 1 : 0);
-    });
-
-    q('.qdetail').textContent = `${nd.queue_depth ?? 0} of ${s.config.queue_limit} waiting` +
-      (nd.has_data ? ` · best ${d1(pct(nd.top_score))}` : '') +
-      (nd.evicted ? ` · ${nd.evicted} discarded when its queue filled` : '');
-    const rows = el.querySelectorAll('.qrow');
-    rows.forEach((r, k) => {
-      const item = nd.queue[k];
-      r.hidden = !item;
-      if (!item) return;
-      r.querySelector('i').style.transform = `scaleX(${Math.max(.02, pct(item.score) / 100)})`;
-      r.querySelector('.v').textContent = d1(pct(item.score));
-      r.querySelector('.id').textContent = '#' + item.frame_id;
-    });
-
-    const sent = nd.sent.slice(-SENT_MAX).reverse();
-    q('.sentwrap .none').hidden = sent.length > 0;
-    el.querySelectorAll('.sentrow figure').forEach((f, k) => {
-      const t = sent[k];
-      f.hidden = !t;
-      setShot(f.querySelector('.shot'), t ? t.frame_id : null, t ? `Photo ${t.frame_id}, already sent home` : '');
-      f.querySelector('figcaption').textContent = t ? d1(t.display) : '';
-    });
-  });
-}
-
-/* ── Fig 1 chart ───────────────────────────────────────────────────────── */
-let chartPts = [], chartGeom = null;
-function drawChart(s) {
-  const box = $('chartbox'), svg = $('chart');
-  // viewBox === the box's own pixel size, so one SVG unit is one CSS pixel and
-  // nothing is scaled: no stretched axis text, no letterboxing.
-  const W = Math.max(240, box.clientWidth), H = Math.max(90, box.clientHeight);
-  const L = 52, R = 16, T = 16, B = 24;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-
-  const pts = s.slots.map((t, k) => ({
-    x: s.n_slots - s.slots.length + k + 1,
-    f: t.value_filtered / 655.35, q: t.value_fifo / 655.35,
-    node: t.node, frame: t.frame_id, score: t.display, reason: t.reason,
-  }));
-  chartPts = pts;
-  if (!pts.length) {
-    svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">Nothing sent yet. The curves start at the first send slot.</text>`;
-    chartGeom = null; return;
-  }
-  const { max: maxY, step: stepY, ticks: nY, label: kY } = niceScale(Math.max(...pts.map(p => Math.max(p.f, p.q))));
-  const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
-  const sx = x => L + (x1 > x0 ? (x - x0) / (x1 - x0) : .5) * (W - L - R);
-  const sy = y => T + (1 - y / maxY) * (H - T - B);
-  chartGeom = { sx, sy, x0, x1, L, R, T, B, W, H };
-
-  const g = [];
-  for (let k = 0; k <= nY; k += kY) {
-    const v = stepY * k, y = sy(v);
-    g.push(`<line x1="${L}" x2="${W - R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--rule-soft)" stroke-width="1"/>`);
-    g.push(`<text x="${L - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${num(v)}</text>`);
-  }
-  g.push(`<line x1="${L}" x2="${W - R}" y1="${sy(0).toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="var(--rule)" stroke-width="1"/>`);
-  g.push(`<text x="${L}" y="${H - 7}">first slot</text>`);
-  g.push(`<text x="${W - R}" y="${H - 7}" text-anchor="end">slot ${x1}</text>`);
-  g.push(`<text x="${L}" y="${T - 4}">points delivered</text>`);
-
-  const line = key => pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.x).toFixed(1)},${sy(p[key]).toFixed(1)}`).join(' ');
-  const gap = line('f') + ' ' + pts.slice().reverse().map(p => `L${sx(p.x).toFixed(1)},${sy(p.q).toFixed(1)}`).join(' ') + ' Z';
-  g.push(`<path d="${gap}" fill="var(--blue-wash)" stroke="none"/>`);
-  g.push(`<path d="${line('q')}" fill="none" stroke="var(--pencil)" stroke-width="2" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"/>`);
-  g.push(`<path d="${line('f')}" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`);
-
-  const last = pts[pts.length - 1];
-  g.push(`<circle cx="${sx(last.x).toFixed(1)}" cy="${sy(last.f).toFixed(1)}" r="4.5" fill="var(--blue)" stroke="var(--plate)" stroke-width="2"/>`);
-  g.push(`<circle cx="${sx(last.x).toFixed(1)}" cy="${sy(last.q).toFixed(1)}" r="4.5" fill="var(--pencil)" stroke="var(--plate)" stroke-width="2"/>`);
-
-  // Direct labels on the two ends, nudged apart only when they would collide.
-  const yf = sy(last.f), yq = sy(last.q), room = Math.abs(yf - yq) > 15;
-  g.push(`<text class="lbl" x="${(sx(last.x) - 8).toFixed(1)}" y="${(yf - 9).toFixed(1)}" text-anchor="end" fill="var(--blue)">Orbit ${num(Math.round(last.f))}</text>`);
-  g.push(`<text class="lbl" x="${(sx(last.x) - 8).toFixed(1)}" y="${(room ? yq + 15 : yq + 22).toFixed(1)}" text-anchor="end" fill="var(--pencil)">Baseline ${num(Math.round(last.q))}</text>`);
-
-  g.push(`<rect id="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>`);
-  svg.innerHTML = g.join('');
-}
-/* Every gridline label must be a number a person would write down, AND the axis
-   must not tower over the data: a fifth of the plot left empty flattens the very
-   gap Fig 1 exists to show. So: try the round steps, keep the one that clears the
-   peak with the least headroom, then label every kth line so the labels breathe
-   even when the step is fine. */
-function niceScale(peak) {
-  if (!(peak > 0)) return { max: 1, step: 1, ticks: 1, label: 1 };
-  const p = Math.pow(10, Math.floor(Math.log10(peak)));
-  let best = null;
-  for (const m of [0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5]) {
-    const step = m * p, ticks = Math.round(Math.ceil(peak / step - 1e-9));
-    if (ticks < 3 || ticks > 7) continue;
-    const head = step * ticks - peak;
-    if (!best || head < best.head) best = { max: step * ticks, step, ticks, head };
-  }
-  if (!best) { const step = p, ticks = Math.max(1, Math.ceil(peak / step)); best = { max: step * ticks, step, ticks }; }
-  best.label = Math.ceil(best.ticks / 4);          // draw a line every `label` steps
-  return best;
-}
-
-/* crosshair + tooltip: values are also on the axis and in the direct labels */
-(function hover() {
-  const box = $('chartbox'), tip = $('tip');
-  box.addEventListener('pointermove', e => {
-    if (!chartGeom || !chartPts.length) return;
-    const r = box.getBoundingClientRect(), mx = e.clientX - r.left;
-    let best = chartPts[0], bd = Infinity;
-    for (const p of chartPts) { const d = Math.abs(chartGeom.sx(p.x) - mx); if (d < bd) { bd = d; best = p; } }
-    tip.innerHTML = `<b>Slot ${best.x}</b> · satellite ${best.node + 1} sent photo ${best.frame} scoring ${d1(best.score)}` +
-      `<br><span class="sw" style="background:var(--blue)"></span>Orbit ${num(Math.round(best.f))} points` +
-      `<br><span class="sw" style="background:var(--pencil)"></span>Baseline ${num(Math.round(best.q))} points`;
-    tip.style.left = Math.min(Math.max(chartGeom.sx(best.x), 100), r.width - 100) + 'px';
-    // the tooltip hangs above its point, so keep its own height inside the box
-    tip.style.top = Math.max(tip.offsetHeight + 6, chartGeom.sy(Math.max(best.f, best.q)) - 10) + 'px';
-    tip.style.opacity = 1;
-  });
-  box.addEventListener('pointerleave', () => tip.style.opacity = 0);
-})();
-
-/* ── Sheet 2 — hardware ────────────────────────────────────────────────── */
-const TBD = '<span class="tag e">not measured yet</span>';
-function row(what, value, unit, how) {
-  return `<tr><td>${what}</td><td class="num">${value}</td><td class="unit">${unit || ''}</td><td class="how">${how}</td></tr>`;
-}
-function renderDevice(s) {
-  const v = s.vivado || {}, b = s.bench, phys = s.physical_nodes.length;
-  const cycles = (s.nodes.find(n => n.status && n.status.cycles_last_frame) || { status: {} }).status.cycles_last_frame;
-  const u = v.utilization || {}, tm = v.timing || {}, pw = v.power_w || {};
-  const util = (r, what, unit) => v.measured && r && typeof r === 'object'
-    ? row(what, `${num(r.used)} <span class="unit">of ${num(r.available)}</span>`, unit, `<span class="tag m">measured</span> Vivado report`)
-    : row(what, TBD, unit, 'needs the Vivado build to run');
-
-  const eng = [
-    cycles
-      ? row('Clock cycles to score one photo', num(cycles), 'cycles', '<span class="tag m">measured</span> counter on the board')
-      : row('Clock cycles to score one photo', TBD, 'cycles', 'needs a board on the wire'),
-    cycles
-      ? row('Photos scored per second', num(Math.round(1e8 / cycles)), 'photos/s', '<span class="tag m">measured</span> at 100 MHz')
-      : row('Photos scored per second', `<span class="tag e">about ${num(Math.round(1e8 / (s.params.FRAME_BYTES / s.params.PIXELS_PER_CYCLE)))}</span>`,
-            'photos/s', `estimate at ${s.params.PIXELS_PER_CYCLE} pixels per clock, not measured`),
-    util(u.dsps, 'Multiplier blocks used <span class="unit">(the edge filter needs none)</span>', 'of 240'),
-    util(u.slice_luts, 'Logic cells used', 'of 63,400'),
-    util(u.bram_tiles, 'Memory blocks used', 'tiles'),
-    v.measured
-      ? row('Runs at the target 100 MHz', `<span class="tag ${tm.met ? 'm' : 'x'}">${tm.met ? 'yes' : 'NO'}</span>`, '', `slack ${tm.wns_ns} ns, Vivado timing report`)
-      : row('Runs at the target 100 MHz', TBD, '', 'needs the Vivado build to run'),
-    v.measured
-      ? row('Power drawn by the chip', pw.total, 'W', `<span class="tag e">estimate</span> ${pw.label} for the chip only, not the whole board`)
-      : row('Power drawn by the chip', TBD, 'W', 'needs the Vivado build to run'),
-  ];
-  if (b && b.entries && b.entries.length) {
-    for (const e of b.entries) eng.push(e.j_per_thousand == null
-      ? row(`Energy per 1000 photos, ${e.platform}`, TBD, 'J', 'run not taken yet')
-      : row(`Energy per 1000 photos, ${e.platform}`, e.j_per_thousand.toFixed(3), 'J',
-            `<span class="tag m">measured</span> ${e.provenance}, ${e.stamp || b.stamp}`));
-  } else {
-    eng.push(row('Energy per 1000 photos', TBD, 'J', 'no benchmark run recorded yet'));
-  }
-  setHTML($('t-engine'), eng.join(''));
-
-  const w = s.window;
-  setHTML($('t-link'), [
-    row('Laptop-to-board cable', `${num(Math.round(s.wire.tx_bps))} <span class="unit">down</span> · ${num(Math.round(s.wire.rx_bps))} <span class="unit">up</span>`,
-        'bits/s', `<span class="tag m">measured</span> live, line rate ${num(s.wire.baud)} baud`),
-    row('The cable carries', 'photo rows in, scores and grants out', '', 'never the downlink itself'),
-    row('Modelled downlink', num(Math.round(w.rate_bps)), 'bits/s', `<span class="tag e">modelled</span> ${w.duration_s} s per pass, enforced by counting bytes`),
-    row('Real downlink it stands for', num(s.params.LINK_RATE_BPS), 'bits/s',
-        `<span class="tag e">modelled</span> ${s.params.WINDOW_DURATION_S} s per pass = ${num(Math.floor(s.params.WINDOW_DURATION_S * s.params.LINK_RATE_BPS / 8 / s.params.FRAME_BYTES))} photos`),
-    row('One photo', `${s.params.FRAME_W}×${s.params.FRAME_H} grey, ${num(s.params.FRAME_BYTES)}`, 'bytes', 'committed NASA MODIS imagery'),
-    row('What stops a satellite sending', 'being out of range', '',
-        'not cloud. Cloud only lowers a photo’s score.'),
-  ].join(''));
-
-  // ── what is measured, what is waiting, and on what ──────────────────────
-  // Counted from the rows themselves rather than asserted, so the sheet cannot
-  // claim progress it does not have.
-  const tags = [...$('t-engine').querySelectorAll('.tag'), ...$('t-link').querySelectorAll('.tag')];
-  const measured = tags.filter(t => t.classList.contains('m')).length;
-  const waiting = tags.length - measured;
-  const needBoard = [...$('t-engine').querySelectorAll('td.how')].filter(c => /board/.test(c.textContent)).length;
-  const needVivado = [...$('t-engine').querySelectorAll('td.how')].filter(c => /Vivado/.test(c.textContent)).length;
-  const needBench = [...$('t-engine').querySelectorAll('td.how')].filter(c => /benchmark/.test(c.textContent)).length;
-  setHTML($('d-stats'), [
-    [`${measured}`, `figure${measured === 1 ? '' : 's'} on this sheet <b>measured</b> so far`],
-    [`${waiting}`, `still <b>waiting</b> on hardware nobody has run yet`],
-    [phys ? `${phys}` : 'None', phys ? `board${phys > 1 ? 's' : ''} on the wire right now` : 'No board is connected right now'],
-  ].map(([v, t]) => `<div class="s"><div class="v">${v}</div><div class="t">${t}</div></div>`).join(''));
-  $('d-state-note').innerHTML = (phys
-    ? `A board is on the wire, so the rows that need one are filling in live.`
-    : `Everything on this sheet that needs silicon says so. Nothing here is estimated into looking finished.`) +
-    ` What is outstanding: <b>${needBoard}</b> row${needBoard === 1 ? '' : 's'} need a board on the wire,
-      <b>${needVivado}</b> need the Vivado build to run on a Windows machine, and <b>${needBench}</b> needs an
-      energy benchmark. Until then the honest reading of this sheet is
-      <b class="tag e">not measured yet</b>, and Table 3 below is what can be checked today.`;
-
-  // ── Table 3: link health, per satellite, board or no board ───────────────
-  const H = [
-    ['Photos scored', n => n.status ? num(n.status.frames_scored) : '—'],
-    ['Photos sent home', n => num(n.frames_sent)],
-    ['Photo rows received', n => n.status ? num(n.status.rows_rx) : '—'],
-    ['Messages back to the ground', n => num(Object.values(n.rx_counts || {}).reduce((a, b2) => a + b2, 0))],
-    ['Checksum errors', n => n.status ? num(n.status.crc_errors) : '—'],
-    ['Malformed messages', n => n.status ? num(n.status.len_errors + n.status.unknown_type) : '—'],
-    ['Dropped because it was busy', n => n.status ? num(n.status.busy_drops) : '—'],
-    ['Replies that never came', n => num(n.timeouts)],
-    ['Disagreements with the model', n => num(n.mismatches)],
-  ];
-  setHTML($('t-health-head'), '<th>What</th>' + s.nodes.map((n, i) =>
-    `<th class="num">Satellite ${i + 1}<br><span class="tag ${n.simulated ? 'e' : 'm'}">${n.simulated ? 'simulated' : 'real board'}</span></th>`).join(''));
-  setHTML($('t-health'), H.map(([what, get]) => {
-    const vals = s.nodes.map(get);
-    const bad = /errors|Malformed|Disagreements|never came|busy/.test(what) && vals.some(v => v !== '—' && v !== '0');
-    return `<tr><td>${what}</td>` + vals.map(v =>
-      `<td class="num"${bad && v !== '0' && v !== '—' ? ' style="color:var(--red)"' : ''}>${v}</td>`).join('') + '</tr>';
-  }).join(''));
-
-  const fr = [...s.frames.notable_tx, ...s.frames.notable_rx].sort((a, b2) => a.t_ms - b2.t_ms).slice(-60);
-  const txt = fr.map(f => `${String(f.t_ms).padStart(8)}  ${f.way === 'tx' ? 'ground → sat' : 'sat → ground'} ${f.node + 1}  ${f.type.padEnd(12)} ` +
-    Object.entries(f).filter(([k]) => !['t_ms', 'way', 'node', 'type', 'hex', 'pixels'].includes(k)).map(([k, val]) => `${k}=${val}`).join(' ')).join('\n');
-  const log = $('log');
-  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 24;
-  if (log.textContent !== txt) { log.textContent = txt; if (atBottom) log.scrollTop = log.scrollHeight; }
-}
-function setHTML(el, html) { if (el.innerHTML !== html) el.innerHTML = html; }
-
-/* ── Sheet 3 — how far it scales ───────────────────────────────────────────
-   Three questions in order: how much gets home as the fleet grows, how good it
-   is, and the numbers behind both. The sweep publishes a row per fleet size as
-   it finishes, so everything here fills in while the run is still going. */
-let sweepRows = [], sweepGeom = null, qualGeom = null, sweepStarted = 0;
-
-function renderScaling(s) {
-  const sc = s.scaling, rows = sc.rows || [], running = sc.state === 'running';
-  $('sweep').disabled = running;
-  $('sweep').textContent = running ? 'Running…' : sc.state === 'done' ? 'Run it again' : 'Run the test';
-
-  // progress: the sweep takes the better part of a minute, so show it moving
-  const run = $('s-run');
-  run.hidden = !running;
-  if (running) {
-    if (!sweepStarted) sweepStarted = Date.now();
-    const done = sc.done_n || 0, total = sc.total_n || 12;
-    $('s-bar').style.transform = `scaleX(${done / total})`;
-    $('s-runtext').innerHTML = done
-      ? `Simulated a fleet of <b>${done}</b>. Now running <b>${Math.min(done + 1, total)} satellites</b>…`
-      : 'Starting the first run…';
-    $('s-runelapsed').textContent = `${((Date.now() - sweepStarted) / 1000).toFixed(0)} s`;
-  } else { sweepStarted = 0; }
-
-  sweepRows = rows;
-  drawSweep(); drawQual();
-
-  const last = rows.length ? rows[rows.length - 1] : null;
-  const cross = rows.find(r => r.window_full);
-  const gain = last && last.fifo ? last.filtered / last.fifo : null;
-
-  // the three numbers the sheet exists to deliver
-  setHTML($('s-stats'), !last ? '' : [
-    [num(last.captured), `photos the fleet took at <b>${last.n} satellite${last.n === 1 ? '' : 's'}</b>`],
-    [num(last.delivered_frames), `got home. The window carries <b>${num(last.capacity_frames)}</b>, however many satellites there are`],
-    [gain ? (gain >= 1 ? '+' : '') + Math.round((gain - 1) * 100) + '%' : '—',
-     gain && gain > 1.005 ? 'more useful imagery than sending the oldest first'
-                          : 'difference from sending the oldest first, while the window still has room'],
-  ].map(([v, t]) => `<div class="s"><div class="v">${v}</div><div class="t">${t}</div></div>`).join(''));
-
-  if (sc.state === 'error') {
-    $('s-note').innerHTML = `<b style="color:var(--red)">The test failed:</b> ${sc.note}`;
-  } else if (!rows.length) {
-    $('s-note').innerHTML = `Press <b>Run the test</b>. It simulates the whole system once per fleet size, from one
-      satellite up to twelve, giving every run the same contact window. Nothing here touches the live run on sheet 1.`;
-  } else if (cross) {
-    $('s-note').innerHTML = `Up to <b>${cross.n - 1} satellite${cross.n - 1 === 1 ? '' : 's'}</b> the window has room
-      for everything, so both policies send the same photos and the gain is exactly zero: <b>choosing only matters once
-      you cannot send everything</b>. From <b>${cross.n}</b> on, the window is full. The number that gets home stops
-      growing, the share that gets home collapses, and the gap between choosing well and not choosing keeps widening.`;
-  } else {
-    $('s-note').innerHTML = `So far the window still has room for everything the fleet takes, so both policies send the
-      same photos. Keep watching: the gain appears the moment the window fills.`;
-  }
-
-  const wnd = sc.window_slots_per_pass;
-  $('s-table-note').innerHTML = `Each row is one two-pass run at that fleet size. Every run shares one contact window of
-    <b>${wnd ? wnd * 2 : '—'} photos</b>${wnd ? ` (${wnd} a pass)` : ''}, which is wider than the live run's window on
-    sheet 1 — that one is <span style="color:var(--amber)">deliberately tight</span> so two satellites already contend.
-    A sweep against a window that is full from the first satellite has nothing to show.`;
-
-  setHTML($('t-scaling'), !rows.length
-    ? '<tr><td colspan="8" style="color:var(--ink-2)">Not run yet.</td></tr>'
-    : rows.map(r => `<tr${cross && r.n === cross.n ? ' data-mark' : ''}>
-      <td class="num">${r.n}</td><td class="num">${num(r.captured)}</td><td class="num">${num(r.delivered_frames)}</td>
-      <td class="num">${num(r.unsent_frames)}</td><td class="num">${(r.share_delivered * 100).toFixed(0)}%</td>
-      <td class="num">${num(Math.round(r.filtered / 655.35))}</td><td class="num">${num(Math.round(r.fifo / 655.35))}</td>
-      <td class="num">${r.fifo ? (r.filtered / r.fifo >= 1 ? '+' : '') + Math.round((r.filtered / r.fifo - 1) * 100) + '%' : '—'}</td>
-      </tr>`).join(''));
-}
-
-/* shared frame for both sweep charts: x is the fleet size */
-function sweepFrame(box, svg, yMaxValue, yLabel) {
-  const W = Math.max(240, box.clientWidth), H = Math.max(120, box.clientHeight);
-  const L = 56, R = 18, T = 18, B = 42;
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  const { max: maxY, step: stepY, ticks: nY, label: kY } = niceScale(yMaxValue);
-  const n0 = sweepRows[0].n, n1 = Math.max(sweepRows[sweepRows.length - 1].n, n0 + 1);
-  const sx = n => L + (n - n0) / (n1 - n0) * (W - L - R);
-  const sy = y => T + (1 - y / maxY) * (H - T - B);
-  const g = [];
-  for (let k = 0; k <= nY; k += kY) {
-    const v = stepY * k, y = sy(v);
-    g.push(`<line x1="${L}" x2="${W - R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--rule-soft)"/>`);
-    g.push(`<text x="${L - 8}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${num(v)}</text>`);
-  }
-  sweepRows.forEach(r => g.push(`<text x="${sx(r.n).toFixed(1)}" y="${H - 24}" text-anchor="middle">${r.n}</text>`));
-  g.push(`<text x="${((L + W - R) / 2).toFixed(1)}" y="${H - 7}" text-anchor="middle" style="font-weight:700">number of satellites</text>`);
-  g.push(`<text x="${L}" y="${T - 5}">${yLabel}</text>`);
-  return { W, H, L, R, T, B, sx, sy, g };
-}
-function crossRule(f) {
-  const c = sweepRows.find(r => r.window_full);
-  if (!c) return;
-  const x = f.sx(c.n);
-  f.g.push(`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${f.T}" y2="${f.sy(0).toFixed(1)}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4 4"/>`);
-  f.g.push(`<text class="lbl" x="${(x + 7).toFixed(1)}" y="${f.T + 12}" fill="var(--amber)">window fills at ${c.n}</text>`);
-}
-function line(f, key, colour, dashed) {
-  return `<path d="${sweepRows.map((r, i) => `${i ? 'L' : 'M'}${f.sx(r.n).toFixed(1)},${f.sy(key(r)).toFixed(1)}`).join(' ')}"
-    fill="none" stroke="${colour}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${dashed ? ' stroke-dasharray="7 5"' : ''}/>`;
-}
-function dots(f, key, colour) {
-  return sweepRows.map(r => `<circle cx="${f.sx(r.n).toFixed(1)}" cy="${f.sy(key(r)).toFixed(1)}" r="4" fill="${colour}" stroke="var(--plate)" stroke-width="2"/>`).join('');
-}
-function empty(svg, box, msg) {
-  const W = Math.max(240, box.clientWidth), H = Math.max(120, box.clientHeight);
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">${msg}</text>`;
-}
-
-/* Fig 4 — what the fleet took, against what got home. Same unit, one axis, and
-   the gap between them is imagery that never left orbit. */
-function drawSweep() {
-  const box = $('sweepbox'), svg = $('sweepchart');
-  if (!sweepRows.length) { sweepGeom = null; return empty(svg, box, 'Not run yet.'); }
-  const f = sweepFrame(box, svg, Math.max(...sweepRows.map(r => r.captured)), 'photos');
-  sweepGeom = f;
-  const took = r => r.captured, home = r => r.delivered_frames;
-  f.g.push(`<path d="${sweepRows.map((r, i) => `${i ? 'L' : 'M'}${f.sx(r.n).toFixed(1)},${f.sy(took(r)).toFixed(1)}`).join(' ')} ` +
-    sweepRows.slice().reverse().map(r => `L${f.sx(r.n).toFixed(1)},${f.sy(home(r)).toFixed(1)}`).join(' ') + ' Z" fill="var(--blue-wash)" stroke="none"/>');
-  crossRule(f);
-  f.g.push(line(f, took, 'var(--pencil)', true));
-  f.g.push(line(f, home, 'var(--blue)', false));
-  f.g.push(dots(f, home, 'var(--blue)'));
-  const last = sweepRows[sweepRows.length - 1];
-  if (sweepRows.length > 1) {
-    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(took(last)) + 14).toFixed(1)}" text-anchor="end" fill="var(--pencil)">${num(took(last))} taken</text>`);
-    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(home(last)) - 9).toFixed(1)}" text-anchor="end" fill="var(--blue)">${num(home(last))} sent</text>`);
-  }
-  svg.innerHTML = f.g.join('');
-}
-
-/* Fig 5 — the payoff: the average score of the photos each policy chose to send. */
-function drawQual() {
-  const box = $('qualbox'), svg = $('qualchart');
-  if (!sweepRows.length) { qualGeom = null; return empty(svg, box, 'Not run yet.'); }
-  const o = r => r.mean_filtered / 655.35, b = r => r.mean_fifo / 655.35;
-  const f = sweepFrame(box, svg, Math.max(...sweepRows.map(r => Math.max(o(r), b(r)))), 'average score, out of 100');
-  qualGeom = f;
-  crossRule(f);
-  f.g.push(line(f, b, 'var(--pencil)', true));
-  f.g.push(line(f, o, 'var(--blue)', false));
-  f.g.push(dots(f, o, 'var(--blue)'));
-  const last = sweepRows[sweepRows.length - 1];
-  if (sweepRows.length > 1) {
-    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(o(last)) - 9).toFixed(1)}" text-anchor="end" fill="var(--blue)">${o(last).toFixed(0)}</text>`);
-    f.g.push(`<text class="lbl" x="${(f.sx(last.n) - 8).toFixed(1)}" y="${(f.sy(b(last)) + 15).toFixed(1)}" text-anchor="end" fill="var(--pencil)">${b(last).toFixed(0)}</text>`);
-  }
-  svg.innerHTML = f.g.join('');
-}
-
-function sweepHoverOn(boxId, tipId, geomFn, body) {
-  const box = $(boxId), tip = $(tipId);
-  box.addEventListener('pointermove', e => {
-    const f = geomFn();
-    if (!f || !sweepRows.length) return;
-    const r0 = box.getBoundingClientRect(), mx = e.clientX - r0.left;
-    let best = sweepRows[0], bd = Infinity;
-    for (const r of sweepRows) { const d = Math.abs(f.sx(r.n) - mx); if (d < bd) { bd = d; best = r; } }
-    tip.innerHTML = body(best);
-    tip.style.left = Math.min(Math.max(f.sx(best.n), 110), r0.width - 110) + 'px';
-    tip.style.top = Math.max(tip.offsetHeight + 6, f.T + 4) + 'px';
-    tip.style.opacity = 1;
-  });
-  box.addEventListener('pointerleave', () => tip.style.opacity = 0);
-}
-sweepHoverOn('sweepbox', 'sweeptip', () => sweepGeom, r =>
-  `<b>${r.n} satellite${r.n === 1 ? '' : 's'}</b>` +
-  `<br><span class="sw" style="background:var(--pencil)"></span>${num(r.captured)} photos taken` +
-  `<br><span class="sw" style="background:var(--blue)"></span>${num(r.delivered_frames)} sent home (${(r.share_delivered * 100).toFixed(0)}%)`);
-sweepHoverOn('qualbox', 'qualtip', () => qualGeom, r =>
-  `<b>${r.n} satellite${r.n === 1 ? '' : 's'}</b>` +
-  `<br><span class="sw" style="background:var(--blue)"></span>Orbit ${(r.mean_filtered / 655.35).toFixed(1)} average` +
-  `<br><span class="sw" style="background:var(--pencil)"></span>Baseline ${(r.mean_fifo / 655.35).toFixed(1)} average`);
-
-/* ── redraw on resize, once per frame ──────────────────────────────────── */
-let raf = 0;
-new ResizeObserver(() => {
-  cancelAnimationFrame(raf);
-  raf = requestAnimationFrame(() => { if (snap) { if ($('sheet-live').hasAttribute('data-active')) drawChart(snap); drawSweep(); } });
-}).observe($('chartbox'));
-addEventListener('resize', () => { if (snap) { drawChart(snap); drawSweep(); } });
-
+fetch('/api/state').then(r => r.json()).then(adopt).catch(() => {});
 connect();
+setInterval(() => { if (dirty) { dirty = false; render(); } else renderHeader(); }, 150);
+
+// --- rendering ------------------------------------------------------------------------------------
+function renderHeader() {
+  const snap = S.snapshot || {};
+  const st = $('state'); st.textContent = snap.state || '—'; st.className = 'badge state ' + (snap.state || '');
+  $('round').textContent = has(snap.round_id) ? snap.round_id : '—';
+  $('granted').textContent = snap.granted_to || '—';
+  const age = lastRxWall == null ? null : (Date.now() - lastRxWall) / 1000;
+  const ageEl = $('age');
+  ageEl.textContent = age == null ? 'no telemetry yet' : `last event ${age.toFixed(1)} s ago`;
+  ageEl.className = 'num' + ((age == null || age > STALE_S) ? ' stale' : '');
+  const link = $('link'); link.textContent = wsState; link.className = 'badge ' + (wsState === 'live' ? 'ok' : 'bad');
+  const quiet = (lastRxWall ?? liveSince) == null ? null : (Date.now() - (lastRxWall ?? liveSince)) / 1000;
+  const down = wsState === 'live' && quiet != null && quiet > STALE_S;
+  if (down !== groundDown) { groundDown = down; dirty = true; }  // the satellite panels change with it
+  const wd = $('watchdog');
+  if (wsState !== 'live') { wd.textContent = `display link ${wsState}`; wd.className = 'badge warn'; }
+  else if (down) { wd.textContent = `GROUND UNREACHABLE — nothing for ${quiet.toFixed(0)} s`; wd.className = 'badge bad'; }
+  else { wd.textContent = 'ground alive'; wd.className = 'badge ok'; }
+  const last = S.recent[S.recent.length - 1];
+  $('ground').textContent = last && last.host ? `ground: ${last.host} · t=${f1(last.t)} s` : '';
+}
+
+function render() {
+  renderHeader();
+  const snap = S.snapshot || {}, c = snap.counters || {}, ts = S.telemetry_stats || {}, bs = S.bus_stats || {};
+  $('counters').innerHTML = ['rounds','grants','completed','revoked','failed_tx','no_bid_rounds','late_bids','ignored_while_busy','unexpected']
+    .map(k => `<span>${k.replace(/_/g,' ')} <b class="num">${has(c[k]) ? c[k] : '—'}</b></span>`).join('') +
+    `<span>datagrams <b class="num">${fmt(S.stats.datagrams)}</b>${S.stats.bad_datagrams ? ` <span class="stale">(${S.stats.bad_datagrams} bad)</span>` : ''}</span>` +
+    (S.stats.restarts ? `<span class="stale">ground restarted ×${S.stats.restarts}</span>` : '');
+
+  // contact window
+  const w = snap.window;
+  if (w) {
+    // Undefined is not false: a replayed run file carries no `scaled`, and calling that a real
+    // pass would be the one thing on this page that is affirmatively untrue.
+    $('scaled').innerHTML = w.scaled === undefined ? '<span class="badge">pass model unknown</span>'
+                          : w.scaled ? '<span class="badge warn">SCALED</span>'
+                          : '<span class="badge ok">real pass</span>';
+    $('wbar').style.width = (w.capacity_bytes ? Math.min(100, 100 * w.used_bytes / w.capacity_bytes) : 0) + '%';
+    $('win').innerHTML = `<span>slots</span><span class="num"><b>${fmt(w.slots_used)}</b> used of ${fmt(w.slots_total)} · ${fmt(w.slots_remaining)} remaining</span>
+      <span>bytes remaining</span><span class="num">${fmt(w.remaining_bytes)} of ${fmt(w.capacity_bytes)}</span>
+      <span>model</span><span class="num">${fmt(w.duration_s)} s × ${fmt(Math.round(w.rate_bps || 0))} bit/s${w.scaled ? ' <span class="muted">(scaled for the demo)</span>' : ''}</span>
+      <span>open</span><span>${w.open ? 'yes' : '<b>no — window closed</b>'}</span>`;
+  }
+
+  // rates: shown live if any event carried them, else inferred from the last decision's own terms
+  let rt = '';
+  if (S.rates) rt = `ITEM_AGING_RATE = <b>${S.rates.item_aging_rate ?? '—'}</b> · SAT_AGING_RATE = <b>${S.rates.sat_aging_rate ?? '—'}</b> (from telemetry)`;
+  else {
+    const d = S.decisions[S.decisions.length - 1], r = d && d.ranked && d.ranked[0];
+    if (r) {
+      const ia = r.item_age_s > 0 ? f2(r.item_age_term / r.item_age_s) : '—', sa = r.sat_wait_s > 0 ? f2(r.sat_wait_term / r.sat_wait_s) : '—';
+      rt = `rates inferred from the last decision's terms: ITEM_AGING_RATE ≈ <b>${ia}</b> · SAT_AGING_RATE ≈ <b>${sa}</b>`;
+    } else rt = 'rates not yet observable';
+  }
+  $('rates').innerHTML = rt;
+  $('telem').innerHTML = `<span>telemetry</span><span class="num">${has(ts.sent) ? `${fmt(ts.sent)} sent · ${fmt(ts.dropped_queue_full)} dropped (queue full) · ${fmt(ts.send_errors)} send errors` : '—'}</span>
+    <span>bus (ground)</span><span class="num">${has(bs.received) ? `${fmt(bs.received)} received · ${fmt(bs.dropped_dup)} dup · ${fmt(bs.dropped_malformed)} malformed` : '—'}</span>
+    <span>clients</span><span class="num">${fmt(S.stats.connected_clients)}</span>`;
+
+  renderSats(snap.sats || {});
+  renderArb();
+  renderFeed();
+  renderBus();
+}
+
+function flagChips(f) {
+  if (!f) return '<span class="badge quiet">no assessment</span>';
+  const chips = [];
+  const label = { nominal:'nominal', starved:'starved', idle:'idle', never_transmitted:'never transmitted', silent:'silent' }[f.kind] || esc(f.kind);
+  if (f.level === 'hard') chips.push(`<span class="badge hard">${label} · HARD</span>`);
+  else if (f.level === 'soft') chips.push(`<span class="badge soft">${label} · soft — aging at work</span>`);
+  else chips.push(`<span class="badge quiet">${label}</span>`);
+  if (f.memory_pressured) chips.push('<span class="badge mem">MEM</span>');
+  if (f.silent) chips.push('<span class="badge">SILENT</span>');
+  return chips.join(' ');
+}
+
+function renderSats(sats) {
+  const hosts = Object.keys(sats).sort();
+  const maxScore = Math.max(1, ...hosts.flatMap(h => (sats[h].window || []).map(e => e[1] || 0)));
+  const el = $('sats');
+  el.innerHTML = hosts.map(h => {
+    // with the ground unreachable every flag on the panel is a stale assessment, so none is shown:
+    // the honest answer about a satellite we can no longer hear about is "unknown", not "nominal".
+    const s = sats[h], f = groundDown ? null : (S.flags[h] || s.flags || null), col = colorOf(h);
+    const cls = 'panel sat' + (groundDown ? ' unknown' : '') + (f && f.level === 'hard' ? ' hard' : '') + (f && f.silent ? ' silent' : '');
+    const occ = s.occupancy_pct, hot = f && f.memory_pressured;
+    const win = (s.window || []).slice(0, 8);
+    return `<section class="${cls}" style="border-left-color:${col}">
+      <h2><span class="dot" style="background:${col}"></span><span class="name">${esc(h)}</span> ${groundDown ? '<span class="badge bad">unknown — ground unreachable</span>' : flagChips(f)}</h2>
+      <div class="kv">
+        <span>top score</span><span class="num"><b>${f1(s.top_score)}</b></span>
+        <span>queue</span><span class="num">${fmt(s.queue_len)} item(s)</span>
+        <span>buffer</span><span class="num">${has(occ) ? `${f1(occ)} %` : '—'}<div class="meter"><i class="occ${hot ? ' hot' : ''}" style="width:${Math.min(100, occ || 0)}%"></i></div></span>
+        <span>evictions</span><span class="num">${fmt(s.eviction_count)} total${f ? ` · ${f1(f.evictions_per_min)}/min` : ''}</span>
+        <span>wait</span><span class="num">${f1(s.wait_s)} s <span class="muted">since last transmission</span></span>
+        <span>tx / grants / revokes</span><span class="num">${fmt(s.transmissions)} / ${fmt(s.grants)} / ${fmt(s.revokes)}${s.failed_tx ? ` · <span class="stale">${s.failed_tx} failed</span>` : ''}</span>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:6px">reported window (diagnostic only — never used for arbitration)</div>
+      <div class="bars">${win.length ? win.map((e, k) => `<div class="bar${k === 0 ? ' head' : ''}" style="opacity:${k === 0 ? 1 : Math.max(.3, 1 - k * .15)}"><i style="width:${Math.max(2, 140 * (e[1] || 0) / maxScore)}px;background:${col}"></i><span class="num">${f1(e[1])}</span><span class="muted">#${esc(e[0])} · ${f1(e[2])} s old</span></div>`).join('') : '<span class="muted" style="font-size:12px">empty</span>'}</div>
+      ${f && f.reason ? `<div class="reason">${esc(f.reason)}</div>` : ''}
+    </section>`;
+  }).join('') || '<div class="panel muted">no satellites seen yet</div>';
+}
+
+function renderArb() {
+  const rows = S.decisions.slice(-ARB_ROWS).reverse();
+  if (!rows.length) { $('arb').innerHTML = '<span class="muted">no decisions yet</span>'; return; }
+  let h = `<table><tr><th>rnd</th><th>t</th><th class="l">winner</th><th>item</th><th>score</th><th>+ age</th><th>+ wait</th><th>= total</th><th class="l">runner-up</th><th>margin</th><th class="l">outcome</th><th class="l">note</th></tr>`;
+  for (const d of rows) {
+    const key = `${d.round_id}@${d.t}`, open = expanded.has(key);
+    const out = String(d.outcome || 'pending');
+    h += `<tr class="dec" data-key="${esc(key)}"><td>${esc(d.round_id)}</td><td>${f1(d.t)}</td><td class="l"><span class="dot" style="background:${colorOf(d.winner)}"></span>${esc(d.winner)}</td><td>${esc(d.item_id)}</td>
+      <td>${f1(d.score)}</td><td>${f2(d.item_age_term)}</td><td>${f2(d.sat_wait_term)}</td><td><b>${f1(d.total)}</b></td>
+      <td class="l">${d.runner_up ? `${esc(d.runner_up)} ${f1(d.runner_total)}` : '<span class="muted">none</span>'}</td><td>${has(d.margin) ? '+' + f1(d.margin) : '—'}</td>
+      <td class="l out ${out}">${esc(out)}</td><td class="l muted">${esc(d.reason || '')}${d.excluded && d.excluded.length ? ` excl ${esc(d.excluded.join(','))}` : ''}</td></tr>`;
+    if (open) {
+      const cands = d.ranked || [], max = Math.max(1, ...cands.map(c => c.total || 0));
+      h += `<tr class="detail"><td colspan="12">` + cands.map(c => {
+        const px = v => `${Math.max(0, 100 * (v || 0) / max)}%`;
+        return `<div class="cand"><span><span class="dot" style="background:${colorOf(c.sat)}"></span>${esc(c.sat)} <span class="muted">#${esc(c.item_id)}</span></span>
+          <div class="stack" title="score ${f1(c.score)} + age ${f2(c.item_age_term)} + wait ${f2(c.sat_wait_term)} = ${f1(c.total)}"><i class="s" style="width:${px(c.score)}"></i><i class="a" style="width:${px(c.item_age_term)}"></i><i class="w" style="width:${px(c.sat_wait_term)}"></i></div>
+          <span class="num muted">${f1(c.score)} + ${f2(c.item_age_term)} <span style="opacity:.7">(${f1(c.item_age_s)} s)</span> + ${f2(c.sat_wait_term)} <span style="opacity:.7">(${f1(c.sat_wait_s)} s)</span> = <b>${f1(c.total)}</b></span></div>`;
+      }).join('') + `</td></tr>`;
+    }
+  }
+  $('arb').innerHTML = h + '</table>';
+  $('arb').querySelectorAll('tr.dec').forEach(tr => tr.onclick = () => { const k = tr.dataset.key; expanded.has(k) ? expanded.delete(k) : expanded.add(k); dirty = true; });
+}
+
+function describe(e) {
+  switch (e.kind) {
+    case 'revoke': return ['bad', `${e.sat} item #${e.item_id} — ${e.reason} (round ${e.round_id})`];
+    case 'tx_failed': return ['bad', `${e.sat} item #${e.item_id} — ${e.reason}`];
+    case 'eviction': return ['mem', e.loss_kind === 'rejected' || !(e.displaced_by >= 0)
+      ? `${e.sat} rejected incoming #${e.item_id} (score ${f1(e.score)}) — buffer full, nothing lower to evict`
+      : `${e.sat} evicted #${e.item_id} (score ${f1(e.score)}) displaced by #${e.displaced_by} (score ${f1(e.displaced_by_score)})`];
+    case 'no_bids': return ['warn', `round ${e.round_id}: nobody bid${e.excluded && e.excluded.length ? ` (excluded ${e.excluded.join(', ')})` : ''}`];
+    case 'window_closed': return ['', `window closed after ${e.window ? e.window.slots_used : '?'} slots`];
+    case 'sat_seen': return ['', `${e.sat} first seen`];
+    case 'late_bid': return ['warn', `${e.sat} bid for round ${e.bid_round} during round ${e.round_id}`];
+    case 'unexpected_tx': return ['warn', `${e.sat} sent ${e.type} for #${e.item_id} without holding the grant`];
+  }
+  return ['', ''];
+}
+
+function renderFeed() {
+  const items = S.recent.filter(e => FEED_KINDS.has(e.kind)).slice(-FEED_ROWS).reverse();
+  $('feed').innerHTML = items.map(e => { const [cls, txt] = describe(e); return `<div><span class="muted num">${f1(e.t).padStart(7)}</span> <span class="k ${cls}">${esc(e.kind)}</span> ${esc(txt)}</div>`; }).join('') || '<span class="muted">nothing notable yet</span>';
+}
+
+function renderBus() {
+  const skip = new Set(['kind','host','t','dir','from','type','seq','count']);
+  $('log').innerHTML = S.bus.slice().reverse().map(e => {
+    const arrow = e.dir === 'out' ? '→' : '←';
+    const extra = Object.entries(e).filter(([k]) => !skip.has(k)).map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.length}]` : typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v}`).join(' ');
+    const type = e.type === 'tx_chunk' ? `tx_chunk ×${e.count || 1}` : e.type;
+    return `${esc(f1(e.t).padStart(7))} ${arrow} ${esc(String(e.from || '').padEnd(10))} <b>${esc(String(type).padEnd(14))}</b> ${esc(extra)}`;
+  }).join('\n');
+}
 </script>
 </body>
 </html>
