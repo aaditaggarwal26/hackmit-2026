@@ -2,12 +2,6 @@
 
 <!-- impeccable:product-schema 1 -->
 
-<!-- Written from confirmed repo truth (CLAUDE.md, README.md, DEMO_SCRIPT.md,
-JUDGE_QA.md, FINDINGS.md, orbit/, viz/) plus the user's brief for the dashboard
-redesign. The user delegated the ask round explicitly ("your call on pretty much
-everything"), so no interview was run; every line below traces to a repo file or
-that brief. Lines marked (inferred) are the exception and need confirming. -->
-
 ## Platform
 
 web
