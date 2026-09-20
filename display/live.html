@@ -23,11 +23,16 @@
       ?ws=ws://HOST:PORT/ws      explicit (a ground station on another machine)
       served over http            same host as the page, path /ws
       opened as file://           ws://localhost:8000/ws
+  Thumbnails come from <same host>/frames/<id>.png and are shown only after a
+  frame_arrived for that id (contract rule 2), and sheet 2 reads the recorded
+  run from <same host>/runs/. "Same host" means the socket's host, so a ground
+  station that speaks only WebSocket needs
+      ?http=http://HOST:PORT      where /frames/ and /runs/ are served instead
   On connect the page GETs <same host>/api/state to catch up (tools/replay.py
-  documents the shape); if that 404s it starts from the next event. Thumbnails
-  come from <same host>/frames/<id>.png and are shown only after a frame_arrived
-  for that id (contract rule 2). The font sits next to this file in fonts/; if
-  it is missing the page falls back to the system sans.
+  documents the shape); if that 404s it starts from the next event. With an
+  explicit ?http it is not asked at all: that host is not watching this run.
+  The font sits next to this file in fonts/; if it is missing the page falls
+  back to the system sans.
 
   Sheet 2 (results) follows rule 3 of the contract: it reads the recorded
   runs/<run_id>.jsonl from <same host>/runs/<run_id>.jsonl, never live memory,
@@ -524,8 +529,15 @@ const Q = new URLSearchParams(location.search);
 const WS_URL = Q.get('ws') || (location.protocol.startsWith('http')
   ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
   : 'ws://localhost:8000/ws');
-let HTTP_BASE = '';
-try { const u = new URL(WS_URL); HTTP_BASE = (u.protocol === 'wss:' ? 'https:' : 'http:') + '//' + u.host; } catch (e) { HTTP_BASE = ''; }
+// Thumbnails and the recorded run file normally sit on the host that serves the socket,
+// which is true of tools/replay.py and of any ground station that also serves HTTP. One that
+// speaks WebSocket and nothing else serves neither, so ?http=http://HOST:PORT points them at
+// a machine that does (this laptop's own replay.py, say). Events still come from the socket
+// alone: an explicit ?http is never asked for /api/state, because that host knows nothing
+// about the run this page is watching.
+const HTTP_OVERRIDE = (Q.get('http') || '').replace(/\/+$/, '');
+let HTTP_BASE = HTTP_OVERRIDE;
+if (!HTTP_BASE) try { const u = new URL(WS_URL); HTTP_BASE = (u.protocol === 'wss:' ? 'https:' : 'http:') + '//' + u.host; } catch (e) { HTTP_BASE = ''; }
 const FRAMES_BASE = HTTP_BASE + '/frames/';
 const THUMB = id => `${String(id).padStart(4, '0')}.png`;
 // frame_id is a satellite's own item counter, so every node has a frame 1 and they are
@@ -1126,7 +1138,7 @@ function renderResults() {
 let ws = null, hydrating = false, buffer = [], backoff = 1000;
 function setConn(c) { if (S.conn !== c) { S.conn = c; dirty = true; } }
 async function fetchState() {
-  if (!HTTP_BASE) return null;
+  if (!HTTP_BASE || HTTP_OVERRIDE) return null;
   const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 2500);
   try { const r = await fetch(HTTP_BASE + '/api/state', { signal: ctl.signal, cache: 'no-store' }); if (!r.ok) return null; const st = await r.json(); return st && Array.isArray(st.events) ? st : null; }
   catch (e) { return null; } finally { clearTimeout(timer); }
