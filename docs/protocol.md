@@ -39,6 +39,11 @@ dropped, never fatal. Integers are accepted where floats are expected.
 The table is generated from `orbit/protocol/messages.py`; `docs/protocol_vectors.json` holds one
 encoded example per type and `tests/test_messages.py` pins both.
 
+A field marked `?` is OPTIONAL: a sender that cannot measure it leaves it out entirely, and the
+decoder substitutes `null` rather than rejecting the datagram. Every unmarked field is REQUIRED and
+its absence rejects the whole datagram. Unknown extra fields are ignored by every receiver, so a
+newer sender never breaks an older one.
+
 | type | direction | fields |
 |---|---|---|
 | `offers_open` | ground → all | `round_id`, `window_remaining_bytes`, `collect_ms` |
@@ -50,9 +55,10 @@ encoded example per type and `tests/test_messages.py` pins both.
 | `tx_begin` | satellite → all | `round_id`, `item_id`, `total_bytes`, `chunks` |
 | `tx_chunk` | satellite → all | `round_id`, `item_id`, `idx`, `n`, `data` (base64) |
 | `tx_done` | satellite → all | `round_id`, `item_id`, `total_bytes`, `score`, `cloud_frac`, `sha256` |
-| `heartbeat` | satellite → all | `buffer`, `eviction_count`, `queue_len`, `top_score`, `top_item_id`, `uptime_s`, `frames_scored`, `frames_sent` |
+| `heartbeat` | satellite → all | `buffer`, `eviction_count`, `queue_len`, `top_score`, `top_item_id`, `uptime_s`, `frames_scored`, `frames_sent`, `rssi_dbm`?, `free_heap_bytes`?, `psram_ok`? |
 | `eviction` | satellite → all | `item_id`, `score`, `kind`, `displaced_by`, `displaced_by_score` |
 | `scored` | satellite → all | `item_id`, `score`, `parts{clear,sharp,change}`, `cloud_frac`, `queued`, `evicted_item_id`, `queue_depth` |
+| `fault` | satellite → all | `code_id`, `severity`, `detail` |
 
 Nested records:
 
@@ -60,6 +66,16 @@ Nested records:
 * `window` (in `bid`) = `[{item_id, score, item_age_s}, ...]` — the next `BID_WINDOW_N` queue entries *below* the top.
 * `breakdown` (in `grant`) = `{score, item_age_s, item_age_term, sat_wait_s, sat_wait_term, total}`.
 * `window` (in `state`) = `{capacity_bytes, used_bytes, remaining_bytes, slots_remaining}`.
+* `parts` (in `scored`) = `{clear, sharp, change}` — the three normalised score components, 0–100 each.
+
+Health and faults:
+
+* `heartbeat`'s `rssi_dbm`, `free_heap_bytes` and `psram_ok` are LEVEL-triggered and self-clearing:
+  every heartbeat states the node's condition now, so nothing has to announce recovery and a missed
+  heartbeat costs one period of staleness. They are optional because only hardware has them.
+* `fault` is EDGE-triggered: it names one thing that went wrong, once. `code_id` indexes the fault-code
+  registry, which is deliberately not part of this schema — codes can be added or reclassified without
+  a wire change, and a receiver that does not recognise an id still has `severity` and `detail`.
 
 Scores are 0–100 floats as the satellite computed them onboard. `item_id` is an integer unique per
 satellite (paired with `from` it is unique on the bus).
@@ -79,7 +95,7 @@ ground                                   satellite (granted)          other sate
   │ state{COMPLETE}, offers_open{n+1} ─────►│                                │
 ```
 
-### Ground rules (Section 10 of the brief)
+### Ground rules
 
 * `READY`: broadcast `offers_open`, collect bids for `collect_ms`, price each bid's **top item only**
   with `priority = score + item_age_s × ITEM_AGING_RATE + satellite_wait_s × SAT_AGING_RATE`, grant
@@ -96,7 +112,7 @@ ground                                   satellite (granted)          other sate
   is counted as `unexpected` and ignored.
 * `state` is broadcast on every transition and every `state_period_ms`.
 
-### Satellite rules (Section 5 of the brief) — what the firmware must do
+### Satellite rules — what the firmware must do
 
 1. Score every frame locally. The ground never sees an unscored frame.
 2. Keep a fixed frame pool and a separate priority queue of references into it. On a full pool, a new

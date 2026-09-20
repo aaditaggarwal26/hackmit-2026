@@ -459,6 +459,10 @@ class FakeSatellite:
             uptime_s=round(self.uptime_ms(now) / 1000.0, 3),
             frames_scored=self.counters.captured,
             frames_sent=self.counters.transmitted,
+            # rssi_dbm / free_heap_bytes / psram_ok are left unreported on purpose. They are
+            # properties of a radio and an allocator this class does not have, and inventing
+            # plausible numbers for them would make the display's health panel look alive when
+            # it is reading a simulation. Absent is the honest value; the decoder allows it.
         )
 
     def _period(self) -> float:

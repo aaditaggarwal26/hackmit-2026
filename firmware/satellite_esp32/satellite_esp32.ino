@@ -18,11 +18,13 @@
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/sha256.h>
 
 #include "secrets.h"
 #include "orbit_config.h"
 #include "orbit_score.h"
 #include "orbit_queue.h"
+#include "orbit_sat.h"
 
 // Identity comes in as a bare token (-DSAT_ID=c) and is stringified here, so the build
 // flag needs no nested quotes and cannot be mangled by a shell.
@@ -39,12 +41,10 @@ static const char *HOSTNAME = "esp32-satellite-" ORBIT_STR(SAT_ID);
 
 // ---------------------------------------------------------------- state
 
-struct Item {
-  bool     used = false;
-  uint16_t item_id = 0;
-  uint16_t raw_score = 0;
-  uint32_t captured_ms = 0;
-};
+// `Item` is in orbit_sat.h with the rest of the logic a host g++ can check: it had to widen
+// anyway (the `scored` and `tx_done` messages report the cloud fraction and the three score
+// parts, which capture() used to compute and throw away) and it is what the decision functions
+// there are about.
 
 static WiFiUDP      udp;
 static PriorityQueue queue;
@@ -72,7 +72,7 @@ static uint16_t g_frame_pos = 0;            // capture cursor
 
 static uint32_t c_captured = 0, c_evicted = 0, c_rejected = 0, c_bids = 0;
 static uint32_t c_grants = 0, c_transmitted = 0, c_failed = 0, c_revoked = 0;
-static uint32_t c_ack_lost = 0, c_peer_grants = 0;
+static uint32_t c_ack_lost = 0, c_peer_grants = 0, c_late_acks = 0;
 
 // in-flight transmission
 static bool     tx_active = false;
@@ -194,6 +194,36 @@ static void sendHeartbeat() {
     d["top_item_id"] = -1;
   }
   d["uptime_s"] = round3(millis() / 1000.0f);
+  d["frames_scored"] = c_captured;
+  d["frames_sent"] = c_transmitted;
+  // Health, LEVEL-triggered: every heartbeat states the condition now, so nothing has to
+  // announce recovery and a lost heartbeat costs one period of staleness rather than a missed
+  // edge. All three are optional on the wire -- a value we cannot measure is left OUT, never
+  // sent as a zero the ground would read as data. RSSI off a disconnected radio is exactly that
+  // case, which is why it is conditional and the other two are not.
+  if (WiFi.status() == WL_CONNECTED) d["rssi_dbm"] = (int)WiFi.RSSI();
+  d["free_heap_bytes"] = (uint32_t)ESP.getFreeHeap();
+  d["psram_ok"] = fbuf.inPsram();
+  sendDoc(d);
+}
+
+// One frame went through the kernel. The ground does not arbitrate on this, but it is what
+// feeds the display's frame_scored, the no-scoring FIFO baseline and the `usable` verdict, and
+// it is the only place the score PARTS and the cloud fraction are reported for a frame that was
+// rejected on arrival and will never be transmitted. Sent for every capture, kept or not.
+static void sendScored(const Item &it, bool queued, int32_t evicted_item_id) {
+  JsonDocument d;
+  fillEnvelope(d, "scored");
+  d["item_id"] = it.item_id;
+  d["score"] = score_display(it.raw_score);
+  JsonObject p = d["parts"].to<JsonObject>();
+  p["clear"]  = orbit_part(it.clear);
+  p["sharp"]  = orbit_part(it.sharp);
+  p["change"] = orbit_part(it.change);
+  d["cloud_frac"] = orbit_cloud_frac(it.cloud_px);
+  d["queued"] = queued;
+  d["evicted_item_id"] = evicted_item_id;
+  d["queue_depth"] = queue.size();
   sendDoc(d);
 }
 
@@ -274,52 +304,72 @@ static bool ensureRef(uint16_t idx) {
   return true;
 }
 
-static void admit(uint16_t raw, const uint8_t *data) {
-  const int32_t key = queue_key(raw);
+// The newcomer, carrying everything the kernel already worked out about it. Scoring a frame
+// costs ~16 K pixel operations; re-deriving cloud_frac or the parts later would mean paying it
+// twice (and re-reading the frame out of the pool), so they are kept with the item.
+static Item makeItem(const Scored &sc) {
+  Item it;
+  it.used        = true;
+  it.item_id     = g_next_item_id++;
+  it.raw_score   = sc.score;
+  it.captured_ms = millis();
+  it.cloud_px    = sc.cloud_px;
+  it.clear       = sc.clear;
+  it.sharp       = sc.sharp;
+  it.change      = sc.change;
+  return it;
+}
 
-  if (fbuf.freeSlots() > 0) {
-    Item *slot = freeItemSlot();
-    if (!slot) return;
-    slot->used = true;
-    slot->item_id = g_next_item_id++;
-    slot->raw_score = raw;
-    slot->captured_ms = millis();
-    fbuf.store(slot->item_id, data);
-    queue.insert(key, slot->item_id);
-    return;
-  }
+struct AdmitResult {
+  Item    item;
+  bool    queued = false;           // false = rejected on arrival, never held
+  int32_t evicted_item_id = -1;     // what this frame displaced, -1 if nothing
+};
 
-  // Full. The queue tail is the worst held item; whatever is in flight is never a candidate.
-  const QCell tail = queue.at(queue.size() - 1);
+// The decision itself is admit_decide() in orbit_sat.h, mirroring FakeSatellite._admit and
+// tested against it on the host; everything here is the storage that follows from it.
+static AdmitResult admit(const Scored &sc, const uint8_t *data) {
+  AdmitResult r;
+  r.item = makeItem(sc);
+  const int32_t key = queue_key(r.item.raw_score);
   const uint16_t in_flight = tx_active ? tx_item : (await_ack ? await_item : NO_FRAME);
-  if (key <= tail.key || tail.item_id == in_flight) {
-    Item newcomer;
-    newcomer.used = true;
-    newcomer.item_id = g_next_item_id++;
-    newcomer.raw_score = raw;
-    newcomer.captured_ms = millis();
-    c_rejected++;
-    sendEviction(newcomer, "rejected", nullptr);
-    return;
+  const QCell tail = queue.hasData() ? queue.at(queue.size() - 1) : QCell{0, NO_FRAME};
+
+  switch (admit_decide(key, fbuf.freeSlots(), tail.key, tail.item_id, in_flight)) {
+    case ADMIT_REJECT:
+      c_rejected++;
+      sendEviction(r.item, "rejected", nullptr);
+      return r;                     // queued stays false: the frame is gone
+
+    case ADMIT_EVICT_TAIL: {
+      // The newcomer beats the worst held frame: the tail leaves, permanently.
+      Item *lost = findItem(tail.item_id);
+      Item lostCopy;
+      if (lost) { lostCopy = *lost; lost->used = false; }
+      queue.removeItem(tail.item_id);
+      fbuf.release(tail.item_id);
+      Item *slot = freeItemSlot();
+      if (!slot) return r;          // cannot happen: the release above freed one
+      *slot = r.item;
+      fbuf.store(slot->item_id, data);
+      queue.insert(key, slot->item_id);
+      c_evicted++;
+      r.queued = true;
+      r.evicted_item_id = (int32_t)lostCopy.item_id;
+      sendEviction(lostCopy, "evicted", slot);
+      return r;
+    }
+
+    default: {                      // ADMIT_STORE: a slot was free
+      Item *slot = freeItemSlot();
+      if (!slot) return r;
+      *slot = r.item;
+      fbuf.store(slot->item_id, data);
+      queue.insert(key, slot->item_id);
+      r.queued = true;
+      return r;
+    }
   }
-
-  // The newcomer beats the worst held frame: the tail leaves, permanently.
-  Item *lost = findItem(tail.item_id);
-  Item lostCopy;
-  if (lost) { lostCopy = *lost; lost->used = false; }
-  queue.removeItem(tail.item_id);
-  fbuf.release(tail.item_id);
-
-  Item *slot = freeItemSlot();
-  if (!slot) return;
-  slot->used = true;
-  slot->item_id = g_next_item_id++;
-  slot->raw_score = raw;
-  slot->captured_ms = millis();
-  fbuf.store(slot->item_id, data);
-  queue.insert(key, slot->item_id);
-  c_evicted++;
-  sendEviction(lostCopy, "evicted", slot);
 }
 
 static void capture() {
@@ -334,7 +384,10 @@ static void capture() {
   c_captured++;
   Serial.printf("[cap] frame=%u score=%u (%.1f) cloud=%u chg=%u %ums\n",
                 idx, s.score, score_display(s.score), s.cloud_px, s.changed_px, us / 1000);
-  admit(s.score, scratch);
+  // eviction first, then scored -- the same order orbit/sim/satellite.py::capture emits them,
+  // so a reader of the bus log sees the loss before the frame that caused it is announced.
+  const AdmitResult r = admit(s, scratch);
+  sendScored(r.item, r.queued, r.evicted_item_id);
 }
 
 // ---------------------------------------------------------------- messages in
@@ -386,22 +439,45 @@ static void onRevoke(JsonDocument &d) {
   Serial.printf("[revoke] item=%u reason=%s\n", (unsigned)(d["item_id"] | 0), (const char *)(d["reason"] | "?"));
 }
 
-static void onTxAck(JsonDocument &d) {
-  if (strcmp(d["to"] | "", HOSTNAME) != 0) return;
-  const uint16_t item_id = d["item_id"] | 0;
-  if (!await_ack || item_id != await_item) return;
-  await_ack = false;
-  if (!(d["ok"] | false)) {
-    c_failed++;                        // keep the frame: a failed transmission must not lose data
-    Serial.printf("[nack] item=%u reason=%s\n", item_id, (const char *)(d["reason"] | "?"));
-    return;
-  }
+static void popItem(uint16_t item_id) {
   queue.removeItem(item_id);
   Item *it = findItem(item_id);
   if (it) it->used = false;
   fbuf.release(item_id);
   c_transmitted++;
-  Serial.printf("[ack ] item=%u confirmed, popped\n", item_id);
+}
+
+// The decision is ack_decide() in orbit_sat.h, mirroring FakeSatellite._acked. This used to
+// return early whenever the ack was not the one being waited for, which stranded a frame the
+// ground already had: after a timeout or a "ground moved on" give-up we re-offer the item, and
+// the ground answers a re-offer of a frame it holds with tx_ack{ok} rather than a grant. The
+// item then sat in the pool winning rounds that would never be granted, and its slot never came
+// back. Protocol rule 6: an ok-ack for an item we still hold means pop it, never resend it.
+static void onTxAck(JsonDocument &d) {
+  if (strcmp(d["to"] | "", HOSTNAME) != 0) return;
+  const uint16_t item_id = d["item_id"] | 0;
+  const bool ok = d["ok"] | false;
+  const bool held = findItem(item_id) != nullptr;
+
+  switch (ack_decide(await_ack, await_item, item_id, ok, held, tx_active, tx_item)) {
+    case ACK_POP:
+      await_ack = false;
+      popItem(item_id);
+      Serial.printf("[ack ] item=%u confirmed, popped\n", item_id);
+      return;
+    case ACK_NACK_KEEP:
+      await_ack = false;
+      c_failed++;                      // keep the frame: a failed transmission must not lose data
+      Serial.printf("[nack] item=%u reason=%s\n", item_id, (const char *)(d["reason"] | "?"));
+      return;
+    case ACK_POP_LATE:
+      c_late_acks++;
+      popItem(item_id);
+      Serial.printf("[ack ] item=%u late ok, popped without resending\n", item_id);
+      return;
+    default:
+      return;
+  }
 }
 
 // Duplicate suppression, the mirror of the ground's dedup_window (orbit/bus/base.py).
@@ -481,14 +557,35 @@ static void pumpTx() {
     return;
   }
   if (tx_next_idx >= tx_chunks && !tx_done_sent) {
-    tx_done_sent = true;
     Item *it = findItem(tx_item);
+    const uint8_t *data = fbuf.read(tx_item);
+    if (!it || !data) {
+      // The frame left the pool mid-transmission. tx_done without a digest over the real bytes
+      // would be a claim we cannot back, so nothing is sent: the ground times the grant out and
+      // re-arbitrates, which is a failure it already knows how to handle.
+      Serial.printf("[tx  ] item=%u vanished mid-transmission, no tx_done\n", tx_item);
+      tx_done_sent = true;
+      tx_active = false;
+      return;
+    }
+    tx_done_sent = true;
+    // The ground reassembles the chunks and compares this digest before it counts the frame, so
+    // it has to be a real sha256 over exactly the bytes that were sent -- one-shot mbedtls over
+    // the pool slot, hex-formatted by orbit_hex64 (orbit_sat.h, tested on the host).
+    uint8_t digest[32];
+    char    sha_hex[65];
+    mbedtls_sha256(data, tx_total, digest, 0);
+    orbit_hex64(digest, sha_hex);
     JsonDocument d;
     fillEnvelope(d, "tx_done");
     d["round_id"] = tx_round;
     d["item_id"] = tx_item;
     d["total_bytes"] = tx_total;
-    d["score"] = it ? score_display(it->raw_score) : 0.0f;
+    d["score"] = score_display(it->raw_score);
+    // Repeated from `scored` on purpose: the ground can still judge the frame usable when the
+    // earlier scored datagram was one of the ones multicast lost.
+    d["cloud_frac"] = orbit_cloud_frac(it->cloud_px);
+    d["sha256"] = sha_hex;
     tx_done_len = serializeJson(d, tx_done_buf, sizeof(tx_done_buf));
     for (int i = 0; i < BUS_TX_REPEAT; i++) {
       udp.beginPacket(MCAST_GROUP, MCAST_PORT);

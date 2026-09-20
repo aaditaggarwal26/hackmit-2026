@@ -20,6 +20,19 @@ as base64, one chunk per datagram.
 Decoding never raises on hostile input. ``decode()`` returns either a ``Message`` or
 a ``DecodeError`` describing why the bytes were rejected; the bus counts the latter
 and moves on. A malformed datagram must not be able to stop the arbiter.
+
+Required vs optional fields: a field declared *without* a default is REQUIRED and its
+absence rejects the whole datagram. A field declared *with* a default (in practice
+``X | None = None``) is OPTIONAL: an absent value means "this sender cannot report it",
+not "malformed". Optional fields are also omitted from ``encode()`` when they are
+``None``, so "unknown" never goes on the wire dressed up as data. Health telemetry is
+the reason: RSSI, free heap and PSRAM presence exist only on real hardware, the
+simulator cannot produce them, and that set will keep growing as the firmware learns to
+report more about itself. Making each such field a new *message* type would put a
+schema change (and a ground-station release) behind every new gauge; making them
+optional heartbeat fields does not. Every field that existed before this rule stays
+strict — an old sender that omits ``frames_scored`` is still rejected — because those
+fields are inputs the ground reasons with, not gauges it displays.
 """
 
 from __future__ import annotations
@@ -28,9 +41,10 @@ import base64
 import binascii
 import json
 import math
-from dataclasses import dataclass, fields, is_dataclass
+import types
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from enum import StrEnum
-from typing import Any, ClassVar, Self, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, ClassVar, Self, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from orbit import config
 
@@ -52,6 +66,7 @@ class MessageType(StrEnum):
     HEARTBEAT = "heartbeat"  # buffer/queue state while no round is open
     EVICTION = "eviction"  # a frame was lost to onboard storage limits (never to arbitration)
     SCORED = "scored"  # a frame was scored onboard: score parts + cloud fraction, whether it was kept
+    FAULT = "fault"  # an edge-triggered onboard fault, identified by a registry code
 
 
 class DecodeError(Exception):
@@ -134,11 +149,21 @@ class Message:
         for f in fields(self):
             if f.name in ("sender", "seq", "t_ms"):
                 continue
-            doc[f.name] = _to_json(getattr(self, f.name))
+            v = getattr(self, f.name)
+            if v is None:
+                continue  # an optional field this sender cannot report: absent, not null
+            doc[f.name] = _to_json(v)
         return json.dumps(doc, separators=(",", ":"), allow_nan=False).encode()
 
     @classmethod
     def from_doc(cls, doc: dict[str, Any]) -> Self:
+        """Body fields out of a decoded JSON object.
+
+        A field with no dataclass default is REQUIRED: missing it rejects the datagram, which
+        is the rule every field written before health telemetry existed still lives under. A
+        field with a default is OPTIONAL and simply falls back to it. Unknown *extra* keys are
+        ignored in both cases, so a newer sender never breaks an older receiver.
+        """
         kw: dict[str, Any] = {
             "sender": _need(doc, "from", str),
             "seq": _need(doc, "seq", int),
@@ -149,7 +174,9 @@ class Message:
             if f.name in kw:
                 continue
             if f.name not in doc:
-                raise DecodeError(f"missing field {f.name!r}", doc.get("type"))
+                if f.default is MISSING and f.default_factory is MISSING:
+                    raise DecodeError(f"missing field {f.name!r}", doc.get("type"))
+                continue  # optional: the dataclass default stands for "not reported"
             kw[f.name] = _from_json(doc[f.name], hints[f.name], f.name)
         return cls(**kw)
 
@@ -267,7 +294,14 @@ class State(Message):
 
 @dataclass(frozen=True)
 class Heartbeat(Message):
-    """Satellite → all, every SAT_HEARTBEAT_MS. Lets the ground tell idle from starved between rounds."""
+    """Satellite → all, every SAT_HEARTBEAT_MS. Lets the ground tell idle from starved between rounds.
+
+    The three health fields below are LEVEL-triggered and self-clearing: each heartbeat states the
+    node's condition *now*, so a bad value needs no "it got better" message and a missed heartbeat
+    costs at most one period of staleness. They are optional because they exist only on hardware —
+    the simulator has no radio and no heap — and absent means "not reported", never zero. A node
+    that stops being able to measure one simply drops it again.
+    """
 
     TYPE = MessageType.HEARTBEAT
     buffer: BufferStats
@@ -278,6 +312,9 @@ class Heartbeat(Message):
     uptime_s: float
     frames_scored: int  # since boot
     frames_sent: int  # since boot, confirmed by tx_ack
+    rssi_dbm: int | None = None  # WiFi signal strength, negative dBm; None on a node with no radio
+    free_heap_bytes: int | None = None  # smallest number that matters for "will it still allocate"
+    psram_ok: bool | None = None  # False = the frame pool fell back to internal SRAM
 
 
 @dataclass(frozen=True)
@@ -327,9 +364,42 @@ class Scored(Message):
     queue_depth: int
 
 
+@dataclass(frozen=True)
+class Fault(Message):
+    """Satellite → all. Something went wrong onboard that the node itself named.
+
+    This message is only the envelope for a fault: ``code_id`` indexes the fault-code registry,
+    which lives outside this module precisely so that adding, renaming or reclassifying a code
+    never touches the wire schema. Nothing here validates the id, and no code list is defined
+    here — a receiver that does not know an id still gets ``severity`` and ``detail``.
+
+    Unlike the heartbeat's health gauges this is EDGE-triggered: it reports an event, not a level,
+    so it is sent once when the condition occurs rather than repeated.
+    """
+
+    TYPE = MessageType.FAULT
+    code_id: int  # index into the fault-code registry (owned elsewhere)
+    severity: str  # the registry's severity name for this code
+    detail: str  # free text for a human reading the bus log; "" when there is nothing to add
+
+
 MESSAGE_TYPES: dict[MessageType, type[Message]] = {
     m.TYPE: m
-    for m in (OffersOpen, Bid, Grant, Revoke, TxBegin, TxChunk, TxDone, TxAck, State, Heartbeat, Eviction, Scored)
+    for m in (
+        OffersOpen,
+        Bid,
+        Grant,
+        Revoke,
+        TxBegin,
+        TxChunk,
+        TxDone,
+        TxAck,
+        State,
+        Heartbeat,
+        Eviction,
+        Scored,
+        Fault,
+    )
 }
 
 GROUND_TYPES = frozenset(
@@ -391,6 +461,12 @@ def _need(doc: dict[str, Any], key: str, typ: type) -> Any:
 
 def _from_json(v: Any, typ: Any, name: str) -> Any:
     origin = get_origin(typ)
+    if origin in (types.UnionType, Union):
+        # Only `X | None` is supported: an explicit null is the same as "not reported".
+        inner = [a for a in get_args(typ) if a is not type(None)]
+        if len(inner) != 1 or len(inner) == len(get_args(typ)):
+            raise DecodeError(f"{name}: unsupported field type {typ!r}")
+        return None if v is None else _from_json(v, inner[0], name)
     if origin is tuple:
         (inner, *_) = get_args(typ)
         if not isinstance(v, list):
@@ -440,7 +516,12 @@ def spec_markdown() -> str:
     out = ["| type | direction | fields |", "|---|---|---|"]
     for mtype, cls in MESSAGE_TYPES.items():
         direction = "ground → all" if mtype in GROUND_TYPES else "satellite → all"
-        names = ", ".join(f"`{f.name}`" for f in fields(cls) if f.name not in ("sender", "seq", "t_ms"))
+        names = ", ".join(
+            # `?` marks an optional field: one the sender may leave out entirely
+            f"`{f.name}`" + ("?" if f.default is not MISSING or f.default_factory is not MISSING else "")
+            for f in fields(cls)
+            if f.name not in ("sender", "seq", "t_ms")
+        )
         out.append(f"| `{mtype}` | {direction} | {names} |")
     return "\n".join(out)
 
@@ -507,6 +588,9 @@ def examples() -> list[tuple[str, Message]]:
                 uptime_s=8.0,
                 frames_scored=9,
                 frames_sent=4,
+                rssi_dbm=-57,
+                free_heap_bytes=214512,
+                psram_ok=True,
             ),
         ),
         (
@@ -528,6 +612,8 @@ def examples() -> list[tuple[str, Message]]:
                 queue_depth=5,
             ),
         ),
+        # code_id is a registry index, not a constant of this module: 1 is a placeholder here.
+        ("fault", Fault(s, 14, 8200, code_id=1, severity="warn", detail="frame pool in internal SRAM")),
     ]
 
 
@@ -544,6 +630,7 @@ __all__ = [
     "BufferStats",
     "DecodeError",
     "Eviction",
+    "Fault",
     "Grant",
     "Heartbeat",
     "Message",

@@ -145,3 +145,73 @@ def test_spec_markdown_lists_every_type():
 def test_non_finite_numbers_are_hostile(raw):
     """A bid with score=1e999 would win every round and then break every JSON encoder downstream."""
     assert isinstance(M.decode(raw), M.DecodeError)
+
+
+# --- required vs optional fields --------------------------------------------------------
+
+
+def _heartbeat_doc() -> dict:
+    return json.loads(dict(M.examples())["heartbeat"].encode())
+
+
+def test_required_field_missing_is_still_rejected():
+    """The strictness every pre-health field was written under: absence is malformed, not 'unknown'."""
+    for field in ("frames_scored", "frames_sent", "buffer", "uptime_s", "top_item_id"):
+        doc = _heartbeat_doc()
+        del doc[field]
+        r = M.decode(json.dumps(doc).encode())
+        assert isinstance(r, M.DecodeError) and field in r.reason, field
+
+
+def test_optional_health_fields_may_be_absent():
+    """A node with no radio and no heap to report still produces a decodable heartbeat."""
+    doc = _heartbeat_doc()
+    for field in ("rssi_dbm", "free_heap_bytes", "psram_ok"):
+        del doc[field]
+    m = M.decode(json.dumps(doc).encode())
+    assert isinstance(m, M.Heartbeat)
+    assert m.rssi_dbm is None and m.free_heap_bytes is None and m.psram_ok is None
+    assert m.frames_scored == 9  # the required fields are unaffected
+
+
+def test_optional_field_present_is_parsed_and_type_checked():
+    doc = _heartbeat_doc()
+    doc["rssi_dbm"] = -91
+    m = M.decode(json.dumps(doc).encode())
+    assert isinstance(m, M.Heartbeat) and m.rssi_dbm == -91
+    for bad in ("-91", 1.5, [], {}):
+        doc["rssi_dbm"] = bad
+        assert isinstance(M.decode(json.dumps(doc).encode()), M.DecodeError), bad
+    doc["rssi_dbm"] = None  # an explicit null is the same as not reporting it
+    m = M.decode(json.dumps(doc).encode())
+    assert isinstance(m, M.Heartbeat) and m.rssi_dbm is None
+
+
+def test_unreported_optional_fields_are_omitted_not_nulled():
+    """'Unknown' must not go on the wire dressed as data, and the simulator reports none of them."""
+    hb = M.Heartbeat(
+        "sat-x",
+        1,
+        0,
+        buffer=M.BufferStats(1, 1, 0, 1, 0.0),
+        eviction_count=0,
+        queue_len=0,
+        top_score=-1.0,
+        top_item_id=-1,
+        uptime_s=0.0,
+        frames_scored=0,
+        frames_sent=0,
+    )
+    doc = json.loads(hb.encode())
+    assert "rssi_dbm" not in doc and "free_heap_bytes" not in doc and "psram_ok" not in doc
+    assert M.decode(hb.encode()) == hb
+
+
+def test_fault_carries_a_registry_code_not_a_name():
+    """The fault-code registry lives outside this schema; the message only has to carry an id."""
+    f = M.Fault("sat-x", 1, 0, code_id=7, severity="error", detail="")
+    assert M.decode(f.encode()) == f
+    assert M.MessageType.FAULT in M.SATELLITE_TYPES and M.MessageType.FAULT not in M.GROUND_TYPES
+    doc = json.loads(f.encode())
+    del doc["code_id"]
+    assert isinstance(M.decode(json.dumps(doc).encode()), M.DecodeError)
