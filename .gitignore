@@ -8,6 +8,7 @@ __pycache__/
 !viz/static/**/*.png
 .coverage
 !corpus/png/*.png
+!results/filtered_vs_fifo.png
 results/raw/
 runs/*
 !runs/sample.jsonl
