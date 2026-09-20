@@ -31,7 +31,7 @@ def test_envelope_and_order(run):
     assert {e["type"] for e in ev} <= TYPES
     assert ev[0]["type"] == "run_start" and sum(e["type"] == "run_start" for e in ev) == 1
     assert ev[-1]["type"] == "run_end" and sum(e["type"] == "run_end" for e in ev) == 1
-    assert sim.stream.lines == [json.dumps(json.loads(x), separators=(",", ":")) for x in sim.stream.lines]
+    assert list(sim.stream.lines) == [json.dumps(json.loads(x), separators=(",", ":")) for x in sim.stream.lines]
 
 
 def test_run_start_contents(run):
