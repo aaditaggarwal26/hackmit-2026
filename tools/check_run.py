@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check a run file against docs/events.md.
+"""Check a run file against docs/event_stream.md.
 
     python3 tools/check_run.py runs/sample.jsonl          # errors, warnings, summary; exit 1 on errors
     python3 tools/check_run.py runs/sample.jsonl --quiet  # one summary block, no per-event lines
@@ -28,51 +28,109 @@ Errors are contract violations. Warnings are places the contract leaves open
 from the reading the display uses. They deserve a message in the group chat,
 not a failed check.
 """
+
 from __future__ import annotations
 
 import json
 import sys
 from collections import Counter, OrderedDict
+from collections.abc import Iterable
+from typing import Any
 
-TYPES = ("run_start", "node_status", "queue_window", "frame_scored", "grant", "frame_arrived",
-         "baseline_arrival", "window_update", "node_event", "run_end")
+Event = dict[str, Any]
+
+TYPES = (
+    "run_start",
+    "node_status",
+    "queue_window",
+    "frame_scored",
+    "grant",
+    "frame_arrived",
+    "baseline_arrival",
+    "window_update",
+    "node_event",
+    "run_end",
+)
 REASONS = ("highest_score", "starvation_forced", "only_ready")
 LEVELS = ("info", "warn", "error")
 MODES = ("live", "replay")
-EMPTY_TOP_ID = (None, 0xFFFF)     # top_frame_id of an empty queue: null, or 0xFFFF as the wire protocol has it
-WINDOW_CAP = 5                    # queue_window: "Cap at 5 entries"
+EMPTY_TOP_ID = (None, 0xFFFF)  # top_frame_id of an empty queue: null, or 0xFFFF as the wire protocol has it
+WINDOW_CAP = 5  # queue_window: "Cap at 5 entries"
 
 Int, Num, Bool, Str, List, Dict = "int", "num", "bool", "str", "list", "dict"
 NULLABLE = "?"
 SCHEMA = {
-    "run_start": {"run_id": Str, "mode": Str, "nodes": List, "window": Dict, "queue_limit": Int,
-                  "scoring": Dict, "usable_rule": Dict},
-    "node_status": {"node_id": Int, "queue_depth": Int, "top_frame_id": Int + NULLABLE, "top_score": Int,
-                    "top_age_s": Num, "frames_scored": Int, "frames_evicted": Int, "frames_sent": Int,
-                    "busy": Bool, "link_ok": Bool},
+    "run_start": {
+        "run_id": Str,
+        "mode": Str,
+        "nodes": List,
+        "window": Dict,
+        "queue_limit": Int,
+        "scoring": Dict,
+        "usable_rule": Dict,
+    },
+    "node_status": {
+        "node_id": Int,
+        "queue_depth": Int,
+        "top_frame_id": Int + NULLABLE,
+        "top_score": Int,
+        "top_age_s": Num,
+        "frames_scored": Int,
+        "frames_evicted": Int,
+        "frames_sent": Int,
+        "busy": Bool,
+        "link_ok": Bool,
+    },
     "queue_window": {"node_id": Int, "depth": Int, "top": List},
-    "frame_scored": {"node_id": Int, "frame_id": Int, "score": Int, "parts": Dict, "cloud_frac": Num,
-                     "queued": Bool, "evicted_frame_id": Int + NULLABLE, "queue_depth": Int},
+    "frame_scored": {
+        "node_id": Int,
+        "frame_id": Int,
+        "score": Int,
+        "parts": Dict,
+        "cloud_frac": Num,
+        "queued": Bool,
+        "evicted_frame_id": Int + NULLABLE,
+        "queue_depth": Int,
+    },
     "grant": {"slot_id": Int, "node_id": Int, "budget_bytes": Int, "reason": Str, "bids": List},
-    "frame_arrived": {"slot_id": Int, "node_id": Int, "frame_id": Int, "score": Int, "bytes": Int,
-                      "duration_s": Num, "cloud_frac": Num, "usable": Bool},
-    "baseline_arrival": {"node_id": Int, "frame_id": Int, "score": Int, "bytes": Int, "cloud_frac": Num,
-                         "usable": Bool},
-    "window_update": {"budget_bytes": Int, "used_bytes": Int, "remaining_bytes": Int, "time_remaining_s": Num,
-                      "open": Bool},
+    "frame_arrived": {
+        "slot_id": Int,
+        "node_id": Int,
+        "frame_id": Int,
+        "score": Int,
+        "bytes": Int,
+        "duration_s": Num,
+        "cloud_frac": Num,
+        "usable": Bool,
+    },
+    "baseline_arrival": {
+        "node_id": Int,
+        "frame_id": Int,
+        "score": Int,
+        "bytes": Int,
+        "cloud_frac": Num,
+        "usable": Bool,
+    },
+    "window_update": {
+        "budget_bytes": Int,
+        "used_bytes": Int,
+        "remaining_bytes": Int,
+        "time_remaining_s": Num,
+        "open": Bool,
+    },
     "node_event": {"node_id": Int, "level": Str, "message": Str},
     "run_end": {"orbit": Dict, "baseline": Dict, "headline": Dict},
 }
 TOTALS = ("frames_down", "usable_down", "bytes_used", "frames_left_queued")
 
 
-def is_type(v, spec: str) -> bool:
+def is_type(v: Any, spec: str) -> bool:
     if v is None:
         return spec.endswith(NULLABLE)
     spec = spec.rstrip(NULLABLE)
     if spec == Bool:
         return isinstance(v, bool)
-    if isinstance(v, bool):                      # bool is an int in Python; the contract's ints are not bools
+    if isinstance(v, bool):  # bool is an int in Python; the contract's ints are not bools
         return False
     if spec == Int:
         return isinstance(v, int)
@@ -82,34 +140,35 @@ def is_type(v, spec: str) -> bool:
 
 
 class NodeState:
-    def __init__(self, label):
+    def __init__(self, label: str) -> None:
         self.label = label
-        self.scored = {}            # frame_id -> {"t", "score", "cloud_frac"}
-        self.queue = OrderedDict()  # frame_id -> score, in insertion order
+        self.scored: dict[Any, dict[str, Any]] = {}  # frame_id -> {"t", "score", "cloud_frac"}
+        self.queue: OrderedDict[Any, float] = OrderedDict()  # frame_id -> score, in insertion order
         self.n_scored = self.n_evicted = self.n_sent = self.n_rejected = 0
-        self.last_status_t = None
-        self.max_quiet = 0.0        # longest gap between node_status events, stream seconds
-        self.link_ok = None
-        self.in_flight = None       # (frame_id, score) of the head when this node was granted; None when idle
+        self.last_status_t: float | None = None
+        self.max_quiet = 0.0  # longest gap between node_status events, stream seconds
+        self.link_ok: bool | None = None
+        # (frame_id, score) of the head when this node was granted; None when idle
+        self.in_flight: tuple[Any, float] | None = None
 
-    def head(self):
+    def head(self) -> tuple[Any, float] | None:
         """(frame_id, score) of the head: highest score, earliest insert among equals."""
         if not self.queue:
             return None
         ranked = sorted(self.queue.items(), key=lambda kv: (-kv[1], list(self.queue).index(kv[0])))
         return ranked[0]
 
-    def ranked(self):
+    def ranked(self) -> list[tuple[Any, float]]:
         order = {fid: i for i, fid in enumerate(self.queue)}
         return sorted(self.queue.items(), key=lambda kv: (-kv[1], order[kv[0]]))
 
 
 class Report:
-    def __init__(self):
+    def __init__(self) -> None:
         self.errors: list[tuple[int | None, str]] = []
         self.warnings: list[tuple[int | None, str]] = []
-        self.notes: list[tuple[int | None, str]] = []      # conventions the file uses where the contract is open
-        self.summary: dict = {}
+        self.notes: list[tuple[int | None, str]] = []  # conventions the file uses where the contract is open
+        self.summary: dict[str, Any] = {}
 
     @property
     def ok(self) -> bool:
@@ -117,47 +176,49 @@ class Report:
 
 
 class Checker:
-    def __init__(self):
+    def __init__(self) -> None:
         self.r = Report()
         self.seq_expected = 1
-        self.last_t = None
-        self.run = None
+        self.last_t: float | None = None
+        self.run: Event | None = None
         self.ended = False
-        self.nodes: dict[int, NodeState] = {}
-        self.queue_limit = None
-        self.budget = None
-        self.duration = None
-        self.usable_max = None          # None when usable_rule is not on cloud_frac (then usable is not checked)
-        self.frame_owner: dict[int, int] = {}
-        self.open_grant = None          # the grant event whose frame has not arrived yet
-        self.grant_t = None
-        self.pop_at = None              # "grant" or "arrival": when the sent frame leaves the queue. Learned from the file.
-        self.last_slot = None
-        self.winners: list[int] = []
+        self.nodes: dict[Any, NodeState] = {}
+        self.queue_limit: int | None = None
+        self.budget: int | None = None
+        self.duration: float | None = None
+        self.usable_max: float | None = None  # None when usable_rule is not on cloud_frac (then usable is not checked)
+        self.frame_owner: dict[Any, Any] = {}
+        self.open_grant: Event | None = None  # the grant event whose frame has not arrived yet
+        self.grant_t: float | None = None
+        self.pop_at: str | None = (
+            None  # "grant" or "arrival": when the sent frame leaves the queue. Learned from the file.
+        )
+        self.last_slot: Any = None
+        self.winners: list[Any] = []
         self.n_arrived = self.n_usable = self.bytes_used = 0
-        self.base_sent: set[int] = set()
+        self.base_sent: set[Any] = set()
         self.base_n = self.base_usable = self.base_bytes = 0
-        self.last_window = None
-        self.window_closed_t = None
-        self.types = Counter()
-        self.reasons = Counter()
-        self.levels = Counter()
-        self.unknown_types = Counter()
-        self.run_end = None
+        self.last_window: Event | None = None
+        self.window_closed_t: float | None = None
+        self.types: Counter[str] = Counter()
+        self.reasons: Counter[str] = Counter()
+        self.levels: Counter[str] = Counter()
+        self.unknown_types: Counter[str] = Counter()
+        self.run_end: Event | None = None
         self.n_lines = 0
         self.bad_lines = 0
 
     # -- reporting helpers
-    def E(self, seq, msg):
+    def E(self, seq: int | None, msg: str) -> None:
         self.r.errors.append((seq, msg))
 
-    def W(self, seq, msg):
+    def W(self, seq: int | None, msg: str) -> None:
         self.r.warnings.append((seq, msg))
 
-    def N(self, seq, msg):
+    def N(self, seq: int | None, msg: str) -> None:
         self.r.notes.append((seq, msg))
 
-    def node(self, seq, ev, key="node_id"):
+    def node(self, seq: int | None, ev: Event, key: str = "node_id") -> NodeState:
         nid = ev.get(key)
         if nid in self.nodes:
             return self.nodes[nid]
@@ -168,9 +229,9 @@ class Checker:
         st = self.nodes.setdefault(nid, NodeState(f"node {nid}"))
         return st
 
-    def resolve_depth(self, seq, st: NodeState, observed: int, what: str) -> None:
+    def resolve_depth(self, seq: int | None, st: NodeState, observed: int, what: str) -> None:
         """A depth observation while a grant is open decides when the sent frame leaves the
-        queue (events.md leaves it open): at the grant, or when frame_arrived comes. The first
+        queue (event_stream.md leaves it open): at the grant, or when frame_arrived comes. The first
         observation locks the convention for the whole file; a mismatch after that is an error."""
         if st.in_flight is None or st.in_flight[0] not in st.queue:
             return
@@ -180,14 +241,17 @@ class Checker:
             elif observed == len(st.queue):
                 self.pop_at = "arrival"
             else:
-                return                                    # let the caller report the mismatch
-            self.N(seq, f"the transmitted frame leaves the queue at the "
-                        f"{'grant' if self.pop_at == 'grant' else 'frame_arrived'} (first seen in {what} for {st.label})")
+                return  # let the caller report the mismatch
+            self.N(
+                seq,
+                f"the transmitted frame leaves the queue at the "
+                f"{'grant' if self.pop_at == 'grant' else 'frame_arrived'} (first seen in {what} for {st.label})",
+            )
         if self.pop_at == "grant":
             del st.queue[st.in_flight[0]]
 
     # -- entry points
-    def feed_line(self, line: str):
+    def feed_line(self, line: str) -> None:
         self.n_lines += 1
         line = line.strip()
         if not line:
@@ -204,8 +268,8 @@ class Checker:
             return
         self.feed(ev)
 
-    def feed(self, ev: dict):
-        seq = ev.get("seq")
+    def feed(self, ev: Event) -> None:
+        seq: Any = ev.get("seq")
         # envelope
         if not is_type(seq, Int):
             self.E(seq, f"seq missing or not an int: {seq!r}")
@@ -217,13 +281,13 @@ class Checker:
             self.seq_expected = seq + 1
         else:
             self.seq_expected += 1
-        t = ev.get("t")
+        t: Any = ev.get("t")
         if not is_type(t, Num):
             self.E(seq, f"t missing or not a number: {t!r}")
             t = self.last_t
         elif self.last_t is not None and t < self.last_t:
             self.E(seq, f"t went backwards: {t} after {self.last_t}")
-        typ = ev.get("type")
+        typ: Any = ev.get("type")
         if not is_type(typ, Str):
             self.E(seq, f"type missing or not a string: {typ!r}")
             return
@@ -236,9 +300,8 @@ class Checker:
             self.last_t = t if t is not None else self.last_t
             return
         self.types[typ] += 1
-        if self.run is None and typ != "run_start":
-            if self.types.total() == 1:
-                self.E(seq, f"first event is {typ}, not run_start")
+        if self.run is None and typ != "run_start" and self.types.total() == 1:
+            self.E(seq, f"first event is {typ}, not run_start")
         # field shapes
         shape_ok = True
         for field, spec in SCHEMA[typ].items():
@@ -254,7 +317,7 @@ class Checker:
             self.last_t = t
 
     # -- per type
-    def on_run_start(self, seq, t, ev):
+    def on_run_start(self, seq: int | None, t: float | None, ev: Event) -> None:
         if self.run is not None:
             self.E(seq, "second run_start in one file")
         self.run = ev
@@ -284,7 +347,7 @@ class Checker:
         else:
             self.W(seq, f"run_start: usable_rule {rule!r} is not on cloud_frac; usable flags will not be checked")
 
-    def on_node_status(self, seq, t, ev):
+    def on_node_status(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         if st.last_status_t is not None and t is not None:
             st.max_quiet = max(st.max_quiet, t - st.last_status_t)
@@ -308,21 +371,34 @@ class Checker:
             if t is not None:
                 age = t - st.scored[head[0]]["t"]
                 if ev["top_age_s"] < age - 1.0:
-                    self.W(seq, f"node_status {st.label}: top_age_s {ev['top_age_s']} but its frame_scored was {age:.1f} s ago")
+                    self.W(
+                        seq,
+                        f"node_status {st.label}: top_age_s {ev['top_age_s']} but its frame_scored was {age:.1f} s ago",
+                    )
         if ev["frames_scored"] != st.n_scored:
-            self.E(seq, f"node_status {st.label}: frames_scored {ev['frames_scored']} but {st.n_scored} frame_scored seen")
+            self.E(
+                seq, f"node_status {st.label}: frames_scored {ev['frames_scored']} but {st.n_scored} frame_scored seen"
+            )
         if ev["frames_sent"] != st.n_sent:
             self.E(seq, f"node_status {st.label}: frames_sent {ev['frames_sent']} but {st.n_sent} frame_arrived seen")
         if ev["frames_evicted"] != st.n_evicted:
-            self.W(seq, f"node_status {st.label}: frames_evicted {ev['frames_evicted']}; counting non-null "
-                        f"evicted_frame_id gives {st.n_evicted} (is a rejected frame counted?)")
-        holding = self.open_grant is not None and self.open_grant.get("node_id") == ev["node_id"]
+            self.W(
+                seq,
+                f"node_status {st.label}: frames_evicted {ev['frames_evicted']}; counting non-null "
+                f"evicted_frame_id gives {st.n_evicted} (is a rejected frame counted?)",
+            )
+        g = self.open_grant
+        open_grant = g if g is not None and g.get("node_id") == ev["node_id"] else None
+        holding = open_grant is not None
         if ev["busy"] != holding:
-            self.W(seq, f"node_status {st.label}: busy={ev['busy']} while "
-                        f"{'holding slot ' + str(self.open_grant['slot_id']) if holding else 'not transmitting'} "
-                        "(display reads busy as 'transmitting')")
+            self.W(
+                seq,
+                f"node_status {st.label}: busy={ev['busy']} while "
+                f"{'holding slot ' + str(open_grant['slot_id']) if open_grant is not None else 'not transmitting'} "
+                "(display reads busy as 'transmitting')",
+            )
 
-    def on_queue_window(self, seq, t, ev):
+    def on_queue_window(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         self.resolve_depth(seq, st, ev["depth"], "queue_window")
         depth = len(st.queue)
@@ -334,21 +410,33 @@ class Checker:
         ranked = st.ranked()
         prev = None
         for i, e in enumerate(top):
-            if not isinstance(e, dict) or not is_type(e.get("frame_id"), Int) or not is_type(e.get("score"), Int) \
-                    or not is_type(e.get("age_s"), Num):
+            if (
+                not isinstance(e, dict)
+                or not is_type(e.get("frame_id"), Int)
+                or not is_type(e.get("score"), Int)
+                or not is_type(e.get("age_s"), Num)
+            ):
                 self.E(seq, f"queue_window {st.label}: bad entry {e!r}")
                 continue
             if e["frame_id"] not in st.queue:
                 self.E(seq, f"queue_window {st.label}: frame {e['frame_id']} is not in the queue")
             elif e["score"] != st.queue[e["frame_id"]]:
-                self.E(seq, f"queue_window {st.label}: frame {e['frame_id']} score {e['score']} != scored {st.queue[e['frame_id']]}")
+                self.E(
+                    seq,
+                    f"queue_window {st.label}: frame {e['frame_id']} score {e['score']}"
+                    f" != scored {st.queue[e['frame_id']]}",
+                )
             if prev is not None and e["score"] > prev:
                 self.E(seq, f"queue_window {st.label}: top is not sorted by score (entry {i})")
             prev = e["score"]
             if i < len(ranked) and ranked[i][0] != e["frame_id"] and (i == 0 or ranked[i][1] != e["score"]):
-                self.E(seq, f"queue_window {st.label}: entry {i} is frame {e['frame_id']}, the queue's rank {i} is {ranked[i][0]}")
+                self.E(
+                    seq,
+                    f"queue_window {st.label}: entry {i} is frame {e['frame_id']},"
+                    f" the queue's rank {i} is {ranked[i][0]}",
+                )
 
-    def on_frame_scored(self, seq, t, ev):
+    def on_frame_scored(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         fid, score = ev["frame_id"], ev["score"]
         if fid in st.scored:
@@ -364,8 +452,9 @@ class Checker:
         st.scored[fid] = {"t": t, "score": score, "cloud_frac": ev["cloud_frac"]}
         st.n_scored += 1
         # the depth this event reports is after its own insert: undo that to compare with the model
-        self.resolve_depth(seq, st, ev["queue_depth"] - (1 if ev["queued"] and ev["evicted_frame_id"] is None else 0),
-                           "frame_scored")
+        self.resolve_depth(
+            seq, st, ev["queue_depth"] - (1 if ev["queued"] and ev["evicted_frame_id"] is None else 0), "frame_scored"
+        )
         ev_id = ev["evicted_frame_id"]
         if ev["queued"]:
             if ev_id is not None:
@@ -375,8 +464,11 @@ class Checker:
                     self.E(seq, f"frame_scored {st.label}: evicted frame {ev_id} was not in the queue")
                 else:
                     if self.queue_limit is not None and len(st.queue) < self.queue_limit:
-                        self.W(seq, f"frame_scored {st.label}: evicted {ev_id} while the queue had room "
-                                    f"({len(st.queue)}/{self.queue_limit})")
+                        self.W(
+                            seq,
+                            f"frame_scored {st.label}: evicted {ev_id} while the queue had room "
+                            f"({len(st.queue)}/{self.queue_limit})",
+                        )
                     del st.queue[ev_id]
                     st.n_evicted += 1
             st.queue[fid] = score
@@ -387,18 +479,26 @@ class Checker:
                 st.n_evicted += 1
             st.n_rejected += 1
             if self.queue_limit is not None and len(st.queue) < self.queue_limit:
-                self.W(seq, f"frame_scored {st.label}: frame {fid} rejected while the queue had room "
-                            f"({len(st.queue)}/{self.queue_limit})")
+                self.W(
+                    seq,
+                    f"frame_scored {st.label}: frame {fid} rejected while the queue had room "
+                    f"({len(st.queue)}/{self.queue_limit})",
+                )
         if self.queue_limit is not None and len(st.queue) > self.queue_limit:
             self.E(seq, f"frame_scored {st.label}: queue depth {len(st.queue)} exceeds queue_limit {self.queue_limit}")
         if ev["queue_depth"] != len(st.queue):
-            self.E(seq, f"frame_scored {st.label}: queue_depth {ev['queue_depth']} but the stream implies {len(st.queue)}")
+            self.E(
+                seq, f"frame_scored {st.label}: queue_depth {ev['queue_depth']} but the stream implies {len(st.queue)}"
+            )
 
-    def on_grant(self, seq, t, ev):
+    def on_grant(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         if self.open_grant is not None:
-            self.W(seq, f"grant slot {ev['slot_id']} while slot {self.open_grant['slot_id']} "
-                        f"(node {self.open_grant['node_id']}) has no frame_arrived yet")
+            self.W(
+                seq,
+                f"grant slot {ev['slot_id']} while slot {self.open_grant['slot_id']} "
+                f"(node {self.open_grant['node_id']}) has no frame_arrived yet",
+            )
         if self.last_slot is not None and ev["slot_id"] <= self.last_slot:
             self.W(seq, f"grant: slot_id {ev['slot_id']} does not increase (last {self.last_slot})")
         self.last_slot = ev["slot_id"]
@@ -409,8 +509,12 @@ class Checker:
             self.W(seq, f"grant slot {ev['slot_id']} while the last window_update said open=false")
         bids = {}
         for b in ev["bids"]:
-            if not isinstance(b, dict) or not is_type(b.get("node_id"), Int) or not is_type(b.get("top_score"), Int) \
-                    or not is_type(b.get("ready"), Bool):
+            if (
+                not isinstance(b, dict)
+                or not is_type(b.get("node_id"), Int)
+                or not is_type(b.get("top_score"), Int)
+                or not is_type(b.get("ready"), Bool)
+            ):
                 self.E(seq, f"grant: bad bid {b!r}")
                 continue
             bids[b["node_id"]] = b
@@ -433,22 +537,30 @@ class Checker:
                 self.E(seq, f"grant: reason only_ready but {len(ready)} bidders were ready")
             if ev["reason"] == "highest_score":
                 if win["top_score"] < best["top_score"]:
-                    self.E(seq, f"grant: reason highest_score but node {best['node_id']} bid {best['top_score']} "
-                                f"> winner's {win['top_score']}")
+                    self.E(
+                        seq,
+                        f"grant: reason highest_score but node {best['node_id']} bid {best['top_score']} "
+                        f"> winner's {win['top_score']}",
+                    )
                 elif best["node_id"] != ev["node_id"]:
                     self.W(seq, f"grant: tie at {win['top_score']} not broken by lowest node_id")
             if ev["reason"] == "starvation_forced":
                 if best["node_id"] == ev["node_id"]:
                     self.E(seq, "grant: reason starvation_forced but the winner also holds the highest bid")
                 elif not self.winners or self.winners[-1] != best["node_id"]:
-                    self.W(seq, f"grant: starvation_forced but the top bidder (node {best['node_id']}) "
-                                "did not win the previous slot")
+                    self.W(
+                        seq,
+                        f"grant: starvation_forced but the top bidder (node {best['node_id']}) "
+                        "did not win the previous slot",
+                    )
         for b in bids.values():
             bs = self.nodes.get(b["node_id"])
             if bs is not None and b["ready"] and bs.queue:
                 h = bs.head()
-                if b["top_score"] != h[1]:
-                    self.W(seq, f"grant: bid of {bs.label} is {b['top_score']} but its head score in the stream is {h[1]}")
+                if h is not None and b["top_score"] != h[1]:
+                    self.W(
+                        seq, f"grant: bid of {bs.label} is {b['top_score']} but its head score in the stream is {h[1]}"
+                    )
         self.winners.append(ev["node_id"])
         self.open_grant = ev
         self.grant_t = t
@@ -456,7 +568,7 @@ class Checker:
         if self.pop_at == "grant" and st.in_flight is not None:
             del st.queue[st.in_flight[0]]
 
-    def on_frame_arrived(self, seq, t, ev):
+    def on_frame_arrived(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         fid = ev["frame_id"]
         g = self.open_grant
@@ -466,10 +578,17 @@ class Checker:
             if g["slot_id"] != ev["slot_id"]:
                 self.E(seq, f"frame_arrived slot {ev['slot_id']} but the open grant is slot {g['slot_id']}")
             if g["node_id"] != ev["node_id"]:
-                self.E(seq, f"frame_arrived from node {ev['node_id']} but slot {g['slot_id']} was granted to node {g['node_id']}")
+                self.E(
+                    seq,
+                    f"frame_arrived from node {ev['node_id']} but slot {g['slot_id']}"
+                    f" was granted to node {g['node_id']}",
+                )
             if t is not None and self.grant_t is not None and t - self.grant_t + 1e-6 < ev["duration_s"]:
-                self.W(seq, f"frame_arrived: duration_s {ev['duration_s']} is longer than the time since the grant "
-                            f"({t - self.grant_t:.2f} s)")
+                self.W(
+                    seq,
+                    f"frame_arrived: duration_s {ev['duration_s']} is longer than the time since the grant "
+                    f"({t - self.grant_t:.2f} s)",
+                )
         self.open_grant = None
         rec = st.scored.get(fid)
         if rec is None:
@@ -478,15 +597,25 @@ class Checker:
             if ev["score"] != rec["score"]:
                 self.E(seq, f"frame_arrived {st.label}: frame {fid} score {ev['score']} != scored {rec['score']}")
             if abs(ev["cloud_frac"] - rec["cloud_frac"]) > 1e-6:
-                self.W(seq, f"frame_arrived {st.label}: frame {fid} cloud_frac {ev['cloud_frac']} != scored {rec['cloud_frac']}")
+                self.W(
+                    seq,
+                    f"frame_arrived {st.label}: frame {fid} cloud_frac {ev['cloud_frac']}"
+                    f" != scored {rec['cloud_frac']}",
+                )
         flight = st.in_flight
         st.in_flight = None
         if flight is not None and flight[0] != fid:
-            self.W(seq, f"frame_arrived {st.label}: sent frame {fid} but the head at the grant was {flight[0]} ({flight[1]})")
+            self.W(
+                seq,
+                f"frame_arrived {st.label}: sent frame {fid} but the head at the grant was {flight[0]} ({flight[1]})",
+            )
         if fid in st.queue:
             del st.queue[fid]
         elif flight is None or flight[0] != fid:
-            self.E(seq, f"frame_arrived {st.label}: frame {fid} is not in the queue (never queued, evicted, or already sent)")
+            self.E(
+                seq,
+                f"frame_arrived {st.label}: frame {fid} is not in the queue (never queued, evicted, or already sent)",
+            )
         self.check_usable(seq, "frame_arrived", st, ev)
         st.n_sent += 1
         self.n_arrived += 1
@@ -495,15 +624,18 @@ class Checker:
         if self.budget is not None and self.bytes_used > self.budget:
             self.E(seq, f"frame_arrived: bytes used {self.bytes_used} exceed budget {self.budget}")
 
-    def check_usable(self, seq, typ, st, ev):
+    def check_usable(self, seq: int | None, typ: str, st: NodeState, ev: Event) -> None:
         if self.usable_max is None:
             return
         expect = ev["cloud_frac"] <= self.usable_max
         if ev["usable"] != expect:
-            self.E(seq, f"{typ} {st.label}: usable={ev['usable']} but cloud_frac {ev['cloud_frac']} "
-                        f"{'<=' if expect else '>'} usable_rule.max {self.usable_max} (usable must follow cloud_frac only)")
+            self.E(
+                seq,
+                f"{typ} {st.label}: usable={ev['usable']} but cloud_frac {ev['cloud_frac']} "
+                f"{'<=' if expect else '>'} usable_rule.max {self.usable_max} (usable must follow cloud_frac only)",
+            )
 
-    def on_baseline_arrival(self, seq, t, ev):
+    def on_baseline_arrival(self, seq: int | None, t: float | None, ev: Event) -> None:
         st = self.node(seq, ev)
         fid = ev["frame_id"]
         owner = self.frame_owner.get(fid)
@@ -525,54 +657,76 @@ class Checker:
         if self.budget is not None and self.base_bytes > self.budget:
             self.E(seq, f"baseline_arrival: baseline bytes {self.base_bytes} exceed budget {self.budget}")
 
-    def on_window_update(self, seq, t, ev):
+    def on_window_update(self, seq: int | None, t: float | None, ev: Event) -> None:
         if self.budget is not None and ev["budget_bytes"] != self.budget:
             self.E(seq, f"window_update: budget_bytes {ev['budget_bytes']} != run_start budget {self.budget}")
         if ev["used_bytes"] != self.bytes_used:
             self.E(seq, f"window_update: used_bytes {ev['used_bytes']} but arrivals sum to {self.bytes_used}")
         if ev["remaining_bytes"] != ev["budget_bytes"] - ev["used_bytes"]:
-            self.E(seq, f"window_update: remaining_bytes {ev['remaining_bytes']} != budget - used "
-                        f"({ev['budget_bytes'] - ev['used_bytes']})")
+            self.E(
+                seq,
+                f"window_update: remaining_bytes {ev['remaining_bytes']} != budget - used "
+                f"({ev['budget_bytes'] - ev['used_bytes']})",
+            )
         if ev["open"] and ev["remaining_bytes"] <= 0:
             self.E(seq, "window_update: open=true with no bytes remaining")
         if self.duration is not None and t is not None and abs(ev["time_remaining_s"] - (self.duration - t)) > 1.0:
-            self.W(seq, f"window_update: time_remaining_s {ev['time_remaining_s']} but duration - t = {self.duration - t:.1f}")
+            self.W(
+                seq,
+                f"window_update: time_remaining_s {ev['time_remaining_s']} but duration - t = {self.duration - t:.1f}",
+            )
         if not ev["open"] and self.window_closed_t is None:
             self.window_closed_t = t
         self.last_window = ev
 
-    def on_node_event(self, seq, t, ev):
+    def on_node_event(self, seq: int | None, t: float | None, ev: Event) -> None:
         self.node(seq, ev)
         if ev["level"] not in LEVELS:
             self.E(seq, f"node_event: level {ev['level']!r} not in {LEVELS}")
         self.levels[ev["level"]] += 1
 
-    def on_run_end(self, seq, t, ev):
+    def on_run_end(self, seq: int | None, t: float | None, ev: Event) -> None:
         self.ended = True
         self.run_end = ev
         for side in ("orbit", "baseline"):
             for k in TOTALS:
                 if not is_type(ev[side].get(k), Int):
                     self.E(seq, f"run_end: {side}.{k} missing or not an int")
-        if not self.r.errors or True:
-            o, b = ev["orbit"], ev["baseline"]
-            checks = [("orbit.frames_down", o.get("frames_down"), self.n_arrived),
-                      ("orbit.usable_down", o.get("usable_down"), self.n_usable),
-                      ("orbit.bytes_used", o.get("bytes_used"), self.bytes_used),
-                      ("orbit.frames_left_queued", o.get("frames_left_queued"), sum(len(n.queue) for n in self.nodes.values())),
-                      ("baseline.frames_down", b.get("frames_down"), self.base_n),
-                      ("baseline.usable_down", b.get("usable_down"), self.base_usable),
-                      ("baseline.bytes_used", b.get("bytes_used"), self.base_bytes)]
-            for name, got, want in checks:
-                if got != want:
-                    self.E(seq, f"run_end: {name} is {got} but the events add up to {want}")
+        # the totals are cross-checked even when earlier events already failed
+        o, b = ev["orbit"], ev["baseline"]
+        checks = [
+            ("orbit.frames_down", o.get("frames_down"), self.n_arrived),
+            ("orbit.usable_down", o.get("usable_down"), self.n_usable),
+            ("orbit.bytes_used", o.get("bytes_used"), self.bytes_used),
+            (
+                "orbit.frames_left_queued",
+                o.get("frames_left_queued"),
+                sum(len(n.queue) for n in self.nodes.values()),
+            ),
+            ("baseline.frames_down", b.get("frames_down"), self.base_n),
+            ("baseline.usable_down", b.get("usable_down"), self.base_usable),
+            ("baseline.bytes_used", b.get("bytes_used"), self.base_bytes),
+        ]
+        for name, got, want in checks:
+            if got != want:
+                self.E(seq, f"run_end: {name} is {got} but the events add up to {want}")
         h = ev["headline"]
-        if h.get("metric") == "usable frames downlinked":
-            if h.get("orbit") != ev["orbit"].get("usable_down") or h.get("baseline") != ev["baseline"].get("usable_down"):
-                self.E(seq, "run_end: headline orbit/baseline do not equal the usable_down totals")
-        if is_type(h.get("orbit"), Num) and is_type(h.get("baseline"), Num) and is_type(h.get("gain"), Num):
-            if h["baseline"] > 0 and abs(h["gain"] - h["orbit"] / h["baseline"]) > 0.006:
-                self.E(seq, f"run_end: headline gain {h['gain']} != {h['orbit']}/{h['baseline']} = {h['orbit'] / h['baseline']:.3f}")
+        if h.get("metric") == "usable frames downlinked" and (
+            h.get("orbit") != ev["orbit"].get("usable_down") or h.get("baseline") != ev["baseline"].get("usable_down")
+        ):
+            self.E(seq, "run_end: headline orbit/baseline do not equal the usable_down totals")
+        if (
+            is_type(h.get("orbit"), Num)
+            and is_type(h.get("baseline"), Num)
+            and is_type(h.get("gain"), Num)
+            and h["baseline"] > 0
+            and abs(h["gain"] - h["orbit"] / h["baseline"]) > 0.006
+        ):
+            self.E(
+                seq,
+                f"run_end: headline gain {h['gain']} != {h['orbit']}/{h['baseline']}"
+                f" = {h['orbit'] / h['baseline']:.3f}",
+            )
         if self.open_grant is not None:
             self.W(seq, f"run_end while slot {self.open_grant['slot_id']} has no frame_arrived")
 
@@ -590,9 +744,18 @@ class Checker:
         s["unknown_types"] = dict(self.unknown_types)
         s["duration_s"] = self.last_t
         s["run_id"] = self.run.get("run_id") if self.run else None
-        s["nodes"] = {nid: {"label": n.label, "scored": n.n_scored, "queued_now": len(n.queue), "evicted": n.n_evicted,
-                            "rejected": n.n_rejected, "sent": n.n_sent, "max_quiet_s": round(n.max_quiet, 1)}
-                      for nid, n in self.nodes.items()}
+        s["nodes"] = {
+            nid: {
+                "label": n.label,
+                "scored": n.n_scored,
+                "queued_now": len(n.queue),
+                "evicted": n.n_evicted,
+                "rejected": n.n_rejected,
+                "sent": n.n_sent,
+                "max_quiet_s": round(n.max_quiet, 1),
+            }
+            for nid, n in self.nodes.items()
+        }
         s["scored"] = sum(n.n_scored for n in self.nodes.values())
         s["arrived"] = self.n_arrived
         s["usable"] = self.n_usable
@@ -606,47 +769,60 @@ class Checker:
         return self.r
 
 
-def check_lines(lines) -> Report:
+def check_lines(lines: Iterable[str]) -> Report:
     c = Checker()
     for line in lines:
         c.feed_line(line)
     return c.finish()
 
 
-def check_events(events) -> Report:
+def check_events(events: Iterable[Event]) -> Report:
     c = Checker()
     for ev in events:
         c.feed(ev)
     return c.finish()
 
 
-def format_summary(s: dict, name: str) -> str:
+def format_summary(s: dict[str, Any], name: str) -> str:
     nodes = s.get("nodes", {})
     per = ", ".join(f"{n['label']} {n['scored']}" for n in nodes.values())
     quiet = max(nodes.values(), key=lambda n: n["max_quiet_s"], default=None)
     g = s.get("grants", {})
-    lines = [f"{name}: {s.get('events', 0)} events over {s.get('duration_s') or 0:.1f} s, {len(nodes)} nodes"
-             + (f", run_id {s['run_id']}" if s.get("run_id") else "")
-             + (f", {s['bad_lines']} unparseable lines" if s.get("bad_lines") else ""),
-             f"  scored {s.get('scored', 0)} ({per}) · still queued {sum(n['queued_now'] for n in nodes.values())}"
-             f" · evicted {sum(n['evicted'] for n in nodes.values())} (of which rejected on arrival {sum(n['rejected'] for n in nodes.values())})",
-             f"  downlinked {s.get('arrived', 0)} (usable {s.get('usable', 0)}) · grants: "
-             + (", ".join(f"{k} {v}" for k, v in sorted(g.items(), key=lambda kv: -kv[1])) or "none"),
-             f"  baseline FIFO {s.get('baseline', {}).get('arrived', 0)} (usable {s.get('baseline', {}).get('usable', 0)})"
-             + (f" · headline {s['headline'].get('orbit')} vs {s['headline'].get('baseline')} = {s['headline'].get('gain')}x"
-                if s.get("headline") else " · no run_end headline"),
-             f"  window {s.get('bytes_used', 0)} / {s.get('budget')} bytes"
-             + (f", closed at t={s['window_closed_t']:.1f}" if s.get("window_closed_t") is not None else ", still open at the end"),
-             f"  node_events " + (", ".join(f"{k} {v}" for k, v in s.get("node_events", {}).items()) or "none")
-             + (f" · longest node silence {quiet['label']} {quiet['max_quiet_s']} s" if quiet else "")]
+    lines = [
+        f"{name}: {s.get('events', 0)} events over {s.get('duration_s') or 0:.1f} s, {len(nodes)} nodes"
+        + (f", run_id {s['run_id']}" if s.get("run_id") else "")
+        + (f", {s['bad_lines']} unparseable lines" if s.get("bad_lines") else ""),
+        f"  scored {s.get('scored', 0)} ({per}) · still queued {sum(n['queued_now'] for n in nodes.values())}"
+        f" · evicted {sum(n['evicted'] for n in nodes.values())}"
+        f" (of which rejected on arrival {sum(n['rejected'] for n in nodes.values())})",
+        f"  downlinked {s.get('arrived', 0)} (usable {s.get('usable', 0)}) · grants: "
+        + (", ".join(f"{k} {v}" for k, v in sorted(g.items(), key=lambda kv: -kv[1])) or "none"),
+        f"  baseline FIFO {s.get('baseline', {}).get('arrived', 0)} (usable {s.get('baseline', {}).get('usable', 0)})"
+        + (
+            f" · headline {s['headline'].get('orbit')} vs {s['headline'].get('baseline')}"
+            f" = {s['headline'].get('gain')}x"
+            if s.get("headline")
+            else " · no run_end headline"
+        ),
+        f"  window {s.get('bytes_used', 0)} / {s.get('budget')} bytes"
+        + (
+            f", closed at t={s['window_closed_t']:.1f}"
+            if s.get("window_closed_t") is not None
+            else ", still open at the end"
+        ),
+        "  node_events "
+        + (", ".join(f"{k} {v}" for k, v in s.get("node_events", {}).items()) or "none")
+        + (f" · longest node silence {quiet['label']} {quiet['max_quiet_s']} s" if quiet else ""),
+    ]
     if s.get("unknown_types"):
         lines.append(f"  unknown types ignored: {s['unknown_types']}")
     return "\n".join(lines)
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     import argparse
-    ap = argparse.ArgumentParser(description="Check a runs/<run_id>.jsonl file against docs/events.md")
+
+    ap = argparse.ArgumentParser(description="Check a runs/<run_id>.jsonl file against docs/event_stream.md")
     ap.add_argument("path", help="run file, or - for stdin")
     ap.add_argument("--quiet", action="store_true", help="summary only, no per-event lines")
     ap.add_argument("--max", type=int, default=40, help="per-event lines to print per category (default 40)")
