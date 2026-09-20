@@ -3,9 +3,9 @@
 ## The shape
 
 ```
-  sat-a                 sat-b                 sat-c            ESP32-S3 (simulated today)
-  score · buffer ·      score · buffer ·      score · buffer ·  fully autonomous
-  queue · bid · send    queue · bid · send    queue · bid · send
+  sat-a                 sat-b                 sat-c               ESP32-S3 · three simulated,
+  score · buffer ·      score · buffer ·      score · buffer ·    two boards on the bench
+  queue · bid · send    queue · bid · send    queue · bid · send  fully autonomous
       │                     │                     │
       └─────────────────────┼─────────────────────┘
                             │  UDP multicast 239.255.42.99:50000 — every node hears everything
@@ -40,7 +40,14 @@ the re-offer with an ack instead of a grant, so nothing is ever sent or counted 
 
 `orbit/sim/satellite.py` is this behaviour as a pure event machine, driven by a
 virtual clock in the simulator and by asyncio in the live demo. The ESP32 firmware
-will implement the same rules (`docs/protocol.md` §"Satellite rules").
+implements the same rules (`docs/protocol.md` §"Satellite rules"): `firmware/satellite_esp32/`
+is a complete sketch plus eight headers — scoring kernel, queue, codec, LittleFS frame
+store, TweetNaCl with Ed25519 and AES-GCM — and `firmware/test/` compiles those headers
+on the host and holds them to this Python model term by term
+(`tools/check_score_parity.py`, `tools/check_firmware_sync.py`). The roster is three
+satellites in simulation and exactly two boards, `esp32-satellite-b` and
+`esp32-satellite-c` (`orbit/config.py`). The boards have not yet run a pass end to end
+on the bus; what is proven is the kernel, the codec and the crypto, off the board.
 
 ## What the ground does
 

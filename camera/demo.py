@@ -3,7 +3,7 @@
 
     uv run python camera/demo.py            # then open http://localhost:8100/
 
-Stands alone. It is not the ground station, it does not speak docs/events.md,
+Stands alone. It is not the ground station, it does not speak docs/event_stream.md,
 and it has nothing to do with display/live.html: this is the half of the system
 that happens on the board, shown by itself. A photo comes in, the kernel scores
 it on cloud cover, detail and change, and the priority queue decides whether it
@@ -15,9 +15,10 @@ preview, and when you press the button it takes one frame, reduces it to the
 camera permission is Chrome's normal one, there is no opencv, and no terminal.
 
 The scoring is not the browser's. Every number on the page is computed here by
-orbit.golden.score, the same kernel the rest of the repo holds the RTL to, and
-the queue is orbit.golden.queue.PriorityQueue at its real depth. The page only
-draws what this file returns.
+orbit.golden.score, the same kernel tools/check_score_parity.py holds the ESP32
+firmware's C to, bit for bit, on all seven intermediates -- and the queue is
+orbit.golden.queue.PriorityQueue at its real depth. The page only draws what this
+file returns.
 
 No camera (or no permission) is not a failure: "Use a sample photo" pulls a
 frame from the committed corpus and scores it the same way.

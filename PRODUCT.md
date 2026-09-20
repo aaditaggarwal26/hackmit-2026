@@ -10,10 +10,10 @@ web
 
 Existing: a single-file dashboard, `viz/static/index.html` — hand-written
 HTML/CSS/vanilla JS, no build step, no framework, no npm. Served by FastAPI
-(`viz/server.py`) which pushes a full state snapshot over a WebSocket at 10 Hz
-and mirrors every control as a REST endpoint. Must keep working with zero
-network access (`tools/offline_check.py`): no CDN fonts, no CDN scripts, no
-remote images.
+(`viz/server.py`) which pushes a full state snapshot over a WebSocket at 1 Hz
+(`SNAPSHOT_S`, the cadence the ground emits its own at) and mirrors every control
+as a REST endpoint. Must keep working with zero network access: no CDN fonts, no
+CDN scripts, no remote images.
 
 ## Users
 
@@ -64,13 +64,20 @@ throughput and must never invite that comparison.**
 
 - **The judging slot**: three minutes, a laptop screen or a projector, judges at
   ~2 m. Large clear numbers beat decoration. The demo must run fully offline.
-- **The run**: the simulation advances in *passes* (orbits). Each pass has an
-  ingest phase (every satellite captures and scores 12 frames) and a contact
-  window (the ground grants transmission slots one at a time until the window's
-  byte budget is spent — 3 slots per pass at the demo's scaled pacing). Default
-  4 passes; `filtered_vs_fifo` runs 8.
-- **Five named scenarios** the operator switches between live: `nominal`,
-  `lead_change` (the demo default), `starvation`, `filtered_vs_fifo`, `scaling`.
+- **The run**: continuous and event driven, not a sequence of passes. The ground
+  opens a slot, every ready satellite bids its top item, the ground grants one, that
+  satellite transmits to completion, and arbitration runs again — `orbit/arbiter/fsm.py`,
+  and `ARCHITECTURE.md` "What the ground does". There is no separate ingest phase:
+  satellites capture and score throughout. The window closes when the next frame no
+  longer fits the byte budget. `orbit sim` runs 50 slots by default (`--rounds`).
+- **Six named scenarios**, defined in `orbit/sim/scenarios.py` and selected with
+  `--scenario`:
+  - `nominal` — three similar satellites; capture slightly outpaces the link
+  - `memory_pressure` — sat-c captures every 0.5 s into 8 slots: constant eviction
+  - `low_scorer` — sat-b scores 15 points lower than its peers on every frame
+  - `revoke` — sat-c is granted slots and never transmits
+  - `lossy` — bus duplicates 20%, reorders 10%, drops 2% of datagrams
+  - `late_joiner` — sat-c boots 40 s into the pass with no configuration anywhere
 - **Two policies run side by side on the same frames and the same window**: the
   scored priority queue, and an unfiltered FIFO baseline computed on the ground.
   The gap between them is the pitch.
@@ -91,20 +98,34 @@ throughput and must never invite that comparison.**
 - The corpus is **real NASA GIBS MODIS Terra imagery**, 194 frames, 14 scenes ×
   16 dates in 2024, 128×128 grayscale, committed to the repo. `synthetic: false`.
   Thumbnails are served from `/corpus/<id>.png`.
-- The contact window is **modelled, not performed**: pixels never cross the UART.
-  The link carries frame rows in, scores/grants/accounting out. Window capacity
-  is enforced by byte accounting. The demo window is **scaled down** (3 frames
-  per pass instead of 45,776) and must be labelled as scaled wherever shown.
+- The contact window is **modelled, not performed**: there is no radio and no
+  orbital propagation. Frames cross a UDP multicast bus and capacity is enforced by
+  byte accounting — `duration × rate / 8`, one fixed frame debited per confirmed
+  transmission. The demo window is **scaled down** for the judging slot:
+  `window_duration_s = 120.0` and `link_rate_bps = 65_536.0` in `orbit/config.py`,
+  which is 983,040 bytes or 60 frames of 16,384. The unscaled reference figures sit
+  beside them as `REAL_WINDOW_DURATION_S = 600.0` and `REAL_LINK_RATE_BPS =
+  10_000_000.0`, which would be 45,776 slots (`corpus/gate_result.json`, `unscaled`).
+  Scaled numbers must be labelled as scaled wherever shown.
 - **Cloud does not block the radio link.** Cloud degrades the captured image and
   therefore lowers its score. What gates transmission is line of sight — the
   pass. The UI must keep these two separate; conflating them is a known failure
   the team fixed in the pitch and must not reintroduce.
-- Terminology is settled: **orchestrator / edge node**, never master/slave.
-- The starvation guard: after N consecutive wins by one satellite, the ground
-  forces a switch. N is a live knob, default 3, and its value is an open
-  parameter the team wants visible.
-- Unresolved and must not be invented: camera hardware, live capture vs replay,
-  contact-window duration in the real system.
+- Terminology is settled: **ground / satellite**, never master/slave. The
+  orchestrator and edge node of the pre-pivot design are gone from the code and must
+  not come back into the copy.
+- There is no consecutive-win counter and no forced switch. Fairness is the two
+  aging terms in the priority formula and nothing else (`orbit/arbiter/priority.py`):
+  item age and satellite wait are added to the score, at `ITEM_AGING_RATE` 0.5 and
+  `SAT_AGING_RATE` 0.3. Those two rates are the live knobs and the team wants them
+  visible. The event stream labels a slot `reason: "starvation_forced"` when the
+  aging terms rather than the raw score decided it (`orbit/ground/stream.py`) — that
+  is a description of what happened, not a separate mechanism.
+- Unresolved and must not be invented: the contact-window duration and link rate of
+  a real system (the `REAL_*` constants in `orbit/config.py` are reference figures,
+  not measurements), and per-frame energy on the satellite itself. Camera hardware is
+  no longer open: `camera/` scores a frame from the browser's own webcam with the same
+  kernel, on its own port, deliberately outside the arbitration path.
 
 ## Brand Commitments
 
