@@ -1,0 +1,1168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit — live run</title>
+<!--
+  Sheet 1 of the display: the live run, as a test report being written live.
+  One file, no build step. It reads the event stream in docs/events.md over a
+  WebSocket and shows what is happening right now on the three satellites.
+
+  The look is the Orbit design system (DESIGN.md): bond stock, white plates,
+  hairline rules, Archivo alone, light only, and five pens with one job each —
+    blue    Orbit's own result (a photo that came down, a won slot, used budget)
+    pencil  the baseline it beats (what first-in-first-out would have sent)
+    red     live right now, or something the ground forced (the fairness guard,
+            a lost link, an error)
+    green   measured on a real board
+    amber   simulated, replayed, stale, or not measured yet
+  A satellite is a numbered lane, never a colour.
+
+  Where the socket is:
+      ?ws=ws://HOST:PORT/ws      explicit (a ground station on another machine)
+      served over http            same host as the page, path /ws
+      opened as file://           ws://localhost:8000/ws
+  On connect the page GETs <same host>/api/state to catch up (tools/replay.py
+  documents the shape); if that 404s it starts from the next event. Thumbnails
+  come from <same host>/frames/<id>.png and are shown only after a frame_arrived
+  for that id (contract rule 2). The font sits next to this file in fonts/; if
+  it is missing the page falls back to the system sans.
+
+  Sheet 2 (results) follows rule 3 of the contract: it reads the recorded
+  runs/<run_id>.jsonl from <same host>/runs/<run_id>.jsonl, never live memory,
+  and takes the last run_end in it. While the run is still going it shows what
+  the file holds so far and re-reads every 5 s. ?run=<run_id> opens another
+  recorded run; <same host>/api/runs, when served, fills the run picker.
+
+  Scores on the wire are 0..65535 in the contract's examples and are shown out
+  of 100; a stream that only ever carries scores <= 100 is shown as is.
+  ?scale=65535 or ?scale=100 forces it.
+  Keys: 1 / 2 switch sheets, r shows raw scores.
+
+  Every field access is guarded: a missing field shows "—", a node that goes
+  quiet is marked stale, an unknown event type is counted and ignored, a bad
+  line is counted, a dropped seq shows a gap warning.
+-->
+<style>
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-stretch: 62% 125%;
+  font-display: block;
+  src: url('fonts/archivo-latin.woff2') format('woff2');
+}
+
+/* ── the five pens and the paper ──────────────────────────────────────── */
+:root {
+  --stock: #edf0f3; --plate: #ffffff; --plate-sunk: #f4f6f8;
+  --ink: #11161b; --ink-2: #4e5a66; --rule: #c9d2da; --rule-soft: #e2e8ed;
+  --blue: #1b54c8; --blue-wash: rgba(27, 84, 200, .10); --blue-soft: rgba(27, 84, 200, .16);
+  --pencil: #6e7a85;
+  --red: #c0271f; --red-wash: rgba(192, 39, 31, .10);
+  --green: #15704a;
+  --amber: #8a5a00; --amber-wash: rgba(138, 90, 0, .10);
+  --sh: 0 1px 2px rgba(17, 22, 27, .05), 0 6px 18px -12px rgba(17, 22, 27, .30);
+  --t-hero: clamp(34px, 3.6vw, 54px);
+  --t-pass: clamp(24px, 2.3vw, 31px);
+  --t-title: 24px;
+  --t-standfirst: 15px;
+  --t-lede: 13px;
+  --gap: 12px; --pad: 15px;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--stock); color: var(--ink);
+  font: 400 14.5px/1.45 Archivo, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; overflow: hidden;
+}
+::selection { background: var(--blue-soft); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+* { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 9px; border: 2px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+b { font-weight: 600; }
+
+/* ── the sheet ─────────────────────────────────────────────────────────── */
+#app { height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 11px; padding: 11px 16px 13px; }
+
+.titleblock { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding-bottom: 7px; border-bottom: 1px solid var(--rule); }
+.wordmark { font-size: var(--t-title); font-weight: 800; font-stretch: 112%; letter-spacing: -.012em; margin: 0; line-height: 1; }
+.standfirst { color: var(--ink-2); font-size: var(--t-standfirst); letter-spacing: -.005em; }
+.standfirst b { color: var(--ink); font-weight: 600; }
+.titleblock .spacer { flex: 1 1 24px; }
+.sheets { display: flex; gap: 2px; align-self: center; align-items: center; }
+.sheets button {
+  font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .085em; text-transform: uppercase;
+  color: var(--ink-2); background: transparent; border: 1px solid transparent; padding: 5px 11px; border-radius: 3px; cursor: pointer;
+  transition: color .16s var(--ease), background-color .16s var(--ease);
+}
+.sheets button:hover { color: var(--ink); background: var(--plate); }
+.sheets button[aria-selected="true"] { color: var(--plate); background: var(--ink); }
+.btn { font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--plate-sunk); border: 1px solid var(--rule-soft); border-radius: 3px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+.btn:hover { border-color: var(--rule); background: var(--stock); }
+
+/* ── conditions line ───────────────────────────────────────────────────── */
+.conditions { display: flex; flex-wrap: wrap; gap: 3px 18px; align-items: baseline; font-size: 12px; color: var(--ink-2); padding: 1px 2px; }
+.conditions .k { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; font-size: 10px; margin-right: 4px; }
+.conditions b { color: var(--ink); font-weight: 600; }
+
+/* ── tags and chips: the word always travels with the ink ──────────────── */
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
+.tag.m { color: var(--green); }      /* measured on a real board */
+.tag.e { color: var(--amber); }      /* modelled, simulated, replayed, stale, not yet */
+.tag.x { color: var(--red); }        /* live right now, or forced, or broken */
+.tag.b { color: var(--blue); }       /* Orbit's own result */
+.tag.p { color: var(--pencil); }     /* the baseline, or nothing */
+.chip { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; padding: 2px 6px; border-radius: 2px; border: 1px solid currentColor; white-space: nowrap; }
+.chip.hw { color: var(--green); }
+.chip.sim { color: var(--amber); }
+.chip.bad { color: var(--red); border-color: transparent; background: var(--red-wash); }
+.chip.plain { color: var(--ink-2); border-color: var(--rule); }
+.chip.solid { color: var(--plate); background: var(--red); border-color: transparent; }
+.chip.stale { color: var(--amber); border-color: transparent; background: var(--amber-wash); }
+.lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--pencil); flex: none; display: inline-block; }
+.x { color: var(--red); font-weight: 600; }
+
+/* ── plates ────────────────────────────────────────────────────────────── */
+.plate { background: var(--plate); border: 1px solid var(--rule-soft); border-radius: 3px; box-shadow: var(--sh); padding: var(--pad); min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.plate > h2 { margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; }
+.plate > h2 .n { color: var(--ink); font-stretch: 118%; }
+.plate > h2 .thin { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 12px; }
+.plate > h2 .right { margin-left: auto; }
+.caption { font-size: 12px; line-height: 1.35; color: var(--ink-2); margin-top: 7px; flex: none; }
+.caption b { color: var(--ink); font-weight: 600; }
+.micro { font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); }
+.key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); align-items: center; }
+.key span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.key i { display: block; width: 11px; height: 13px; border-radius: 2px; background: var(--blue); }
+.key i.forced { background: var(--red); }
+.key i.live { background: var(--rule-soft); box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red); }
+.key i.lost { background: var(--rule-soft); }
+.scroll { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.fade { -webkit-mask-image: linear-gradient(black calc(100% - 12px), transparent); mask-image: linear-gradient(black calc(100% - 12px), transparent); }
+
+/* ── sheet 1 grid ──────────────────────────────────────────────────────── */
+.sheet { min-height: 0; display: none; }
+.sheet[data-active] { display: grid; }
+#sheet-live {
+  grid-template-columns: minmax(0, 1.5fr) minmax(244px, .8fr) minmax(246px, .74fr);
+  grid-template-rows: minmax(330px, 1.36fr) minmax(184px, .72fr) minmax(150px, .56fr);
+  gap: var(--gap);
+}
+#sheet-live > .plate { overflow: hidden; }
+#p-channel  { grid-column: 1; grid-row: 1; }
+#p-photos   { grid-column: 2; grid-row: 1; }
+#p-window   { grid-column: 3; grid-row: 1; }
+#sats       { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); min-height: 0; }
+#p-arrivals { grid-column: 1 / 3; grid-row: 3; }
+#p-log      { grid-column: 3; grid-row: 3; }
+/* ── sheet 2: the recorded run against the baseline ─────────────────── */
+#sheet-results { grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr); grid-template-rows: minmax(280px, 1fr) minmax(236px, 1fr); gap: var(--gap); }
+#sheet-results > .plate { overflow: hidden; }
+#r-head  { grid-column: 1; grid-row: 1; }
+#r-table { grid-column: 2; grid-row: 1; }
+#r-slots { grid-column: 1; grid-row: 2; }
+#r-sats  { grid-column: 2; grid-row: 2; }
+.status { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; color: var(--ink-2); margin-bottom: 8px; flex: none; }
+.status b { color: var(--ink); }
+.ctl { margin-left: auto; display: flex; gap: 6px; align-items: center; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.ctl select { font: inherit; font-size: 12px; color: var(--ink); background: var(--plate-sunk); border: 1px solid var(--rule-soft); border-radius: 3px; padding: 3px 6px; max-width: 30ch; }
+.ctl .btn { font-size: 12px; padding: 3px 9px; }
+.pair .fig:empty::before { content: '\00a0'; }
+.pair { display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: end; flex: none; }
+.pair .fig { font-size: var(--t-hero); font-weight: 800; font-stretch: 108%; line-height: .9; letter-spacing: -.035em; font-variant-numeric: proportional-nums; }
+.pair .fig.blue { color: var(--blue); }
+.pair .fig.pencil { color: var(--pencil); }
+.pair .lbl { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.pair .lbl b { color: var(--ink); }
+.pair .gain { text-align: center; font-size: var(--t-pass); font-weight: 800; letter-spacing: -.02em; padding: 0 6px 4px; }
+.pair .gain small { display: block; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-2); letter-spacing: .1em; }
+.dots { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; min-height: 18px; }
+.dots i { width: 14px; height: 18px; border-radius: 2px; background: var(--plate-sunk); border: 1px solid var(--rule-soft); }
+.dots i[data-on] { background: var(--blue); border-color: var(--blue); }
+.dots.pencil i[data-on] { background: transparent; border: 2px dashed var(--pencil); }
+.lede { font-size: var(--t-lede); line-height: 1.3; margin-top: 10px; max-width: 74ch; flex: none; }
+.lede b { font-weight: 700; }
+.prov { font-size: 12px; color: var(--ink-2); margin-top: auto; padding-top: 8px; border-top: 1px solid var(--rule-soft); display: flex; flex-wrap: wrap; gap: 3px 14px; flex: none; }
+.prov b { color: var(--ink); }
+td.derived { font-size: 12px; color: var(--ink-2); }
+td.derived::after { content: ' derived'; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--amber); }
+.slotwrap { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.slotgrid { display: grid; gap: 3px 5px; align-items: start; justify-content: start; font-size: 10px; color: var(--ink-2); }
+.slotgrid .rl { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; display: flex; align-items: center; gap: 6px; padding-top: 12px; white-space: nowrap; }
+.slotgrid .rl i { width: 9px; height: 9px; border-radius: 2px; background: var(--blue); flex: none; }
+.slotgrid .rl i.pencil { background: transparent; border: 2px dashed var(--pencil); width: 7px; height: 7px; }
+.slotgrid .hd { font-weight: 700; text-align: center; letter-spacing: .05em; }
+.slotgrid .hd[data-forced] { color: var(--red); }
+.slotcell { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.slotcell .shot { width: 100%; max-width: 46px; aspect-ratio: 1; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); overflow: hidden; }
+.slotcell .shot[data-usable] { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+.slotcell .shot.pencil[data-usable] { border: 2px dashed var(--pencil); box-shadow: none; }
+.slotcell[data-bad] .shot { opacity: .45; }
+.slotcell[data-bad] .v { color: var(--ink-2); font-weight: 400; text-decoration: line-through; }
+.slotcell .v { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.slotcell .w { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 1180px) {
+  #sheet-results { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  #r-head, #r-table, #r-slots, #r-sats { grid-column: 1; grid-row: auto; }
+  #sheet-results > .plate { overflow: visible; }
+}
+
+/* ── FIG 1: who has the channel ────────────────────────────────────────── */
+.hero { display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap; flex: none; }
+.hero .who { font-size: var(--t-hero); font-weight: 800; font-stretch: 108%; line-height: .88; letter-spacing: -.035em; font-variant-numeric: proportional-nums; }
+.phase { display: inline-flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: .02em; padding: 4px 10px 4px 8px; border-radius: 3px; background: var(--plate-sunk); border: 1px solid var(--rule-soft); color: var(--ink); }
+.phase[data-live] { background: var(--red-wash); border-color: transparent; color: var(--red); }
+.phase[data-live] .lamp { background: var(--red); animation: breathe 1.9s var(--ease) infinite; }
+@keyframes breathe { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
+.hero .say { font-size: var(--t-lede); line-height: 1.26; padding-top: 4px; max-width: 46ch; flex: 1 1 220px; }
+.hero .say b { font-weight: 700; }
+.bids { margin-top: 7px; flex: none; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+thead th { text-align: left; font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); padding: 0 12px 6px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+tbody td { padding: 3px 12px 3px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: baseline; }
+tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-weight: 600; white-space: nowrap; }
+td.how, td.dim { color: var(--ink-2); }
+tbody tr[data-won] td { background: var(--blue-wash); font-weight: 600; }
+tbody tr[data-forced] td { background: var(--red-wash); }
+td .sub { font-size: 12px; color: var(--ink-2); font-weight: 400; }
+.out.won { color: var(--blue); font-weight: 700; }
+.out.forced { color: var(--red); font-weight: 700; }
+.out.held { color: var(--red); }
+.out.lost { color: var(--ink-2); }
+
+/* ── FIG 2: the last photo home, against the baseline ──────────────────── */
+.versus { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.versus figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; align-items: center; }
+.versus .who { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; display: flex; align-items: flex-start; gap: 5px; min-height: 2.4em; align-self: stretch; flex: none; color: var(--ink-2); }
+.versus .who i { width: 9px; height: 9px; border-radius: 2px; flex: none; margin-top: 2px; background: var(--blue); }
+.versus .who i.pencil { background: transparent; border: 2px dashed var(--pencil); width: 7px; height: 7px; }
+.versus .shot { flex: 1 1 auto; aspect-ratio: 1; width: auto; max-width: 100%; min-height: 44px; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); display: grid; place-items: center; overflow: hidden; }
+.shot img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; display: block; border-radius: 1px; }
+.shot .none { font-size: 11px; color: var(--ink-2); text-align: center; padding: 6px; }
+.versus figcaption { font-size: 12px; color: var(--ink-2); line-height: 1.3; align-self: stretch; flex: none; }
+.versus .sc { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -.02em; }
+.versus .sc small { font-size: 12px; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+
+/* ── FIG 3: the contact window ─────────────────────────────────────────── */
+.passno { font-size: var(--t-pass); font-weight: 800; font-stretch: 106%; letter-spacing: -.025em; line-height: 1; font-variant-numeric: proportional-nums; }
+.passno small { font-size: .46em; font-weight: 600; color: var(--ink-2); letter-spacing: 0; }
+.meter { margin-top: 9px; flex: none; }
+.meter .track { height: 20px; border-radius: 2px; background: var(--plate-sunk); border: 1px solid var(--rule-soft); display: flex; gap: 2px; padding: 2px; overflow: hidden; }
+.meter .track i { display: block; flex: 0 0 auto; border-radius: 1px; background: var(--rule-soft); min-width: 2px; }
+.meter .track i[data-used] { background: var(--blue); }
+.meter .track i[data-now] { background: var(--rule-soft); box-shadow: inset 0 0 0 2px var(--red); }
+.meter .track i[data-rest] { flex: 1 1 auto; background: transparent; }
+.meter .cap { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 4px; flex-wrap: wrap; }
+.meter .cap b { color: var(--ink); font-weight: 700; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; align-items: baseline; margin: 9px 0 0; }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; text-align: right; font-weight: 600; }
+
+/* ── the slot ledger, at the foot of Fig 1 ─────────────────────────────── */
+.ledger { margin-top: auto; padding-top: 8px; flex: none; }
+.ledger .qline { justify-content: space-between; margin-bottom: 4px; }
+.lanes { display: flex; flex-direction: column; gap: 3px; }
+.lane { display: flex; align-items: center; gap: 8px; }
+.lane .name { width: 84px; flex: none; font-size: 12px; font-weight: 700; letter-spacing: .05em; color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lane .cells { flex: 1 1 auto; display: flex; gap: 2px; min-width: 0; }
+.lane .cells b { flex: 1 1 0; min-width: 4px; height: 14px; border-radius: 2px; background: var(--rule-soft); position: relative; }
+.lane .cells b[data-won] { background: var(--blue); }
+.lane .cells b[data-forced] { background: var(--red); }
+.lane .cells b[data-live] { box-shadow: 0 0 0 2px var(--plate), 0 0 0 3.5px var(--red); z-index: 2; }
+.lane .cells b[data-new] { animation: land .45s var(--ease) both; }
+@keyframes land { from { transform: scaleY(.25); opacity: .2; } to { transform: scaleY(1); opacity: 1; } }
+.axis { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.axis .name { width: 84px; flex: none; }
+.axis .rng { flex: 1 1 auto; display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-2); }
+.ledger .caption { margin-top: 3px; }
+.ledger .caption:empty { display: none; }
+.pmark { display: inline-block; width: 7px; height: 7px; border: 2px dashed var(--pencil); border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.pencil { color: var(--pencil); }
+
+/* ── satellite strips ──────────────────────────────────────────────────── */
+.sat { display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.sat .head { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-2); flex: none; }
+.sat .head .n { font-size: 13px; letter-spacing: .04em; color: var(--ink); font-stretch: 112%; white-space: nowrap; flex: none; }
+.sat .head .sub { font-weight: 500; letter-spacing: .02em; text-transform: none; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 2ch; }
+.sat .head .chips { margin-left: auto; display: flex; gap: 5px; flex: none; }
+.bar { display: grid; grid-template-columns: auto minmax(0, 1fr) 46px; gap: 8px; align-items: center; font-size: 13px; }
+.bar .t { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .track { height: 10px; border-radius: 5px; background: var(--plate-sunk); overflow: hidden; }
+.bar .track i { display: block; height: 100%; width: 100%; border-radius: 5px; background: var(--blue); transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
+.bar .v { text-align: right; font-weight: 700; }
+.triplet { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.triplet .m { display: grid; grid-template-columns: auto minmax(14px, 1fr) 30px; gap: 5px; align-items: center; font-size: 12px; }
+.triplet .m .t { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.triplet .m .track { height: 5px; border-radius: 3px; background: var(--plate-sunk); overflow: hidden; }
+.triplet .m .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft); transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
+.triplet .m .v { font-weight: 700; text-align: right; }
+.qline { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; flex: none; }
+.qdetail { font-size: 12px; color: var(--ink-2); }
+.qdetail b { color: var(--ink); }
+.qwrap { flex: 1 1 auto; min-height: 30px; overflow: hidden; display: flex; flex-direction: column; gap: 3px; }
+.queue { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; -webkit-mask-image: linear-gradient(black calc(100% - 9px), transparent); mask-image: linear-gradient(black calc(100% - 9px), transparent); }
+.queue .qrow { display: grid; grid-template-columns: minmax(0, 1fr) 36px 74px; gap: 7px; align-items: center; font-size: 12px; }
+.queue .qrow .track { height: 9px; border-radius: 2px; background: var(--plate-sunk); overflow: hidden; }
+.queue .qrow .track i { display: block; height: 100%; width: 100%; background: var(--blue-soft); transform-origin: left center; transform: scaleX(0); transition: transform .3s var(--ease); }
+.queue .qrow:first-child .track i { background: var(--blue); }
+.queue .qrow .v { text-align: right; font-weight: 700; color: var(--ink); }
+.queue .qrow .id { text-align: right; color: var(--ink-2); white-space: nowrap; }
+.sentwrap { flex: none; }
+.sentrow { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; margin-top: 3px; -webkit-mask-image: linear-gradient(90deg, black calc(100% - 22px), transparent); mask-image: linear-gradient(90deg, black calc(100% - 22px), transparent); }
+.sentrow figure { margin: 0; text-align: center; flex: none; }
+.sentrow .shot { width: 36px; height: 36px; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); display: block; overflow: hidden; }
+.sentrow figcaption { font-size: 10px; color: var(--ink-2); margin-top: 2px; }
+.sentwrap .none { font-size: 12px; color: var(--ink-2); margin-top: 3px; }
+.last { font-size: 12px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.last b { color: var(--ink); }
+#sats[data-compact] { grid-template-columns: minmax(0, 1fr); grid-auto-rows: 46px; overflow-y: auto; align-content: start; gap: 6px; }
+#sats[data-compact] .sat { flex-direction: row; align-items: center; gap: 14px; padding: 5px 10px; }
+#sats[data-compact] .sat .head { width: 260px; flex: none; flex-wrap: nowrap; }
+#sats[data-compact] .sat .head .chips { margin-left: 6px; }
+#sats[data-compact] .sat .barswrap { flex: 1 1 auto; min-width: 0; }
+#sats[data-compact] .sat .barswrap .micro, #sats[data-compact] .sat .triplet, #sats[data-compact] .sat .last { display: none; }
+#sats[data-compact] .sat .qwrap, #sats[data-compact] .sat .sentwrap { display: none; }
+
+/* ── TABLE 1 and the log ───────────────────────────────────────────────── */
+td.thumb { width: 24px; padding-right: 8px; }
+td.thumb span { display: block; width: 22px; height: 22px; border: 1px solid var(--rule-soft); border-radius: 2px; background: var(--plate-sunk); overflow: hidden; }
+td.thumb img { width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; display: block; }
+tr.fresh td { animation: settle 1.4s var(--ease) both; }
+@keyframes settle { from { background: var(--blue-wash); } to { background: transparent; } }
+.log { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink-2); overflow: auto; min-height: 0; flex: 1 1 auto; }
+.log div { white-space: pre-wrap; padding-left: 19ch; text-indent: -19ch; margin-bottom: 1px; }
+.log .x { color: var(--red); font-weight: 700; }
+.log .e { color: var(--amber); font-weight: 700; }
+.log .sys { opacity: .7; }
+.empty { font-size: 12px; color: var(--ink-2); padding: 6px 0; }
+
+/* ── the lost-link banner ──────────────────────────────────────────────── */
+#offline { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: var(--red); color: #fff; font-size: 13px; font-weight: 700; padding: 7px 14px; border-radius: 3px; z-index: 40; box-shadow: var(--sh); display: none; max-width: 90vw; text-align: center; }
+#offline[data-show] { display: block; }
+.help { position: fixed; right: 10px; bottom: 2px; font-size: 10px; color: var(--ink-2); opacity: .7; }
+
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }
+@media (max-height: 940px) and (min-width: 1181px) { #sats:not([data-compact]) .sat .sentwrap { display: none; } }
+@media (max-height: 860px) and (min-width: 1181px) { #p-photos .caption, #p-window .caption { display: none; } :root { --t-pass: clamp(22px, 2.1vw, 27px); --pad: 13px; } }
+@media (max-height: 799px) and (min-width: 1181px) {
+  body { overflow: auto; }
+  #app { height: auto; min-height: 100%; }
+  #sheet-live { grid-template-rows: minmax(336px, auto) minmax(184px, auto) minmax(160px, auto); }
+  #sheet-live > .plate { overflow: visible; }
+  #sheet-results { grid-template-rows: auto auto; }
+  #sheet-results > .plate { overflow: visible; }
+  #p-arrivals .scroll, #p-log .log { max-height: 320px; }
+}
+@media (max-height: 860px) { :root { --t-hero: 42px; } }
+@media (max-width: 1180px) {
+  body { overflow: auto; }
+  #app { height: auto; min-height: 100%; }
+  #sheet-live { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto; }
+  #sheet-live > * { grid-row: auto; }
+  #p-channel { grid-column: 1 / -1; }
+  #p-photos { grid-column: 1; } #p-window { grid-column: 2; }
+  #sats, #p-arrivals, #p-log { grid-column: 1 / -1; }
+  #sheet-live > .plate { overflow: visible; }
+  #p-arrivals .scroll, #p-log .log { max-height: 340px; }
+  #sats[data-compact] { overflow: visible; grid-auto-rows: auto; }
+}
+@media (max-width: 720px) {
+  #app { padding: 10px; gap: 8px; }
+  :root { --t-title: 21px; --t-standfirst: var(--t-lede); --t-hero: 40px; }
+  #sheet-live { grid-template-columns: minmax(0, 1fr); }
+  #p-channel, #p-photos, #p-window, #sats, #p-arrivals, #p-log { grid-column: 1; }
+  #sats { grid-template-columns: minmax(0, 1fr); }
+  .lane .name, .axis .name { width: 62px; font-size: 10px; }
+  .triplet { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+</style>
+</head>
+<body>
+<div id="offline"></div>
+<div id="app">
+  <header class="titleblock">
+    <h1 class="wordmark">ORBIT</h1>
+    <div class="standfirst">A satellite takes far more photos than it can send home. <b>Which ones go first?</b></div>
+    <div class="spacer"></div>
+    <div class="sheets" role="tablist" aria-label="Sheets">
+      <button role="tab" aria-selected="true" data-sheet="live" title="Press 1">1 · Live run</button>
+      <button role="tab" aria-selected="false" data-sheet="results" title="Press 2">2 · Results</button>
+    </div>
+  </header>
+  <div class="conditions" id="conditions"><span><span class="k">Feed</span> connecting…</span></div>
+
+  <main id="sheet-live" class="sheet" data-active>
+    <section class="plate" id="p-channel">
+      <h2><span class="n">Fig 1</span> Who has the channel <span class="thin">now, and slot by slot · the highest offer out of 100 wins</span></h2>
+      <div class="hero">
+        <div>
+          <div class="who" id="ch-who">Nobody yet</div>
+          <div class="phase" id="ch-phase"><i class="lamp"></i><span id="ch-phase-text">Waiting for the ground station</span></div>
+        </div>
+        <div class="say" id="ch-say">The first slot goes out as soon as one satellite has scored a photo.</div>
+      </div>
+      <div class="bids">
+        <table>
+          <thead><tr><th>Satellite</th><th class="num">Offered</th><th>State</th><th>Outcome</th></tr></thead>
+          <tbody id="bids-body"></tbody>
+        </table>
+      </div>
+      <div class="ledger">
+        <div class="qline"><span class="micro" id="lanes-label">Slot by slot</span>
+          <span class="key"><span><i></i>won the slot</span><span><i class="forced"></i>fairness guard forced the switch</span><span><i class="live"></i>sending now</span></span></div>
+        <div class="lanes" id="lanes"><div class="empty">No slot has been granted yet. An offer is the top score in a satellite's queue, computed onboard; the ground only compares them.</div></div>
+        <div class="axis" id="axis" hidden><span class="name"></span><span class="rng"><span id="axis-a"></span><span id="axis-b"></span></span></div>
+        <div class="caption" id="slots-cap"></div>
+      </div>
+    </section>
+
+    <section class="plate" id="p-photos">
+      <h2><span class="n">Fig 2</span> The last photo home <span class="thin">and what first-in-first-out would have sent</span></h2>
+      <div class="versus">
+        <figure>
+          <div class="who"><i></i>Orbit sent</div>
+          <div class="shot" id="ph-a"><span class="none">No photo has come down yet</span></div>
+          <figcaption id="ph-a-cap"></figcaption>
+        </figure>
+        <figure>
+          <div class="who"><i class="pencil"></i>Baseline would have sent</div>
+          <div class="shot" id="ph-b"><span class="none">—</span></div>
+          <figcaption id="ph-b-cap"></figcaption>
+        </figure>
+      </div>
+      <div class="caption" id="ph-cap">Same slot, same airtime. <b>Usable</b> is judged from cloud cover alone, never from the score.</div>
+    </section>
+
+    <section class="plate" id="p-window">
+      <h2><span class="n">Fig 3</span> Contact window</h2>
+      <div class="passno" id="w-left">--:-- <small>left</small></div>
+      <div class="phase" id="w-phase"><i class="lamp"></i><span id="w-phase-text">No window report yet</span></div>
+      <div class="meter">
+        <div class="track" id="w-track"><i data-rest></i></div>
+        <div class="cap"><span id="w-used">— used</span><span id="w-down">— down</span></div>
+      </div>
+      <dl class="kv" id="w-kv"></dl>
+      <div class="caption">A byte budget the ground keeps and debits per photo. The baseline is charged the same budget on the same photos.</div>
+    </section>
+
+    <div id="sats"></div>
+
+    <section class="plate" id="p-arrivals">
+      <h2><span class="n">Table 1</span> Photos that reached the ground <span class="thin">newest first</span><span class="thin right" id="arr-count"></span></h2>
+      <div class="scroll fade">
+        <table>
+          <thead><tr><th>Slot</th><th></th><th>Satellite</th><th class="num">Score /100</th><th class="num">Cloud</th><th>Usable</th><th class="num">Size</th><th class="num">Took</th><th class="num">At</th></tr></thead>
+          <tbody id="arr-body"><tr><td colspan="9" class="empty">Nothing has come down yet.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="plate" id="p-log">
+      <h2><span class="n">Log</span> Messages from the satellites <span class="thin">newest first</span></h2>
+      <div class="log" id="log">no node_event yet</div>
+    </section>
+  </main>
+
+  <main id="sheet-results" class="sheet">
+    <section class="plate" id="r-head">
+      <h2><span class="n">Fig 5</span> The headline <span class="thin">usable photos home · same window, same bandwidth, different architecture</span><span class="ctl" id="r-controls"></span></h2>
+      <div class="status" id="r-status"></div>
+      <div class="pair">
+        <div><div class="fig blue" id="r-o">—</div><div class="lbl"><b>Orbit</b> · usable photos home</div><div class="dots" id="r-o-dots"></div></div>
+        <div class="gain" id="r-gain">—<small>gain</small></div>
+        <div><div class="fig pencil" id="r-b">—</div><div class="lbl"><b>Baseline</b> · first-in-first-out on the same budget</div><div class="dots pencil" id="r-b-dots"></div></div>
+      </div>
+      <div class="lede" id="r-say"></div>
+      <div class="prov" id="r-prov"></div>
+    </section>
+
+    <section class="plate" id="r-table">
+      <h2><span class="n">Table 2</span> Orbit against the baseline</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Measure</th><th class="num">Orbit</th><th class="num">Baseline</th><th class="num">Difference</th></tr></thead>
+          <tbody id="r-cmp"><tr><td colspan="4" class="empty">No run_end read yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="caption">Copied from the <b>run_end</b> event in the recorded file. Rows marked <span class="tag e">derived</span> are worked out by the display from those numbers.</div>
+    </section>
+
+    <section class="plate" id="r-slots">
+      <h2><span class="n">Fig 6</span> Slot by slot <span class="thin">what Orbit sent, over what first-in-first-out would have sent</span><span class="thin right" id="r-slots-n"></span></h2>
+      <div class="slotwrap fade"><div class="slotgrid" id="r-slotgrid"><div class="empty">No photos recorded yet.</div></div></div>
+      <div class="caption">One column per slot, paired in file order. A <b>solid blue</b> or <b>dashed pencil</b> frame means usable; faded means not usable. Slot numbers in <span class="x">red</span> were forced by the fairness guard.</div>
+    </section>
+
+    <section class="plate" id="r-sats">
+      <h2><span class="n">Table 3</span> By satellite</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Satellite</th><th class="num">Down</th><th class="num">Usable</th><th class="num">Bytes</th><th class="num">Slots won</th><th class="num">Forced</th><th class="num">Scored</th></tr></thead>
+          <tbody id="r-sats-body"><tr><td colspan="7" class="empty">Nothing recorded yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="caption">Added up by the display from the <b>frame_arrived</b>, <b>grant</b> and <b>node_status</b> events in the same file.</div>
+    </section>
+  </main>
+</div>
+<div class="help" id="help"></div>
+
+<script>
+'use strict';
+// ------------------------------------------------------------------ config
+const Q = new URLSearchParams(location.search);
+const WS_URL = Q.get('ws') || (location.protocol.startsWith('http')
+  ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
+  : 'ws://localhost:8000/ws');
+let HTTP_BASE = '';
+try { const u = new URL(WS_URL); HTTP_BASE = (u.protocol === 'wss:' ? 'https:' : 'http:') + '//' + u.host; } catch (e) { HTTP_BASE = ''; }
+const FRAMES_BASE = HTTP_BASE + '/frames/';
+const THUMB = id => `${String(id).padStart(4, '0')}.png`;
+const SCALE_OVERRIDE = Number(Q.get('scale')) || 0;
+const REASON = { highest_score: 'won on the highest score', starvation_forced: 'was handed the slot by the fairness guard', only_ready: 'was the only one ready' };
+const STALE_S = 3, DEAD_S = 12, FREEZE_S = 5;
+const LANE_COLS = 48, QUEUE_ROWS = 5, SENT_MAX = 12, ARR_ROWS = 80, LOG_ROWS = 150;
+
+// ------------------------------------------------------------------ helpers
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const num = v => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+const isInt = v => Number.isInteger(v);
+const arr = v => Array.isArray(v) ? v : [];
+const str = v => typeof v === 'string' ? v : null;
+const DASH = '—';
+let showRaw = false;
+function scale() { return SCALE_OVERRIDE || (Math.max(S.maxScore, R.maxScore) > 100 ? 65535 : 100); }
+function fmtScore(v) { v = num(v); if (v == null) return DASH; if (showRaw) return v.toLocaleString(); return (v / scale() * 100).toFixed(1); }
+function frac(v, max) { v = num(v); max = num(max); if (v == null || !max) return 0; return Math.max(0, Math.min(1, v / max)); }
+function fmtBytes(b) { b = num(b); if (b == null) return DASH; if (b >= 1048576) return (b / 1048576).toFixed(b >= 10485760 ? 0 : 1) + ' MB'; if (b >= 1024) return Math.round(b / 1024) + ' KB'; return b + ' B'; }
+function fmtClock(t) { t = num(t); if (t == null) return '--:--'; t = Math.max(0, t); const m = Math.floor(t / 60), s = Math.floor(t % 60); return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`; }
+function fmtAge(a) { a = num(a); if (a == null) return DASH; return a < 100 ? Math.round(a) + ' s' : fmtClock(a); }
+function fmtPct(f) { f = num(f); return f == null ? DASH : Math.round(f * 100) + '%'; }
+function fmtDur(d) { d = num(d); return d == null ? DASH : (d < 10 ? d.toFixed(1) : Math.round(d)) + ' s'; }
+function setText(el, t) { if (el && el.textContent !== t) el.textContent = t; }
+function setHTML(el, h) { if (el && el.__h !== h) { el.innerHTML = h; el.__h = h; } }
+function setAttr(el, name, on) { if (!el) return; if (on) { if (!el.hasAttribute(name)) el.setAttribute(name, ''); } else if (el.hasAttribute(name)) el.removeAttribute(name); }
+
+// ------------------------------------------------------------------ state
+const S = {
+  run: null, source: null, nodes: new Map(), order: [], t: null,
+  lastGrant: null, bus: null, lastDone: null, grants: [], arrivals: [], scored: new Map(),
+  window: null, windowT: null, windowClosedLogged: false, runEnd: null, baseline: { n: 0, usable: 0 },
+  seq: { expected: null, gaps: 0, missed: 0, last: null }, badLines: 0, badEvents: 0, unknown: new Map(), maxScore: 0,
+  clock: { t: null, wall: 0, rate: 1 }, conn: 'connecting', attempted: false, lastMsgWall: 0, log: [], listsDirty: true,
+};
+let dirty = true;
+
+function nodeRec(id) {
+  if (!S.nodes.has(id)) {
+    S.nodes.set(id, { id, label: 'node ' + id, transport: '', real: null, status: null, statusT: null, qw: null, qwT: null,
+                      lastScored: null, lastScoredT: null, lastEvent: null, lastEventT: null, el: null });
+    S.order.push(id);
+  }
+  return S.nodes.get(id);
+}
+const satNo = id => S.order.indexOf(id) + 1;
+const satName = id => S.order.includes(id) ? `Satellite ${satNo(id)}` : (id == null ? 'Satellite ?' : `node ${id}`);
+const satShort = id => S.order.includes(id) ? `Sat ${satNo(id)}` : `node ${id}`;
+
+function pushLog(entry) { S.log.unshift(entry); if (S.log.length > 400) S.log.length = 400; S.listsDirty = true; }
+function sysLog(t, level, message) { pushLog({ t: t ?? S.t, node: null, level, message, sys: true }); }
+
+function resetRun(ev) {
+  for (const n of S.nodes.values()) if (n.el) n.el.remove();
+  S.run = ev; S.nodes.clear(); S.order = []; S.lastGrant = null; S.bus = null; S.lastDone = null; S.grants = []; S.arrivals = []; S.scored.clear();
+  S.window = null; S.windowT = null; S.windowClosedLogged = false; S.runEnd = null; S.baseline = { n: 0, usable: 0 }; S.maxScore = 0;
+  S.seq = { expected: isInt(ev.seq) ? ev.seq + 1 : null, gaps: 0, missed: 0, last: ev.seq }; S.log = []; S.listsDirty = true;
+  for (const n of arr(ev.nodes)) {
+    if (!n || !isInt(n.node_id)) continue;
+    const r = nodeRec(n.node_id);
+    r.label = str(n.label) || r.label; r.transport = str(n.transport) || ''; r.real = n.real === true ? true : n.real === false ? false : null;
+  }
+  sysLog(num(ev.t), 'info', `run ${str(ev.run_id) || '?'} started (${str(ev.mode) || 'mode ?'})`);
+}
+
+// the node's best guess at its own top frame, from whichever report is fresher
+function topOf(n) {
+  const q0 = arr(n.qw && n.qw.top)[0];
+  const fromQw = q0 && typeof q0 === 'object' ? { frame_id: q0.frame_id, score: q0.score, age: num(q0.age_s), t: n.qwT } : null;
+  const st = n.status;
+  const fromSt = st && isInt(st.top_frame_id) && st.top_frame_id !== 0xFFFF && num(st.queue_depth) > 0 ? { frame_id: st.top_frame_id, score: st.top_score, age: num(st.top_age_s), t: n.statusT } : null;
+  if (fromQw && fromSt) return (fromQw.t ?? -1) >= (fromSt.t ?? -1) ? fromQw : fromSt;
+  return fromQw || fromSt;
+}
+function depthOf(n) {
+  const a = n.status ? num(n.status.queue_depth) : null, b = n.qw ? num(n.qw.depth) : null;
+  if (a != null && b != null) return (n.qwT ?? -1) > (n.statusT ?? -1) ? b : a;
+  return a ?? b;
+}
+function tickClock(t) {
+  const now = performance.now(), c = S.clock;
+  if (c.t != null) { const dw = (now - c.wall) / 1000, dt = t - c.t; if (dw > 0.05 && dt >= 0) c.rate = 0.7 * c.rate + 0.3 * Math.max(0, Math.min(64, dt / dw)); }
+  c.t = t; c.wall = now;
+}
+function nowT() {
+  if (S.runEnd && num(S.runEnd.t) != null) return S.runEnd.t;
+  const c = S.clock; if (c.t == null) return S.t;
+  const idle = Math.min((performance.now() - c.wall) / 1000, FREEZE_S);
+  return c.t + idle * c.rate;
+}
+
+// ------------------------------------------------------------------ the reducer: one code path for live, replay and catch-up
+function apply(ev, live) {
+  if (!ev || typeof ev !== 'object' || Array.isArray(ev)) { S.badEvents++; return; }
+  const type = ev.type, t = num(ev.t);
+  if (type === 'run_start') { resetRun(ev); R.stale = true; if (resultsVisible()) setTimeout(loadResults, 500); }
+  else if (live && isInt(ev.seq) && S.seq.expected != null && ev.seq !== S.seq.expected) {
+    if (ev.seq > S.seq.expected) { S.seq.gaps++; S.seq.missed += ev.seq - S.seq.expected; sysLog(t, 'warn', `gap: seq ${S.seq.expected}–${ev.seq - 1} never arrived`); }
+    S.seq.expected = ev.seq + 1;
+  } else if (live && isInt(ev.seq)) S.seq.expected = ev.seq + 1;
+  if (isInt(ev.seq)) S.seq.last = ev.seq;
+  if (t != null) { S.t = t; if (live) tickClock(t); }
+  for (const k of ['score', 'top_score']) { const v = num(ev[k]); if (v != null && v > S.maxScore) S.maxScore = v; }
+  const nid = ev.node_id;
+  switch (type) {
+    case 'run_start': break;
+    case 'node_status': { if (!isInt(nid)) { S.badEvents++; break; } const n = nodeRec(nid); n.status = ev; n.statusT = t; break; }
+    case 'queue_window': { if (!isInt(nid)) { S.badEvents++; break; } const n = nodeRec(nid); n.qw = ev; n.qwT = t;
+      for (const e of arr(ev.top)) { const v = e && num(e.score); if (v != null && v > S.maxScore) S.maxScore = v; } break; }
+    case 'frame_scored': { if (!isInt(nid)) { S.badEvents++; break; } const n = nodeRec(nid); n.lastScored = ev; n.lastScoredT = t;
+      if (isInt(ev.frame_id)) S.scored.set(ev.frame_id, ev); break; }
+    case 'grant': {
+      for (const b of arr(ev.bids)) { const v = b && num(b.top_score); if (v != null && v > S.maxScore) S.maxScore = v; }
+      S.lastGrant = ev;
+      S.grants.push({ slot: ev.slot_id, node: nid, reason: ev.reason, t }); if (S.grants.length > 600) S.grants.splice(0, S.grants.length - 600);
+      if (isInt(nid)) { const n = nodeRec(nid); S.bus = { slot: ev.slot_id, node: nid, t, reason: ev.reason, presumed: topOf(n) }; }
+      else { S.badEvents++; S.bus = null; }
+      break; }
+    case 'frame_arrived': {
+      if (isInt(nid)) nodeRec(nid);
+      S.arrivals.unshift(ev); if (S.arrivals.length > 400) S.arrivals.length = 400;
+      S.listsDirty = true;
+      if (S.bus && (S.bus.slot === ev.slot_id || S.bus.node === nid)) S.bus = null;
+      S.lastDone = { ev, t };
+      break; }
+    case 'baseline_arrival': { S.baseline.n++; if (ev.usable === true) S.baseline.usable++;
+      const a = S.arrivals[0]; if (a && !a.__baseline) a.__baseline = ev; break; }
+    case 'window_update': { S.window = ev; S.windowT = t;
+      if (ev.open === false && !S.windowClosedLogged) { S.windowClosedLogged = true; sysLog(t, 'info', `contact window closed: ${fmtBytes(ev.used_bytes)} of ${fmtBytes(ev.budget_bytes)} used`); }
+      break; }
+    case 'node_event': { if (isInt(nid)) { const n = nodeRec(nid); n.lastEvent = ev; n.lastEventT = t; }
+      pushLog({ t, node: nid, level: str(ev.level) || 'info', message: str(ev.message) ?? JSON.stringify(ev) }); break; }
+    case 'run_end': { S.runEnd = ev; S.bus = null; const h = ev.headline || {};
+      R.stale = true; for (const ms of [600, 1800, 3500, 6000]) setTimeout(loadResults, ms);   // the file should hold it within moments
+      sysLog(t, 'info', `run ended: ${h.orbit ?? '?'} usable photos vs ${h.baseline ?? '?'} baseline (${h.gain ?? '?'}×)`); break; }
+    default: S.unknown.set(String(type), (S.unknown.get(String(type)) || 0) + 1);
+  }
+  dirty = true;
+}
+
+// ------------------------------------------------------------------ rendering
+function render() {
+  const now = nowT();
+  renderConditions(now); renderChannel(now); renderPhotos(); renderWindow(now); renderLanes(); renderSats(now); renderResults();
+  if (S.listsDirty) { renderTable(now); renderLog(); S.listsDirty = false; }
+  setText($('help'), `${WS_URL} · 1/2 sheets · r raw scores (${showRaw ? 'on' : 'off'}, wire scale ${scale()})`);
+}
+
+function renderConditions(now) {
+  const r = S.run, parts = [];
+  const n = S.order.length, real = S.order.filter(id => S.nodes.get(id).real === true).length, sim = S.order.filter(id => S.nodes.get(id).real === false).length;
+  parts.push(`<span><span class="k">Satellites</span> <b>${n || '—'}</b>${real ? ` · <span class="tag m">${real} real board${real === 1 ? '' : 's'}</span>` : ''}${sim ? ` · <span class="tag e">${sim} simulated</span>` : ''}${!n ? ' none reported yet' : ''}</span>`);
+  if (r) parts.push(`<span><span class="k">Run</span> <b>${esc(r.run_id ?? '?')}</b>${str(r.mode) ? ` · ${esc(r.mode)}` : ''}</span>`);
+  let feed;
+  if (S.conn === 'connected') {
+    const ago = S.lastMsgWall ? (performance.now() - S.lastMsgWall) / 1000 : null;
+    feed = S.source && S.source.kind === 'replay'
+      ? `<span class="tag e">Replay ${num(S.source.speed) ? esc(S.source.speed) + '× ' : ''}${esc(S.source.file || '')}${S.source.loop ? ' · loop' : ''}</span>`
+      : `<span class="tag x">Live</span>`;
+    if (ago != null && ago > FREEZE_S) feed += ` · <span class="tag e">no data for ${Math.round(ago)} s</span>`;
+    feed += ` · <b>T+${fmtClock(now)}</b>`;
+  } else feed = S.conn === 'connecting' ? 'connecting…' : `<span class="tag x">Disconnected</span> · retrying`;
+  parts.push(`<span><span class="k">Feed</span> ${feed}</span>`);
+  if (r) {
+    const w = r.window || {};
+    parts.push(`<span><span class="k">Window</span> <b>${fmtBytes(w.budget_bytes)}</b> in <b>${num(w.duration_s) != null ? fmtClock(w.duration_s) : DASH}</b></span>`);
+    if (num(r.queue_limit) != null) parts.push(`<span><span class="k">Queue limit</span> <b>${esc(r.queue_limit)}</b> photos per satellite</span>`);
+    const u = r.usable_rule || {};
+    if (u.metric) parts.push(`<span><span class="k">Usable</span> <b>${esc(u.metric)} ≤ ${esc(u.max)}</b> · never from the score</span>`);
+  } else if (S.order.length) parts.push(`<span><span class="k">Run</span> <span class="tag e">no run_start seen</span> · joined mid-run</span>`);
+  if (S.seq.gaps) parts.push(`<span><span class="tag x">Gap · ${S.seq.missed} event${S.seq.missed === 1 ? '' : 's'} missed</span></span>`);
+  if (S.badLines || S.badEvents) parts.push(`<span><span class="tag e">${S.badLines + S.badEvents} bad message${S.badLines + S.badEvents === 1 ? '' : 's'}</span></span>`);
+  if (S.unknown.size) parts.push(`<span title="${esc([...S.unknown].map(([k, v]) => k + ' ×' + v).join(', '))}"><span class="tag e">${[...S.unknown.values()].reduce((a, b) => a + b, 0)} unknown event type${S.unknown.size === 1 ? '' : 's'}</span></span>`);
+  setHTML($('conditions'), parts.join(''));
+  const off = $('offline');
+  if (S.conn !== 'connected' && S.attempted) { setText(off, S.run || S.order.length ? 'Lost the link to the ground station. Retrying…' : `Waiting for the ground station at ${WS_URL} …`); setAttr(off, 'data-show', true); }
+  else setAttr(off, 'data-show', false);
+}
+
+function renderChannel(now) {
+  let who, live = false, phase, say;
+  const g = S.lastGrant;
+  if (S.runEnd) {
+    const h = S.runEnd.headline || {}, o = S.runEnd.orbit || {}, b = S.runEnd.baseline || {};
+    who = 'Run complete'; phase = `Ended at T+${fmtClock(S.runEnd.t)}`;
+    say = `<b>${esc(h.orbit ?? o.usable_down ?? '?')}</b> usable photos reached the ground against <b>${esc(h.baseline ?? b.usable_down ?? '?')}</b> the baseline would have sent${num(h.gain) != null ? ` (<b>${esc(h.gain)}×</b>)` : ''}. The full comparison is on sheet 2.`;
+  } else if (S.bus) {
+    const p = S.bus.presumed, el = now != null && S.bus.t != null ? now - S.bus.t : null;
+    who = satName(S.bus.node); live = true;
+    phase = `Sending now · slot ${esc(S.bus.slot ?? '?')}${el != null ? ' · ' + fmtDur(el) : ''}`;
+    say = `${esc(satName(S.bus.node))} <b>${esc(REASON[S.bus.reason] || S.bus.reason || 'has the slot')}</b>${p ? `, and is sending what it reported as its best waiting photo, <b>#${esc(p.frame_id)}</b> at <b>${fmtScore(p.score)}</b>.` : '.'}`;
+    if (S.bus.reason === 'starvation_forced' && g) {
+      const ready = arr(g.bids).filter(b => b && b.ready === true && isInt(b.node_id)).sort((a, b) => (num(b.top_score) ?? -1) - (num(a.top_score) ?? -1));
+      if (ready[0] && ready[0].node_id !== S.bus.node) say += ` <span class="x">${esc(satName(ready[0].node_id))} offered more (${fmtScore(ready[0].top_score)}) but had won too many slots in a row.</span>`;
+    }
+  } else if (S.window && S.window.open === false) {
+    who = 'Window closed'; phase = 'Budget spent';
+    const usable = S.arrivals.filter(a => a.usable === true).length;
+    say = `<b>${S.arrivals.length}</b> photos came down in this window; <b>${usable}</b> ${usable === 1 ? 'is' : 'are'} usable. Nothing more is granted until the next pass.`;
+  } else if (S.lastDone) {
+    const d = S.lastDone.ev;
+    who = 'Nobody'; phase = 'Channel idle · arbitrating the next slot';
+    say = `Slot <b>${esc(d.slot_id ?? '?')}</b> finished${S.lastDone.t != null && now != null ? ' ' + fmtAge(now - S.lastDone.t) + ' ago' : ''}: ${esc(satName(d.node_id))} sent <b>#${esc(d.frame_id ?? '?')}</b> at <b>${fmtScore(d.score)}</b>, ${d.usable === true ? '<b>usable</b>' : d.usable === false ? 'not usable' : 'usable unknown'}.`;
+  } else {
+    who = 'Nobody yet'; phase = S.order.length ? 'Waiting for a satellite with a photo ready' : 'Waiting for the ground station';
+    say = 'The first slot goes out as soon as one satellite has scored a photo and offered it.';
+  }
+  if (live && S.conn !== 'connected') { live = false; phase = 'Last known · ' + phase; }   // the link is down: nothing here is current
+  setText($('ch-who'), who); setText($('ch-phase-text'), phase); setAttr($('ch-phase'), 'data-live', live); setHTML($('ch-say'), say);
+
+  // the bids: one row per satellite, updated in place
+  const body = $('bids-body');
+  while (body.children.length > S.order.length) body.lastChild.remove();
+  while (body.children.length < S.order.length) { const tr = document.createElement('tr'); tr.innerHTML = '<td></td><td class="num"></td><td class="how"></td><td class="out"></td>'; body.appendChild(tr); }
+  const bids = new Map(); if (g) for (const b of arr(g.bids)) if (b && isInt(b.node_id)) bids.set(b.node_id, b);
+  const ready = g ? [...bids.values()].filter(b => b.ready === true) : [];
+  const best = ready.length ? ready.reduce((a, b) => (num(b.top_score) ?? -1) > (num(a.top_score) ?? -1) ? b : a) : null;
+  S.order.forEach((id, i) => {
+    const n = S.nodes.get(id), b = bids.get(id), won = g && g.node_id === id, tr = body.children[i], td = tr.children;
+    setHTML(td[0], `${esc(satName(id))} <span class="sub">${esc(n.label)}</span>`);
+    setText(td[1], b && b.ready === true ? fmtScore(b.top_score) : (g ? DASH : ''));
+    let state = '', out = '', cls = 'out';
+    if (!g) state = 'no grant yet';
+    else if (!b) { state = 'no bid listed'; }
+    else if (b.ready === true) state = 'ready';
+    else { const st = n.status || {}; state = st.link_ok === false ? 'no link' : (depthOf(n) === 0 ? 'empty queue' : 'not ready'); }
+    if (g && won) { if (g.reason === 'starvation_forced') { out = 'won · the guard forced the switch'; cls += ' forced'; } else { out = 'won · ' + (g.reason === 'only_ready' ? 'the only offer' : 'highest offer'); cls += ' won'; } }
+    else if (g && b && b.ready === true) { if (best && best.node_id === id && g.reason === 'starvation_forced') { out = 'highest offer, held back by the guard'; cls += ' held'; } else { out = 'lost'; cls += ' lost'; } }
+    else if (g) { out = DASH; cls += ' lost'; }
+    setText(td[2], state); setText(td[3], out); if (td[3].className !== cls) td[3].className = cls;
+    setAttr(tr, 'data-won', !!(g && won && g.reason !== 'starvation_forced')); setAttr(tr, 'data-forced', !!(g && won && g.reason === 'starvation_forced'));
+  });
+}
+
+function setShot(box, fid) {
+  const key = isInt(fid) ? String(fid) : '';
+  if (box.dataset.fid === key) return;
+  box.dataset.fid = key;
+  if (!key) { box.innerHTML = '<span class="none">—</span>'; return; }
+  const img = document.createElement('img'); img.alt = `photo ${fid}`; img.src = FRAMES_BASE + THUMB(fid);
+  img.onerror = () => { if (box.dataset.fid === key) box.innerHTML = `<span class="none">photo ${esc(fid)}<br>(no thumbnail here)</span>`; };
+  box.innerHTML = ''; box.appendChild(img);
+}
+function photoCaption(ev, who) {
+  return `<span class="sc">${fmtScore(ev.score)}<small> / 100</small></span><br>photo <b>${esc(ev.frame_id ?? '?')}</b> · ${esc(satName(ev.node_id))}<br>cloud ${fmtPct(ev.cloud_frac)} · ${ev.usable === true ? `<span class="tag ${who === 'a' ? 'b' : 'p'}">usable</span>` : ev.usable === false ? '<span class="tag p">not usable</span>' : 'usable ?'}`;
+}
+function renderPhotos() {
+  const a = S.arrivals[0], b = a && a.__baseline;
+  const A = $('ph-a'), B = $('ph-b');
+  if (a) { setShot(A, a.frame_id); setHTML($('ph-a-cap'), photoCaption(a, 'a')); }
+  else { if (A.dataset.fid !== 'none') { A.dataset.fid = 'none'; A.innerHTML = '<span class="none">No photo has come down yet</span>'; } setHTML($('ph-a-cap'), ''); }
+  if (b) { setShot(B, b.frame_id); setHTML($('ph-b-cap'), photoCaption(b, 'b')); }
+  else { if (B.dataset.fid !== 'none') { B.dataset.fid = 'none'; B.innerHTML = `<span class="none">${a ? 'no baseline reported for this slot' : '—'}</span>`; } setHTML($('ph-b-cap'), ''); }
+  const u = S.run && S.run.usable_rule;
+  setHTML($('ph-cap'), `Same slot, same airtime. <b>Usable</b> means ${u && u.metric ? `<b>${esc(u.metric)} ≤ ${esc(u.max)}</b>` : 'little enough cloud'}, judged from cloud cover alone, never from the score.`);
+}
+
+function renderWindow(now) {
+  const w = S.window, budget = num(w && w.budget_bytes) ?? num(S.run && S.run.window && S.run.window.budget_bytes);
+  const used = num(w && w.used_bytes), closed = w && w.open === false, ended = !!S.runEnd;
+  let remain = num(w && w.time_remaining_s);
+  if (remain != null && !closed && !ended && now != null && S.windowT != null) remain = Math.max(0, remain - (now - S.windowT));
+  setHTML($('w-left'), ended ? `${fmtClock(0)} <small>ended</small>` : remain != null ? `${fmtClock(remain)} <small>left</small>` : `--:-- <small>left</small>`);
+  const live = !!w && !closed && !ended && S.conn === 'connected';
+  setText($('w-phase-text'), !w ? 'No window report yet' : ended ? 'Run ended' : closed ? 'Budget spent · window closed' : (S.bus ? 'Open · a photo is on its way' : 'Open · channel idle'));
+  setAttr($('w-phase'), 'data-live', live);
+  // the meter: one cell per photo that came down (blue), a ringed cell for the one in flight, the rest empty
+  const key = `${S.arrivals.length}|${S.bus ? S.bus.slot : ''}|${budget}|${used}`;
+  const track = $('w-track');
+  if (track.dataset.key !== key) {
+    track.dataset.key = key;
+    const cells = [];
+    const usedPct = budget ? Math.min(100, (used ?? 0) / budget * 100) : 0;
+    const arrivals = [...S.arrivals].reverse();
+    let acc = 0;
+    for (const a of arrivals) { const p = budget ? Math.max(0.6, (num(a.bytes) || 0) / budget * 100) : 100 / Math.max(1, arrivals.length + 1); acc += p; cells.push(`<i data-used style="flex-basis:${p.toFixed(2)}%" title="slot ${esc(a.slot_id)} · ${esc(satName(a.node_id))} · ${fmtBytes(a.bytes)}"></i>`); }
+    if (S.bus) { const typical = arrivals.length ? arrivals.reduce((s, a) => s + (num(a.bytes) || 0), 0) / arrivals.length : (budget ? budget / 16 : 0); const p = budget ? Math.max(0.6, Math.min(100 - acc, typical / budget * 100)) : 6; cells.push(`<i data-now style="flex-basis:${p.toFixed(2)}%" title="slot ${esc(S.bus.slot)} · sending now"></i>`); }
+    cells.push('<i data-rest></i>');
+    track.innerHTML = cells.join('');
+    void usedPct;
+  }
+  setHTML($('w-used'), used != null || budget != null ? `<b>${fmtBytes(used ?? 0)}</b> of ${fmtBytes(budget)} used${used != null && budget ? ` · ${Math.round(used / budget * 100)}%` : ''}` : 'no window report yet');
+  const usable = S.arrivals.filter(a => a.usable === true).length;
+  setHTML($('w-down'), `<b>${S.arrivals.length}</b> down · <b>${usable}</b> usable`);
+  const kv = [];
+  kv.push(['Budget', `${fmtBytes(budget)}${S.run && num(S.run.window && S.run.window.duration_s) != null ? ' · ' + fmtClock(S.run.window.duration_s) : ''}`]);
+  kv.push(['Remaining', used != null && budget ? fmtBytes(budget - used) : DASH]);
+  kv.push(['Slots granted', String(S.grants.length)]);
+  for (const id of S.order) { const mine = S.arrivals.filter(a => a.node_id === id), bytes = mine.reduce((s, a) => s + (num(a.bytes) || 0), 0);
+    kv.push([esc(satName(id)), mine.length ? `${mine.length} photo${mine.length === 1 ? '' : 's'} · ${fmtBytes(bytes)}` : '<span class="pencil">nothing yet</span>']); }
+  if (S.baseline.n) kv.push([`<span class="pencil"><i class="pmark"></i>Baseline, same slots</span>`, `<span class="pencil">${S.baseline.n} photo${S.baseline.n === 1 ? '' : 's'} · ${S.baseline.usable} usable</span>`]);
+  setHTML($('w-kv'), kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join(''));
+}
+
+function renderLanes() {
+  const cols = S.grants.slice(-LANE_COLS);
+  const key = `${S.grants.length}|${S.order.join(',')}|${S.bus ? S.bus.slot : ''}|${cols.length ? cols[0].slot : ''}`;
+  const lanes = $('lanes');
+  if (lanes.dataset.key !== key) {
+    const grew = Number(lanes.dataset.n || 0) < S.grants.length;
+    lanes.dataset.key = key; lanes.dataset.n = String(S.grants.length);
+    if (!cols.length || !S.order.length) { lanes.innerHTML = '<div class="empty">No slot has been granted yet. An offer is the top score in a satellite\'s queue, computed onboard; the ground only compares them.</div>'; $('axis').hidden = true; setText($('lanes-label'), 'Slot by slot'); }
+    else {
+      lanes.innerHTML = S.order.map(id => `<div class="lane"><span class="name" title="${esc(S.nodes.get(id).label)}">${esc(satName(id))}</span><span class="cells">${cols.map((c, i) => {
+        const won = c.node === id, forced = won && c.reason === 'starvation_forced', live = won && S.bus && S.bus.slot === c.slot, fresh = won && grew && i === cols.length - 1;
+        return `<b${won ? ' data-won' : ''}${forced ? ' data-forced' : ''}${live ? ' data-live' : ''}${fresh ? ' data-new' : ''} title="slot ${esc(c.slot)}: ${esc(satName(c.node))} · ${esc(REASON[c.reason] || c.reason || '')}"></b>`;
+      }).join('')}</span></div>`).join('');
+      $('axis').hidden = false; setText($('axis-a'), `slot ${cols[0].slot ?? '?'}`); setText($('axis-b'), cols.length > 1 ? `slot ${cols[cols.length - 1].slot ?? '?'}` : '');
+      setText($('lanes-label'), `Slot by slot · ${S.grants.length} granted`);
+    }
+  }
+  const forced = S.grants.filter(c => c.reason === 'starvation_forced'), last = forced[forced.length - 1];
+  const bits = [];
+  if (last) bits.push(`<span class="x">The fairness guard stepped in ${forced.length === 1 ? 'once' : forced.length + ' times'}</span>, last at slot <b>${esc(last.slot ?? '?')}</b>: ${esc(satName(last.node))} got the slot although another satellite offered more.`);
+  if (S.grants.length > LANE_COLS) bits.push(`Showing the last ${LANE_COLS} of ${S.grants.length} slots.`);
+  setHTML($('slots-cap'), bits.join(' '));
+}
+
+function buildSat(n) {
+  const el = document.createElement('section');
+  el.className = 'plate sat';
+  el.innerHTML = `
+    <div class="head"><span class="n"></span><span class="sub"></span>
+      <span class="chips"><span class="chip kind"></span><span class="chip plain link" hidden></span><span class="chip stale quiet" hidden></span><span class="chip bad warn" hidden></span><span class="chip solid sending" hidden>Sending now</span></span></div>
+    <div class="barswrap">
+      <div class="bar"><span class="t top-t">—</span><span class="track"><i></i></span><span class="v top-v">—</span></div>
+      <div class="last"></div>
+      <div class="triplet"></div>
+    </div>
+    <div class="qwrap">
+      <div class="qline"><span class="micro">Waiting to be sent · /100</span> <span class="qdetail"></span></div>
+      <div class="queue"></div>
+    </div>
+    <div class="sentwrap"><div class="micro">Already sent home <span class="qdetail sent-n"></span></div><div class="sentrow"></div><div class="none" hidden>Nothing yet: it keeps losing the slot.</div></div>`;
+  const trip = el.querySelector('.triplet');
+  [['Cloud-free', 'clear'], ['Detail', 'sharp'], ['New', 'change']].forEach(([t, k]) => {
+    const m = document.createElement('div'); m.className = 'm'; m.dataset.k = k;
+    m.innerHTML = `<span class="t">${t}</span><span class="track"><i></i></span><span class="v">—</span>`; trip.appendChild(m);
+  });
+  const q = el.querySelector('.queue');
+  for (let i = 0; i < QUEUE_ROWS; i++) { const r = document.createElement('div'); r.className = 'qrow'; r.hidden = true; r.innerHTML = '<span class="track"><i></i></span><span class="v">—</span><span class="id"></span>'; q.appendChild(r); }
+  n.el = el;
+  return el;
+}
+
+function renderSats(now) {
+  const wrap = $('sats');
+  const compact = S.order.length > 3;
+  setAttr(wrap, 'data-compact', compact);
+  S.order.forEach((id, i) => {
+    const n = S.nodes.get(id);
+    if (!n.el) buildSat(n);
+    if (wrap.children[i] !== n.el) wrap.insertBefore(n.el, wrap.children[i] || null);
+  });
+  while (wrap.children.length > S.order.length) wrap.lastChild.remove();
+  if (!S.order.length) { if (!wrap.querySelector('.empty')) wrap.innerHTML = '<section class="plate"><div class="empty">No satellite has reported yet.</div></section>'; return; }
+  const limit = S.run && num(S.run.queue_limit), weights = S.run && S.run.scoring ? S.run.scoring : {};
+  S.order.forEach(id => {
+    const n = S.nodes.get(id), el = n.el, q = s => el.querySelector(s), st = n.status || {};
+    setText(q('.n'), satName(id)); setText(q('.sub'), `${n.label}${n.transport ? ' · ' + n.transport : ''}`);
+    const kind = q('.kind');
+    if (n.real === true) { setText(kind, 'real board'); kind.className = 'chip kind hw'; } else if (n.real === false) { setText(kind, 'simulated'); kind.className = 'chip kind sim'; } else { setText(kind, 'board ?'); kind.className = 'chip kind plain'; }
+    const link = q('.link');
+    if (st.link_ok === false) { setText(link, 'no link'); link.className = 'chip link bad'; link.hidden = false; }
+    else if (st.link_ok === true) link.hidden = true;
+    else { setText(link, 'link ?'); link.className = 'chip link plain'; link.hidden = false; }
+    const since = now != null && n.statusT != null ? now - n.statusT : null;
+    const quiet = q('.quiet'); quiet.hidden = st.link_ok === false || !(since == null ? S.order.length && S.lastMsgWall : since > STALE_S);
+    if (!quiet.hidden) setText(quiet, since == null ? 'no status yet' : `quiet ${fmtAge(since)}`);
+    const warn = q('.warn'); const recent = n.lastEvent && n.lastEventT != null && now != null && now - n.lastEventT < 20 && n.lastEvent.level !== 'info';
+    warn.hidden = !recent; if (recent) { setText(warn, String(n.lastEvent.level)); warn.title = String(n.lastEvent.message ?? ''); }
+    const holding = S.bus && S.bus.node === id; q('.sending').hidden = !(holding || st.busy === true);
+    el.style.opacity = since != null && since > DEAD_S ? '.55' : '';
+    // best waiting photo
+    const top = topOf(n);
+    const age = top && top.age != null && top.t != null && now != null ? top.age + (now - top.t) : (top ? top.age : null);
+    setText(q('.top-t'), top ? `Best waiting · #${top.frame_id}${age != null ? ' · ' + fmtAge(age) + ' old' : ''}` : (depthOf(n) === 0 ? 'Best waiting · queue empty' : 'Best waiting · no report yet'));
+    setText(q('.top-v'), top ? fmtScore(top.score) : DASH);
+    q('.bar .track i').style.transform = `scaleX(${top ? frac(top.score, scale()) : 0})`;
+    // last scored, with its three parts
+    const ls = n.lastScored;
+    if (ls) {
+      const rej = ls.queued === false, ev = isInt(ls.evicted_frame_id) && ls.evicted_frame_id !== ls.frame_id;
+      setHTML(q('.last'), `Last scored <b>#${esc(ls.frame_id ?? '?')}</b> at <b>${fmtScore(ls.score)}</b> · cloud ${fmtPct(ls.cloud_frac)} · ${rej ? '<span class="x">rejected, queue full</span>' : ev ? `queued, <span class="x">dropped #${esc(ls.evicted_frame_id)}</span>` : 'queued'}${n.lastScoredT != null && now != null ? ` · ${fmtAge(now - n.lastScoredT)} ago` : ''}`);
+      const parts = ls.parts && typeof ls.parts === 'object' ? ls.parts : {};
+      [['clear', 'w_clear'], ['sharp', 'w_sharp'], ['change', 'w_change']].forEach(([k, wk]) => {
+        const m = q(`.m[data-k="${k}"]`), v = num(parts[k]);
+        const max = num(weights[wk]) || (scale() / 3);            // each part can contribute at most its weight
+        m.querySelector('.track i').style.transform = `scaleX(${v == null ? 0 : frac(v, max)})`;
+        setText(m.querySelector('.v'), v == null ? DASH : (showRaw ? String(v) : (v / scale() * 100).toFixed(1)));
+      });
+    } else setHTML(q('.last'), 'Nothing scored yet');
+    // the queue
+    const depth = depthOf(n), topList = arr(n.qw && n.qw.top).slice(0, QUEUE_ROWS);
+    setHTML(q('.qline .qdetail'), `<b>${depth ?? DASH}</b>${limit != null ? ` of ${limit}` : ''} waiting · <b>${num(st.frames_scored) ?? DASH}</b> scored · <b title="the queue was full and a better photo arrived">${num(st.frames_evicted) ?? DASH}</b> pushed out`);
+    const rows = q('.queue').children;
+    for (let i = 0; i < QUEUE_ROWS; i++) {
+      const r = rows[i], e = topList[i];
+      if (!e || typeof e !== 'object') { r.hidden = true; continue; }
+      r.hidden = false;
+      r.querySelector('.track i').style.transform = `scaleX(${frac(e.score, scale())})`;
+      setText(r.querySelector('.v'), fmtScore(e.score));
+      const a2 = num(e.age_s) != null && n.qwT != null && now != null ? e.age_s + (now - n.qwT) : num(e.age_s);
+      setText(r.querySelector('.id'), `#${e.frame_id ?? '?'}${a2 != null ? ' · ' + fmtAge(a2) : ''}`);
+    }
+    if (depth != null && depth > topList.length && topList.length) { let more = q('.queue .more'); if (!more) { more = document.createElement('div'); more.className = 'qdetail more'; q('.queue').appendChild(more); } setText(more, `and ${depth - topList.length} more`); }
+    else { const more = q('.queue .more'); if (more) more.remove(); }
+    // already sent home
+    const mine = S.arrivals.filter(a => a.node_id === id); const row = q('.sentrow');
+    setText(q('.sent-n'), mine.length ? `${mine.length}` : '');
+    q('.sentwrap .none').hidden = mine.length > 0;
+    const shown = mine.slice(0, SENT_MAX).reverse();
+    const sig = shown.map(a => a.frame_id).join(',');
+    if (row.dataset.sig !== sig) {
+      row.dataset.sig = sig;
+      row.innerHTML = shown.map(a => `<figure title="slot ${esc(a.slot_id)} · ${fmtScore(a.score)} · ${a.usable === true ? 'usable' : 'not usable'}"><span class="shot">${isInt(a.frame_id) ? `<img alt="" src="${FRAMES_BASE}${THUMB(a.frame_id)}" onerror="this.remove()">` : ''}</span><figcaption>${fmtScore(a.score)}</figcaption></figure>`).join('');
+    }
+  });
+}
+
+function renderTable(now) {
+  const body = $('arr-body'), usable = S.arrivals.filter(a => a.usable === true).length;
+  setText($('arr-count'), S.arrivals.length ? `${S.arrivals.length} down · ${usable} usable` : '');
+  if (!S.arrivals.length) { body.innerHTML = '<tr><td colspan="9" class="empty">Nothing has come down yet.</td></tr>'; return; }
+  body.innerHTML = S.arrivals.slice(0, ARR_ROWS).map(a => {
+    const fresh = now != null && num(a.t) != null && now - a.t < 3;
+    return `<tr${fresh ? ' class="fresh"' : ''}><td class="num">${esc(a.slot_id ?? '?')}</td><td class="thumb"><span>${isInt(a.frame_id) ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(a.frame_id)}" onerror="this.remove()">` : ''}</span></td><td>${esc(satName(a.node_id))} <span class="sub">#${esc(a.frame_id ?? '?')}</span></td><td class="num">${fmtScore(a.score)}</td><td class="num">${fmtPct(a.cloud_frac)}</td><td>${a.usable === true ? '<span class="tag b">usable</span>' : a.usable === false ? '<span class="tag p">not usable</span>' : '<span class="tag e">unknown</span>'}</td><td class="num">${fmtBytes(a.bytes)}</td><td class="num">${fmtDur(a.duration_s)}</td><td class="num dim">T+${fmtClock(a.t)}</td></tr>`;
+  }).join('');
+}
+
+function renderLog() {
+  const el = $('log');
+  if (!S.log.length) { el.textContent = 'no node_event yet'; return; }
+  el.innerHTML = S.log.slice(0, LOG_ROWS).map(e => {
+    const lvl = String(e.level || 'info').toUpperCase().padEnd(5), who = (e.node == null ? 'display' : satShort(e.node)).padEnd(8);
+    const cls = e.level === 'error' ? 'x' : e.level === 'warn' ? 'e' : '';
+    return `<div class="${e.sys ? 'sys' : ''}">${fmtClock(e.t)}  ${esc(who)} ${cls ? `<span class="${cls}">${esc(lvl)}</span>` : esc(lvl)}  ${esc(e.message)}</div>`;
+  }).join('');
+}
+
+// ------------------------------------------------------------------ sheet 2: the recorded run file, never live memory (contract rule 3)
+const RUN_OVERRIDE = Q.get('run');
+const R = { runId: null, pick: null, status: 'idle', error: '', events: [], badLines: 0, runStart: null, runEnd: null, arrivals: [], baselines: [], grants: [],
+            statuses: new Map(), maxScore: 0, fetchedAt: null, inflight: false, stale: true, runs: null, runsAt: 0 };
+function resultsVisible() { return $('sheet-results').hasAttribute('data-active'); }
+function resultsRunId() { return R.pick || RUN_OVERRIDE || (S.run && str(S.run.run_id)) || (S.source && str(S.source.file) ? S.source.file.replace(/\.jsonl$/, '') : null); }
+function parseRun(text) {
+  const evs = []; let bad = 0;
+  for (const line of text.split('\n')) { const l = line.trim(); if (!l) continue; try { const ev = JSON.parse(l); if (ev && typeof ev === 'object' && !Array.isArray(ev)) evs.push(ev); else bad++; } catch (e) { bad++; } }
+  R.events = evs; R.badLines = bad;
+  R.runStart = evs.find(e => e.type === 'run_start') || null;
+  R.runEnd = [...evs].reverse().find(e => e.type === 'run_end') || null;
+  R.arrivals = evs.filter(e => e.type === 'frame_arrived');
+  R.baselines = evs.filter(e => e.type === 'baseline_arrival');
+  R.grants = evs.filter(e => e.type === 'grant');
+  R.statuses = new Map(); for (const e of evs) if (e.type === 'node_status' && isInt(e.node_id)) R.statuses.set(e.node_id, e);
+  R.maxScore = 0; for (const e of evs) for (const k of ['score', 'top_score']) { const v = num(e[k]); if (v != null && v > R.maxScore) R.maxScore = v; }
+}
+async function loadResults() {
+  const id = resultsRunId();
+  if (!id) { R.status = 'idle'; R.runId = null; R.stale = false; dirty = true; return; }
+  if (R.inflight) { R.queued = true; return; }
+  R.inflight = true; R.queued = false; if (R.runId !== id) { R.status = 'loading'; R.runEnd = null; R.events = []; R.arrivals = []; R.baselines = []; R.grants = []; R.statuses = new Map(); }
+  R.runId = id; dirty = true;
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 6000);
+  try {
+    const r = await fetch(`${HTTP_BASE}/runs/${encodeURIComponent(id)}.jsonl`, { signal: ctl.signal, cache: 'no-store' });
+    if (r.status === 404) { R.status = 'nofile'; R.error = ''; }
+    else if (!r.ok) { R.status = 'error'; R.error = `HTTP ${r.status}`; }
+    else { parseRun(await r.text()); R.status = R.runEnd ? 'ok' : 'partial'; R.error = ''; }
+  } catch (e) { R.status = 'error'; R.error = HTTP_BASE ? `could not reach ${HTTP_BASE}` : 'no server to read from'; }
+  finally { clearTimeout(timer); R.inflight = false; R.fetchedAt = new Date(); R.stale = false; dirty = true; }
+  loadRunList();
+  if (R.queued) loadResults();
+}
+async function loadRunList() {
+  if (!HTTP_BASE || Date.now() - R.runsAt < 8000) return; R.runsAt = Date.now();
+  try { const r = await fetch(`${HTTP_BASE}/api/runs`, { cache: 'no-store' }); const l = r.ok ? await r.json() : null; R.runs = Array.isArray(l) ? l.filter(x => x && typeof x === 'object') : null; }
+  catch (e) { R.runs = null; }
+  dirty = true;
+}
+const nodeNameIn = (start, id) => { const list = arr(start && start.nodes).filter(n => n && isInt(n.node_id)); const i = list.findIndex(n => n.node_id === id); return i >= 0 ? `Satellite ${i + 1}` : (S.order.includes(id) ? satName(id) : `node ${id}`); };
+const signed = (v, unit) => v == null ? DASH : (v > 0 ? '+' : v < 0 ? '−' : '±') + (unit === 'b' ? fmtBytes(Math.abs(v)) : Math.abs(v)) + (unit === 'pts' ? ' pts' : '');
+
+function renderResults() {
+  if (!resultsVisible()) return;
+  const id = resultsRunId(), e = R.runEnd, o = (e && e.orbit) || {}, b = (e && e.baseline) || {}, h = (e && e.headline) || {};
+  const start = R.runStart || (S.run && S.run.run_id === id ? S.run : null);
+  // status line: what was read, from where, and how fresh it is
+  const st = [];
+  if (R.status === 'idle') st.push(`<span class="tag e">No run to read</span> waiting for <b>run_start</b> on the live feed, or open <b>?run=&lt;run_id&gt;</b>`);
+  else if (R.status === 'loading') st.push(`reading <b>runs/${esc(id)}.jsonl</b>…`);
+  else if (R.status === 'nofile') st.push(`<span class="tag x">File not served</span> <b>${esc(HTTP_BASE)}/runs/${esc(id)}.jsonl</b> answered 404. The ground station has to serve the recorded file on the host that serves /ws.`);
+  else if (R.status === 'error') st.push(`<span class="tag x">Could not read the file</span> ${esc(R.error)} · retrying every 5 s`);
+  else if (R.status === 'partial') st.push(`<span class="tag e">Run in progress</span> <b>runs/${esc(id)}.jsonl</b> holds <b>${R.events.length}</b> events and no <b>run_end</b> yet · re-read every 5 s`);
+  else st.push(`<span class="tag b">Final</span> read from <b>runs/${esc(id)}.jsonl</b> · <b>${R.events.length}</b> events${R.badLines ? ` · <span class="tag e">${R.badLines} bad lines skipped</span>` : ''}`);
+  if (R.fetchedAt && R.status !== 'idle') st.push(`at ${R.fetchedAt.toLocaleTimeString()}`);
+  let picker = '';
+  if (R.runs && R.runs.length) {
+    picker = `<select id="r-pick" title="Recorded runs the server lists">${R.runs.map(x => { const v = String(x.file || '').replace(/\.jsonl$/, ''), hl = x.headline || {}; const sel = v === id || x.run_id === id;
+      return `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(x.run_id || v)} · ${x.ended ? `ended · ${esc(hl.orbit ?? '?')} vs ${esc(hl.baseline ?? '?')}` : `in progress · ${esc(x.events ?? '?')} events`}${x.playing ? ' · playing' : ''}</option>`; }).join('')}</select>`;
+  }
+  setHTML($('r-status'), st.join(' · '));
+  setHTML($('r-controls'), `${picker}<button class="btn" id="r-reload" title="Re-read the file now">Re-read</button>`);
+  const pick = $('r-pick'); if (pick && !pick.__wired) { pick.__wired = true; pick.addEventListener('change', () => { R.pick = pick.value; R.stale = true; loadResults(); }); }
+  const rl = $('r-reload'); if (rl && !rl.__wired) { rl.__wired = true; rl.addEventListener('click', () => { R.runsAt = 0; loadResults(); }); }
+
+  // the headline pair
+  const ou = num(o.usable_down), bu = num(b.usable_down), od = num(o.frames_down), bd = num(b.frames_down);
+  const soFar = !e && R.arrivals.length > 0;                                  // counted from the file's arrival events, not final
+  const sou = R.arrivals.filter(a => a.usable === true).length, sbu = R.baselines.filter(a => a.usable === true).length;
+  setText($('r-o'), e ? String(ou ?? h.orbit ?? DASH) : soFar ? String(sou) : ''); setText($('r-b'), e ? String(bu ?? h.baseline ?? DASH) : soFar ? String(sbu) : '');
+  const gain = e ? (num(h.gain) ?? (ou != null && bu ? ou / bu : null)) : (soFar && sbu ? sou / sbu : null);
+  const gainTxt = gain == null ? DASH : esc(e && num(h.gain) != null ? h.gain : gain.toFixed(2)) + '×';
+  setHTML($('r-gain'), `${e || soFar ? gainTxt : ''}<small>${e ? esc(h.metric || 'usable frames downlinked') : soFar ? '<span class="tag e">so far</span>' : 'gain'}</small>`);
+  document.querySelectorAll('.pair .lbl .nf').forEach(x => x.remove());
+  if (soFar) document.querySelectorAll('.pair .lbl').forEach(x => x.insertAdjacentHTML('beforeend', ' <span class="tag e nf">so far · not final</span>'));
+  const dots = (n, on) => n == null ? '' : Array.from({ length: Math.min(n, 64) }, (_, i) => `<i${i < (on ?? 0) ? ' data-on' : ''}></i>`).join('') + (n > 64 ? `<span class="micro">+${n - 64}</span>` : '');
+  setHTML($('r-o-dots'), e ? dots(od, ou) : soFar ? dots(R.arrivals.length, sou) : ''); setHTML($('r-b-dots'), e ? dots(bd, bu) : soFar ? dots(R.baselines.length, sbu) : '');
+  let say;
+  if (e) say = `In the same contact window, on the same byte budget, Orbit sent home <b>${esc(ou ?? '?')}</b> usable photos out of ${esc(od ?? '?')} downlinked. Sending photos in the order they were taken would have sent <b>${esc(bu ?? '?')}</b> usable out of ${esc(bd ?? '?')}.${gain != null ? ` That is <b>${esc(num(h.gain) != null ? h.gain : gain.toFixed(2))}×</b> the useful data for the same bandwidth.` : ''}${num(h.gain) != null && ou != null && bu && Math.abs(h.gain - ou / bu) > 0.06 ? ` <span class="x">The headline gain ${esc(h.gain)} does not match ${(ou / bu).toFixed(2)} from the counts.</span>` : ''}`;
+  else if (R.status === 'partial') say = `The run is still going. So far the file records <b>${R.arrivals.length}</b> photos down, <b>${R.arrivals.filter(a => a.usable === true).length}</b> of them usable, against <b>${R.baselines.filter(a => a.usable === true).length}</b> usable the baseline would have sent. The headline appears when <b>run_end</b> is written.`;
+  else say = 'The headline numbers come from the run_end event in the recorded file, so they survive a refresh, a dropped socket or a laptop swap.';
+  setHTML($('r-say'), say);
+  const prov = [];
+  if (start) { const w = start.window || {}, nodes = arr(start.nodes).filter(n => n && typeof n === 'object'), real = nodes.filter(n => n.real === true).length;
+    prov.push(`<span>Run <b>${esc(start.run_id ?? id)}</b>${str(start.mode) ? ` · ${esc(start.mode)}` : ''}</span>`);
+    prov.push(`<span>${nodes.length} satellites${real ? ` · <span class="tag m">${real} real</span>` : ''}${nodes.length - real ? ` · <span class="tag e">${nodes.length - real} simulated</span>` : ''}</span>`);
+    prov.push(`<span>Budget <b>${fmtBytes(w.budget_bytes)}</b> in <b>${num(w.duration_s) != null ? fmtClock(w.duration_s) : DASH}</b></span>`); }
+  else if (id) prov.push(`<span>Run <b>${esc(id)}</b> · no run_start in the file</span>`);
+  if (e) prov.push(`<span>Ended at <b>T+${fmtClock(e.t)}</b>${num(e.seq) != null ? ` · seq ${esc(e.seq)}` : ''}</span>`);
+  if (e && (num(o.bytes_used) != null || num(b.bytes_used) != null)) prov.push(`<span>Bytes used <b>${fmtBytes(o.bytes_used)}</b> vs ${fmtBytes(b.bytes_used)}</span>`);
+  setHTML($('r-prov'), prov.join(''));
+
+  // Table 2
+  const cmp = $('r-cmp');
+  if (!e) setHTML(cmp, `<tr><td colspan="4" class="empty">${R.status === 'partial' ? 'The run has not ended, so there is no run_end to copy yet.' : 'No run_end read yet.'}</td></tr>`);
+  else {
+    const rows = [];
+    const row = (name, a, c, d, cls = '') => rows.push(`<tr><td${cls ? ` class="${cls}"` : ''}>${name}</td><td class="num">${a}</td><td class="num dim">${c}</td><td class="num">${d}</td></tr>`);
+    row('Photos downlinked', od ?? DASH, bd ?? DASH, signed(od != null && bd != null ? od - bd : null));
+    row('Usable photos', `<span class="tag b" style="font-size:13px">${ou ?? DASH}</span>`, bu ?? DASH, signed(ou != null && bu != null ? ou - bu : null) + (gain != null ? ` <span class="sub">(${esc(num(h.gain) != null ? h.gain : gain.toFixed(2))}×)</span>` : ''));
+    const os = od ? ou / od : null, bs = bd ? bu / bd : null;
+    row('Usable share', os != null ? Math.round(os * 100) + '%' : DASH, bs != null ? Math.round(bs * 100) + '%' : DASH, signed(os != null && bs != null ? Math.round((os - bs) * 100) : null, 'pts'), 'derived');
+    row('Bytes used', fmtBytes(o.bytes_used), fmtBytes(b.bytes_used), signed(num(o.bytes_used) != null && num(b.bytes_used) != null ? o.bytes_used - b.bytes_used : null, 'b'));
+    const obp = ou ? num(o.bytes_used) / ou : null, bbp = bu ? num(b.bytes_used) / bu : null;
+    row('Bytes per usable photo', obp != null && Number.isFinite(obp) ? fmtBytes(obp) : DASH, bbp != null && Number.isFinite(bbp) ? fmtBytes(bbp) : DASH, signed(obp != null && bbp != null && Number.isFinite(obp) && Number.isFinite(bbp) ? Math.round(obp - bbp) : null, 'b'), 'derived');
+    row('Photos left in queues', num(o.frames_left_queued) ?? DASH, num(b.frames_left_queued) ?? DASH, signed(num(o.frames_left_queued) != null && num(b.frames_left_queued) != null ? o.frames_left_queued - b.frames_left_queued : null));
+    setHTML(cmp, rows.join(''));
+  }
+
+  // Fig 6: slot by slot, paired in file order
+  const grid = $('r-slotgrid'), n = Math.max(R.arrivals.length, R.baselines.length), SHOW = 40, from = Math.max(0, n - SHOW);
+  setText($('r-slots-n'), n ? (n > SHOW ? `last ${SHOW} of ${n} slots` : `${n} slots`) : '');
+  const forced = new Set(R.grants.filter(g => g.reason === 'starvation_forced').map(g => g.slot_id));
+  const key = `${id}|${n}|${R.arrivals.map(a => a.frame_id).join(',')}|${R.baselines.map(a => a.frame_id).join(',')}|${showRaw}|${scale()}`;
+  if (grid.dataset.key !== key) {
+    grid.dataset.key = key;
+    if (!n) grid.innerHTML = '<div class="empty">No photos recorded yet.</div>';
+    else {
+      const cols = n - from;
+      grid.style.gridTemplateColumns = `max-content repeat(${cols}, minmax(36px, 46px))`;
+      const cell = (a, pencil) => { if (!a) return '<div class="slotcell"><div class="shot"></div><span class="v">—</span></div>';
+        const ok = a.usable === true, id2 = a.frame_id;
+        return `<div class="slotcell"${a.usable === false ? ' data-bad' : ''} title="photo ${esc(id2 ?? '?')} · ${esc(nodeNameIn(start, a.node_id))} · ${fmtScore(a.score)} · cloud ${fmtPct(a.cloud_frac)} · ${ok ? 'usable' : a.usable === false ? 'not usable' : 'usable ?'}"><div class="shot${pencil ? ' pencil' : ''}"${ok ? ' data-usable' : ''}>${isInt(id2) ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(id2)}" onerror="this.remove()">` : ''}</div><span class="v">${fmtScore(a.score)}</span><span class="w">${esc(nodeNameIn(start, a.node_id).replace('Satellite ', 'Sat '))}</span></div>`; };
+      let html = '<div class="rl">Slot</div>';
+      for (let i = from; i < n; i++) { const a = R.arrivals[i], slot = a && a.slot_id != null ? a.slot_id : i + 1; html += `<div class="hd"${forced.has(slot) ? ' data-forced' : ''} title="${forced.has(slot) ? 'the fairness guard forced this slot' : ''}">${esc(slot)}</div>`; }
+      html += '<div class="rl"><i></i>Orbit sent</div>';
+      for (let i = from; i < n; i++) html += cell(R.arrivals[i], false);
+      html += '<div class="rl"><i class="pencil"></i>Baseline</div>';
+      for (let i = from; i < n; i++) html += cell(R.baselines[i], true);
+      grid.innerHTML = html;
+    }
+  }
+
+  // Table 3: by satellite
+  const body = $('r-sats-body');
+  const ids = arr(start && start.nodes).filter(x => x && isInt(x.node_id)).map(x => x.node_id);
+  for (const a of R.arrivals) if (isInt(a.node_id) && !ids.includes(a.node_id)) ids.push(a.node_id);
+  if (!ids.length) setHTML(body, '<tr><td colspan="7" class="empty">Nothing recorded yet.</td></tr>');
+  else setHTML(body, ids.map(nid => { const mine = R.arrivals.filter(a => a.node_id === nid), won = R.grants.filter(g => g.node_id === nid), st2 = R.statuses.get(nid) || {}; const lab = arr(start && start.nodes).find(x => x && x.node_id === nid);
+    return `<tr><td>${esc(nodeNameIn(start, nid))}${lab && str(lab.label) ? ` <span class="sub">${esc(lab.label)}</span>` : ''}</td><td class="num">${mine.length}</td><td class="num">${mine.filter(a => a.usable === true).length}</td><td class="num">${fmtBytes(mine.reduce((s2, a) => s2 + (num(a.bytes) || 0), 0))}</td><td class="num">${won.length}</td><td class="num${won.some(g => g.reason === 'starvation_forced') ? ' x' : ''}">${won.filter(g => g.reason === 'starvation_forced').length}</td><td class="num dim">${num(st2.frames_scored) ?? DASH}${num(st2.frames_evicted) ? ` <span class="sub">· ${st2.frames_evicted} out</span>` : ''}</td></tr>`; }).join(''));
+}
+
+// ------------------------------------------------------------------ connection
+let ws = null, hydrating = false, buffer = [], backoff = 1000;
+function setConn(c) { if (S.conn !== c) { S.conn = c; dirty = true; } }
+async function fetchState() {
+  if (!HTTP_BASE) return null;
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 2500);
+  try { const r = await fetch(HTTP_BASE + '/api/state', { signal: ctl.signal, cache: 'no-store' }); if (!r.ok) return null; const st = await r.json(); return st && Array.isArray(st.events) ? st : null; }
+  catch (e) { return null; } finally { clearTimeout(timer); }
+}
+function hydrate(st) {
+  for (const ev of st.events) apply(ev, false);
+  S.source = st.source && typeof st.source === 'object' ? st.source : null;
+  if (isInt(st.seq)) { S.seq.expected = st.seq + 1; S.seq.last = st.seq; }
+  const t = num(st.t) ?? S.t;
+  if (t != null) { S.clock = { t, wall: performance.now(), rate: S.source && S.source.playing === false ? 0 : (num(S.source && S.source.speed) || 1) }; S.t = t; }
+  sysLog(t, 'info', `caught up from /api/state: ${st.events.length} events${S.source && S.source.kind === 'replay' ? ' (replay)' : ''}`);
+}
+function connect() {
+  setConn('connecting'); S.attempted = true;
+  try { ws = new WebSocket(WS_URL); } catch (e) { setConn('disconnected'); setTimeout(connect, backoff); return; }
+  ws.onopen = async () => {
+    setConn('connected'); backoff = 1000; buffer = []; hydrating = true;
+    const st = await fetchState(); if (st) hydrate(st); hydrating = false;
+    let cutoff = st && isInt(st.seq) ? st.seq : null;
+    for (const ev of buffer) { if (ev && ev.type === 'run_start') cutoff = null; if (cutoff != null && ev && isInt(ev.seq) && ev.seq <= cutoff) continue; apply(ev, true); }
+    buffer = []; dirty = true;
+  };
+  ws.onmessage = e => { S.lastMsgWall = performance.now(); let ev; try { ev = JSON.parse(e.data); } catch (err) { S.badLines++; dirty = true; return; } if (hydrating) buffer.push(ev); else apply(ev, true); };
+  ws.onclose = () => { setConn('disconnected'); if (S.run || S.order.length) sysLog(S.t, 'warn', `connection lost, retrying in ${Math.round(backoff / 1000)} s`); setTimeout(connect, backoff); backoff = Math.min(8000, backoff * 1.6); };
+  ws.onerror = () => { /* onclose follows */ };
+}
+
+// ------------------------------------------------------------------ sheets, theme, keys
+function showSheet(name) {
+  document.querySelectorAll('.sheet').forEach(s => setAttr(s, 'data-active', s.id === 'sheet-' + name));
+  document.querySelectorAll('.sheets [data-sheet]').forEach(b => b.setAttribute('aria-selected', b.dataset.sheet === name ? 'true' : 'false'));
+  dirty = true;
+  if (name === 'results' && (R.stale || R.status !== 'ok')) loadResults();
+}
+setInterval(() => { if (resultsVisible() && (R.stale || R.status !== 'ok')) loadResults(); }, 5000);   // rule 3: re-read the file, never trust memory
+if (Q.get('sheet') === 'results') showSheet('results');
+document.querySelectorAll('.sheets [data-sheet]').forEach(b => b.addEventListener('click', () => showSheet(b.dataset.sheet)));
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === '1') showSheet('live'); else if (e.key === '2') showSheet('results');
+  else if (e.key === 'r') { showRaw = !showRaw; S.listsDirty = true; dirty = true; }
+});
+
+let tick = 0;
+setInterval(() => { tick++; if (dirty || tick % 4 === 0) { dirty = false; try { render(); } catch (err) { console.error('render failed', err); } } }, 125);
+render();
+connect();
+</script>
+</body>
+</html>
