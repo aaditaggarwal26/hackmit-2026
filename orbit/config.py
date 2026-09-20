@@ -127,6 +127,22 @@ class Settings:
     sat_capture_period_s: float = 3.0  # nominal capture cadence per satellite
     sat_ack_timeout_ms: int = 3000  # tx_done sent, no tx_ack: stop waiting, keep the frame, bid again
 
+    # --- control-bus authenticity (orbit/protocol/auth.py) -----------------------------
+    #
+    # Off by default, all of it, and that is a decision rather than an oversight: this bus is a
+    # local-link multicast group carrying public imagery, the simulator runs entirely inside one
+    # process where there is nobody to impersonate, and every test written before this existed
+    # assumes a datagram means what it says. A deployment turns these on; nothing else has to
+    # know they are there, and `uv run orbit sim` keeps producing the digest it always has.
+    auth_key: str = ""  # pre-shared HMAC key, used as the RAW BYTES typed here. "" = no MAC.
+    # Written down nowhere but the environment: ORBIT_AUTH_KEY=... for the ground, and
+    # ORBIT_AUTH_KEY in the gitignored firmware/satellite_esp32/secrets.h for each board -- the
+    # same characters on both sides, with no hex or base64 step that the two languages could
+    # decode differently. as_dict() redacts it, because that dict is logged at ground_start.
+    ground_name: str = ""  # the one sender whose offers_open/grant/revoke/tx_ack may be obeyed
+    pin_senders: bool = False  # enforce ground_name, and sat_names() for satellite traffic
+    auth_anti_replay: bool = True  # with a key set, a seq must beat that sender's last VERIFIED
+
     # --- determinism -------------------------------------------------------------------
     seed: int = 0
 
@@ -165,7 +181,16 @@ class Settings:
         return cls().with_overrides(**out)
 
     def as_dict(self) -> dict[str, Any]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+        """Every tunable, with the key redacted.
+
+        This dict is logged verbatim at ``ground_start`` and recorded into every bench result,
+        so returning ``auth_key`` here would put the pre-shared key in the run file, the event
+        stream and results/bench.jsonl -- three places it would then be committed from. Nothing
+        reconstructs a Settings from this, so redacting costs nothing.
+        """
+        out = {f.name: getattr(self, f.name) for f in fields(self)}
+        out["auth_key"] = "<set>" if self.auth_key else ""
+        return out
 
 
 def _coerce(raw: str, typ: type) -> Any:

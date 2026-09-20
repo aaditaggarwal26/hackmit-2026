@@ -26,6 +26,7 @@
 #include "orbit_score.h"
 #include "orbit_queue.h"
 #include "orbit_sat.h"
+#include "orbit_crypto.h"   // control-bus auth: sender pinning + HMAC-SHA256, host-tested
 #include "orbit_codec.h"
 #include "orbit_fsimage.h"
 
@@ -163,6 +164,12 @@ static void sendDoc(JsonDocument &d, int repeat = BUS_TX_REPEAT) {
     Serial.printf("[bus] datagram too large (%u), dropped\n", (unsigned)n);
     return;
   }
+  // Authenticate the SERIALISED bytes, so what is MACed is exactly what goes on the wire and
+  // ArduinoJson's number formatting never has to agree with Python's. Adds 42 bytes
+  // (,"auth":"<32 hex>"); returns 0 if they do not fit or the bytes will not canonicalise, and
+  // an unsigned datagram on an authenticated bus is one nobody would act on anyway.
+  n = orbit_auth_sign(buf, n, sizeof(buf), ORBIT_AUTH_KEY);
+  if (n == 0) { Serial.println("[bus] datagram could not be signed, dropped"); return; }
   for (int i = 0; i < repeat; i++) {
     udp.beginPacket(MCAST_GROUP, MCAST_PORT);
     udp.write(buf, n);
@@ -565,6 +572,11 @@ static uint32_t fnv1a(const char *s) {
   return h;
 }
 
+// Anti-replay: the highest seq VERIFIED from each sender. Cleared for a sender whose uptime
+// jumps backwards past ORBIT_RESTART_SLACK_MS, so an operator restarting the ground mid-demo
+// is not fatal. Zero-initialised as a static: no peers known at boot.
+static OrbitAuthState g_auth;
+
 // true if (sender, seq) has been seen before; records it otherwise.
 static bool seenBefore(const char *sender, uint32_t seq) {
   const uint32_t h = fnv1a(sender);
@@ -585,6 +597,13 @@ static void pollBus() {
     const int len = udp.read(buf, BUS_MAX_DATAGRAM);
     if (len <= 0) continue;
     buf[len] = 0;
+    // Authenticity BEFORE the parser and BEFORE seenBefore(): nothing a stranger sends should
+    // reach ArduinoJson (zero-copy deserialisation mutates this buffer), and an unverified
+    // datagram must never move this node's sequence state -- one forgery with a huge seq would
+    // otherwise mute the real ground for the rest of the window. Sender pinning, the MAC and
+    // the anti-replay watermark, in one call, on the raw bytes.
+    if (orbit_auth_accept(buf, (size_t)len, ORBIT_AUTH_KEY, ORBIT_GROUND_NAME, &g_auth) != ORBIT_OK)
+      continue;
     JsonDocument d;
     if (deserializeJson(d, buf, len) != DeserializationError::Ok) continue;
     if ((d["v"] | 0) != ORBIT_PROTOCOL_VERSION) continue;
@@ -655,6 +674,14 @@ static void pumpTx() {
     d["cloud_frac"] = orbit_cloud_frac(it->cloud_px);
     d["sha256"] = sha_hex;
     tx_done_len = serializeJson(d, tx_done_buf, sizeof(tx_done_buf));
+    // tx_done keeps its bytes for the resend path, so it needs its own sign call. The resends
+    // are the same signed bytes with the same seq: the ground dedups them, exactly as before.
+    tx_done_len = orbit_auth_sign(tx_done_buf, tx_done_len, sizeof(tx_done_buf), ORBIT_AUTH_KEY);
+    if (tx_done_len == 0) {
+      Serial.println("[tx  ] tx_done could not be signed, dropped");
+      tx_active = false;      // no tx_done: the ground times the grant out and re-arbitrates
+      return;                 // await_ack stays false, so the frame is KEPT
+    }
     for (int i = 0; i < BUS_TX_REPEAT; i++) {
       udp.beginPacket(MCAST_GROUP, MCAST_PORT);
       udp.write(tx_done_buf, tx_done_len);

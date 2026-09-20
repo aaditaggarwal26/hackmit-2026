@@ -10,3 +10,6 @@ __pycache__/
 !corpus/png/*.png
 results/raw/
 runs/
+
+# the WiFi credentials, the ground hostname and the pre-shared control-bus key live here
+firmware/satellite_esp32/secrets.h

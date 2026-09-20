@@ -27,6 +27,7 @@ from typing import Any
 from orbit.bus.base import Bus
 from orbit.config import Settings
 from orbit.log import log
+from orbit.protocol import auth
 
 lg = logging.getLogger("orbit.bus.mcast")
 
@@ -68,7 +69,11 @@ def open_socket(group: str, port: int, iface_ip: str, ttl: int) -> socket.socket
 class MulticastBus(Bus):
     def __init__(self, settings: Settings, hostname: str) -> None:
         super().__init__(
-            hostname, settings.dedup_window, settings.bus_max_datagram, restart_slack_ms=settings.restart_slack_ms
+            hostname,
+            settings.dedup_window,
+            settings.bus_max_datagram,
+            restart_slack_ms=settings.restart_slack_ms,
+            policy=auth.Policy.from_settings(settings),
         )
         self.s = settings
         self.group = (settings.mcast_group, settings.mcast_port)
@@ -89,6 +94,11 @@ class MulticastBus(Bus):
             port=self.s.mcast_port,
             iface=self.iface_ip,
             hostname=self.hostname,
+            # never the key itself: whether one is set, and what is being enforced with it
+            auth=self.policy.signing,
+            pinned_ground=self.policy.ground_name,
+            pinned_sats=list(self.policy.sat_names),
+            anti_replay=self.policy.replay_checked,
         )
 
     async def stop(self) -> None:
