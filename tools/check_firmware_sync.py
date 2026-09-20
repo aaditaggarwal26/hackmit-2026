@@ -1,11 +1,22 @@
-"""Fail if the firmware's constants have drifted from orbit/config.py.
+"""Fail if the firmware's constants or fault codes have drifted from the ground station.
 
-orbit_config.h restates facts that live in config.py -- frame geometry, kernel weights
-and thresholds, protocol version, bus address, satellite tunables. A silent divergence
-here produces scores the ground cannot reproduce, which is exactly the failure that is
-hardest to read off a dashboard. So it is checked, not trusted.
+Two headers restate facts owned elsewhere, and both are checked rather than trusted:
+
+* ``orbit_config.h`` restates facts from ``orbit/config.py`` -- frame geometry, kernel weights
+  and thresholds, protocol version, bus address, satellite tunables. A silent divergence there
+  produces scores the ground cannot reproduce, which is exactly the failure that is hardest to
+  read off a dashboard.
+* ``orbit_faults.h`` is GENERATED from ``orbit/protocol/registry.py`` and carries the integer
+  ``code_id`` of every fault. Those numbers travel on the wire and get flashed into boards, so a
+  header regenerated from an older registry -- or hand-edited, which its banner forbids and
+  nothing else prevents -- means a board saying 7 while the ground reads 7 as something else.
+  The ids and severity names are parsed back out of the header the firmware actually compiles
+  against, so a stale header is caught whatever the generator would produce today.
 
   uv run python tools/check_firmware_sync.py
+
+The config side is read from ``origin/ground-station``, where config.py is owned. The registry is
+not on that ref -- it is owned here -- so it is imported.
 """
 
 from __future__ import annotations
@@ -14,8 +25,11 @@ import re
 import subprocess
 from pathlib import Path
 
+from orbit.protocol import registry as R
+
 ROOT = Path(__file__).resolve().parents[1]
 HEADER = ROOT / "firmware/satellite_esp32/orbit_config.h"
+FAULTS_HEADER = ROOT / "firmware/satellite_esp32/orbit_faults.h"
 GOLDEN_REF = "origin/ground-station"
 
 # firmware name -> (python name, where it lives: "const" = module level, "setting" = Settings default)
@@ -47,6 +61,47 @@ def firmware_values(text: str) -> dict[str, str]:
     for m in re.finditer(r"static const \w+\s+(\w+)\s*=\s*([^;]+);", text):
         out[m.group(1)] = m.group(2).strip()
     return out
+
+
+_ENUM = re.compile(r"ORBIT_FAULT_(\w+)\s*=\s*(\d+)\s*,")
+_SEVERITY = re.compile(r"case ORBIT_FAULT_(\w+):\s*return\s*\"(\w*)\";")
+
+
+def fault_header_codes(text: str) -> tuple[dict[str, int], dict[str, str]]:
+    """(slug -> id, slug -> severity) as orbit_faults.h actually defines them.
+
+    Parsed, not imported: the point is to read the file the compiler reads. The severity map
+    comes from the first switch only -- orbit_fault_slug's cases return the slug, not a severity,
+    and would otherwise overwrite every entry with its own name.
+    """
+    ids = {m.group(1).lower(): int(m.group(2)) for m in _ENUM.finditer(text)}
+    sev: dict[str, str] = {}
+    body = text.split("orbit_fault_slug")[0]
+    for m in _SEVERITY.finditer(body):
+        sev.setdefault(m.group(1).lower(), m.group(2))
+    return ids, sev
+
+
+def fault_drift() -> list[str]:
+    """Every way orbit_faults.h and the registry can disagree about a code."""
+    if not FAULTS_HEADER.exists():
+        return [f"{FAULTS_HEADER.relative_to(ROOT)} is missing entirely"]
+    ids, sev = fault_header_codes(FAULTS_HEADER.read_text())
+    want_id = {R.slug(c): int(c) for c in R.FAULTS}
+    want_sev = {R.slug(c): str(s.severity) for c, s in R.FAULTS.items()}
+
+    bad = [
+        f"{s}: in the registry (id {want_id[s]}), absent from orbit_faults.h" for s in sorted(set(want_id) - set(ids))
+    ]
+    bad += [f"{s}: in orbit_faults.h (id {ids[s]}), absent from the registry" for s in sorted(set(ids) - set(want_id))]
+    for s in sorted(set(ids) & set(want_id)):
+        if ids[s] != want_id[s]:
+            # The one that matters most: the same name, a different number. Every flashed board
+            # carrying the old number now means something else to the ground.
+            bad.append(f"{s}: orbit_faults.h id={ids[s]} registry id={want_id[s]}")
+        if sev.get(s, "") != want_sev[s]:
+            bad.append(f"{s}: orbit_faults.h severity={sev.get(s, '<missing>')!r} registry={want_sev[s]!r}")
+    return bad
 
 
 def main() -> int:
@@ -86,7 +141,16 @@ def main() -> int:
         for b in bad:
             print("  " + b)
         return 1
+
+    if drift := fault_drift():
+        print("orbit_faults.h has drifted from the fault registry:\n")
+        for d in drift:
+            print("  " + d)
+        print(f"\nregenerate: {R.REGEN}")
+        return 1
+
     print(f"OK: {len(CHECKS)} constants + MCAST_GROUP match orbit/config.py ({GOLDEN_REF})")
+    print(f"OK: {len(R.FAULTS)} fault code ids and severities match orbit/protocol/registry.py")
     return 0
 
 

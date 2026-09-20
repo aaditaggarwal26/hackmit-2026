@@ -22,6 +22,7 @@
 
 #include "secrets.h"
 #include "orbit_config.h"
+#include "orbit_faults.h"
 #include "orbit_score.h"
 #include "orbit_queue.h"
 #include "orbit_sat.h"
@@ -69,6 +70,18 @@ static uint32_t g_next_heartbeat_ms = 0;
 
 static uint16_t g_frame_count = 0;          // frames present on LittleFS
 static uint16_t g_frame_pos = 0;            // capture cursor
+
+// Faults. The registry (orbit/protocol/registry.py) names every code and owns its number;
+// orbit_faults.h is generated from it, and orbit_sat.h holds the two pieces of behaviour that
+// are testable off-board: the boot latch and the edge trigger.
+static PendingFaults g_boot_faults;   // raised before the radio exists; drained after the join
+static FaultOnce     g_fault_once;    // conditions that recur every capture period
+
+// What counts as an abnormal kernel pass. The scoring kernel runs once per capture and the
+// cadence is SAT_CAPTURE_PERIOD_S; a pass that eats a third of the period is not keeping up with
+// its own camera, whatever the absolute number turns out to be on this silicon. NEEDS CALIBRATION
+// against a real board: it is a ceiling chosen from the cadence, not from a measurement.
+static const uint32_t SCORING_LATENCY_WARN_US = (uint32_t)(SAT_CAPTURE_PERIOD_S * 1000000.0f / 3.0f);
 
 static uint32_t c_captured = 0, c_evicted = 0, c_rejected = 0, c_bids = 0;
 static uint32_t c_grants = 0, c_transmitted = 0, c_failed = 0, c_revoked = 0;
@@ -177,6 +190,24 @@ static void sendEviction(const Item &lost, const char *kind, const Item *by) {
   d["displaced_by_score"] = by ? score_display(by->raw_score) : -1.0f;
   sendDoc(d);
   Serial.printf("[lost] item=%u kind=%s score=%.1f\n", lost.item_id, kind, score_display(lost.raw_score));
+}
+
+// One edge-triggered onboard fault. `code_id` indexes the fault-code registry
+// (orbit/protocol/registry.py); the ground looks the number up there, which is why a code can be
+// added or reclassified without touching the wire schema.
+//
+// `severity` is a parameter rather than something this function looks up, but every call site
+// passes orbit_fault_severity(code) out of the generated header. A hand-typed severity string is
+// precisely the drift the registry exists to prevent: it would be the one fact about a fault that
+// the board and the ground could disagree about while both looked correct.
+static void sendFault(int code_id, const char *severity, const char *detail) {
+  JsonDocument d;
+  fillEnvelope(d, "fault");
+  d["code_id"] = code_id;
+  d["severity"] = severity;
+  d["detail"] = detail;
+  sendDoc(d);
+  Serial.printf("[falt] %d %s (%s): %s\n", code_id, orbit_fault_slug(code_id), severity, detail);
 }
 
 static void sendHeartbeat() {
@@ -384,6 +415,15 @@ static void capture() {
   c_captured++;
   Serial.printf("[cap] frame=%u score=%u (%.1f) cloud=%u chg=%u %ums\n",
                 idx, s.score, score_display(s.score), s.cloud_px, s.changed_px, us / 1000);
+  // Degraded, not fatal: the frame was still scored. But a kernel that cannot finish inside the
+  // capture cadence means the queue is being fed slower than the camera runs, and that shows up
+  // on the dashboard as a satellite that simply bids less often, with no reason given. Once per
+  // boot (FaultOnce): every capture after the first would report the same condition.
+  if (us > SCORING_LATENCY_WARN_US && g_fault_once.first(ORBIT_FAULT_SCORING_LATENCY_HIGH)) {
+    char detail[48];
+    snprintf(detail, sizeof(detail), "frame %u scored in %u ms", idx, us / 1000);
+    sendFault(ORBIT_FAULT_SCORING_LATENCY_HIGH, orbit_fault_severity(ORBIT_FAULT_SCORING_LATENCY_HIGH), detail);
+  }
   // eviction first, then scored -- the same order orbit/sim/satellite.py::capture emits them,
   // so a reader of the bus log sees the loss before the frame that caused it is announced.
   const AdmitResult r = admit(s, scratch);
@@ -408,7 +448,17 @@ static void onGrant(JsonDocument &d) {
   if (strcmp(to, HOSTNAME) != 0) { c_peer_grants++; return; }
   const uint16_t item_id = d["item_id"] | 0;
   Item *it = findItem(item_id);
-  if (!it) { Serial.printf("[grant] unknown item %u\n", item_id); return; }
+  if (!it) {
+    // The ground's view of this node's queue and the node's own have diverged: it granted a frame
+    // we do not hold. Not once-only — each grant is its own event, and how often it happens is the
+    // measurement. The slot is lost either way (the ground times the grant out and re-arbitrates),
+    // so the fault is the only record that it was a disagreement rather than a dead board.
+    Serial.printf("[grant] unknown item %u\n", item_id);
+    char detail[48];
+    snprintf(detail, sizeof(detail), "granted item %u, not in the pool", item_id);
+    sendFault(ORBIT_FAULT_GRANT_UNKNOWN_ITEM, orbit_fault_severity(ORBIT_FAULT_GRANT_UNKNOWN_ITEM), detail);
+    return;
+  }
   c_grants++;
   tx_active = true;
   tx_round = d["round_id"] | -1;
@@ -658,15 +708,24 @@ void setup() {
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getPsramSize());
   led(16, 0, 0);
 
-  if (!LittleFS.begin(false)) { Serial.println("FATAL: LittleFS mount failed (upload the image set)"); }
+  // Everything from here to the multicast join can fail fatally, and none of it can say so on the
+  // bus yet: there is no socket. Each failure is latched into g_boot_faults and drained the moment
+  // the join succeeds, so a board that comes up crippled reports it over the air instead of only
+  // down a serial cable nobody has plugged in.
+  if (!LittleFS.begin(false)) {
+    Serial.println("FATAL: LittleFS mount failed (upload the image set)");
+    g_boot_faults.push(ORBIT_FAULT_LITTLEFS_MOUNT_FAILED, "LittleFS.begin(false) failed");
+  }
   else {
     File m = LittleFS.open("/manifest.json", "r");
     if (!m) {
       Serial.println("FATAL: /manifest.json missing -- upload the image set");
+      g_boot_faults.push(ORBIT_FAULT_MANIFEST_MISSING, "/manifest.json not on LittleFS");
     } else {
       JsonDocument md;
       if (deserializeJson(md, m) != DeserializationError::Ok) {
         Serial.println("FATAL: /manifest.json is not valid JSON");
+        g_boot_faults.push(ORBIT_FAULT_MANIFEST_CORRUPT, "/manifest.json is not valid JSON");
       } else {
         JsonArray arr = md["frames"].as<JsonArray>();
         for (JsonObject e : arr) {
@@ -679,7 +738,15 @@ void setup() {
     }
   }
 
-  if (!fbuf.begin(SAT_BUFFER_SLOTS)) { Serial.println("FATAL: frame pool allocation failed"); }
+  if (!fbuf.begin(SAT_BUFFER_SLOTS)) {
+    Serial.println("FATAL: frame pool allocation failed");
+    g_boot_faults.push(ORBIT_FAULT_BUFFER_ALLOC_FAILED, "frame pool allocation failed");
+  } else if (!fbuf.inPsram()) {
+    // Degraded, not fatal: FrameBuffer::begin falls back to internal SRAM (orbit_queue.h) and the
+    // node works. It is reported because 8 x 16 KB beside the WiFi stack is the configuration that
+    // starts failing allocations later, under load, for reasons nobody will connect back to boot.
+    g_boot_faults.push(ORBIT_FAULT_PSRAM_FALLBACK, "frame pool in internal SRAM");
+  }
   Serial.printf("[buf] %d slots x %u B in %s\n", fbuf.slots(), FRAME_BYTES, fbuf.inPsram() ? "PSRAM" : "internal RAM");
   queue.begin(SAT_BUFFER_SLOTS);
 
@@ -698,6 +765,20 @@ void setup() {
 
   if (udp.beginMulticast(IPAddress(239, 255, 42, 99), MCAST_PORT)) Serial.printf("[bus] joined %s:%u\n", MCAST_GROUP, MCAST_PORT);
   else Serial.println("[bus] FATAL: multicast join failed");
+
+  // There is a socket now, so everything latched above can finally be said out loud. sat_boot goes
+  // first and carries the overflow count: it is this node announcing itself, and "I am here, and N
+  // problems did not fit in the list" is the one thing that must never be the part that got
+  // dropped. The rest follow in the order they happened, which is the order that explains them.
+  {
+    char boot[48];
+    snprintf(boot, sizeof(boot), "%s up, %d boot faults", HOSTNAME, g_boot_faults.size() + g_boot_faults.dropped());
+    sendFault(ORBIT_FAULT_SAT_BOOT, orbit_fault_severity(ORBIT_FAULT_SAT_BOOT), boot);
+  }
+  for (int i = 0; i < g_boot_faults.size(); i++) {
+    const int code_id = g_boot_faults.code(i);
+    sendFault(code_id, orbit_fault_severity(code_id), g_boot_faults.detail(i));
+  }
 
   g_next_capture_ms = millis() + (uint32_t)(SAT_CAPTURE_PERIOD_S * 1000);
   g_next_heartbeat_ms = millis();

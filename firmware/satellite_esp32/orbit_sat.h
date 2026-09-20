@@ -12,9 +12,11 @@
 //   orbit_part / orbit_cloud_frac  <->  the rounding Item() applies at capture
 #pragma once
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <stdint.h>
 #include "orbit_config.h"
+#include "orbit_faults.h"
 
 // ---------------------------------------------------------------- one held frame
 //
@@ -122,3 +124,72 @@ static inline void orbit_hex64(const uint8_t digest[32], char out[65]) {
   }
   out[64] = '\0';
 }
+
+// ---------------------------------------------------------------- faults raised before the radio
+//
+// The four worst things that can happen to this node all happen in setup() BEFORE there is a
+// socket to say so on: LittleFS will not mount, the manifest is missing or corrupt, the frame
+// pool will not allocate. Calling sendFault() there writes a datagram into a UDP object that has
+// not joined the group yet, so the board that most needs to be heard is the one that is silent.
+//
+// So boot faults are latched here and drained immediately after the multicast join. Fixed
+// capacity and no allocation, deliberately: one of the conditions being reported IS an allocation
+// failure, and a reporter that needs the heap to report a heap failure reports nothing. Overflow
+// is counted rather than hidden — `dropped()` goes out in the boot fault's detail, so "there were
+// more problems than this" is on the bus even when the list was too small to carry them.
+struct PendingFaults {
+  static const int CAP        = 6;
+  static const int DETAIL_LEN = 48;   // one line of serial log; the bus datagram has room to spare
+
+  bool push(int code_id, const char *detail) {
+    if (n_ >= CAP) { dropped_++; return false; }
+    code_[n_] = code_id;
+    // strncpy without the terminator guarantee is the classic way to lose the end of a string;
+    // the copy is bounded and terminated explicitly instead.
+    const size_t len = strlen(detail) < (size_t)(DETAIL_LEN - 1) ? strlen(detail) : (size_t)(DETAIL_LEN - 1);
+    memcpy(detail_[n_], detail, len);
+    detail_[n_][len] = '\0';
+    n_++;
+    return true;
+  }
+
+  int         size()          const { return n_; }
+  int         dropped()       const { return dropped_; }
+  int         code(int i)     const { return (i >= 0 && i < n_) ? code_[i] : 0; }
+  const char *detail(int i)   const { return (i >= 0 && i < n_) ? detail_[i] : ""; }
+
+ private:
+  int  code_[CAP]              = {0};
+  char detail_[CAP][DETAIL_LEN] = {{0}};
+  int  n_       = 0;
+  int  dropped_ = 0;
+};
+
+// A fault is EDGE-triggered (docs/protocol.md): it reports an event, not a level, so it is sent
+// once when the condition occurs and never repeated. Two sites can re-enter the same condition
+// every capture period — a frame that will not load, a kernel pass that runs long — and left
+// alone they would put a fault on the bus every three seconds for the rest of the window, which
+// is how a fault channel becomes noise nobody reads. They go through here instead.
+//
+// One bit per code id, so the state costs a word and cannot be desynchronised from the registry.
+struct FaultOnce {
+  bool first(int code_id) {
+    if (code_id <= 0 || code_id >= 32) return true;    // outside the mask: never suppressed
+    const uint32_t bit = 1u << code_id;
+    if (seen_ & bit) return false;
+    seen_ |= bit;
+    return true;
+  }
+
+  void forget(int code_id) {                           // the condition cleared: re-arm the edge
+    if (code_id > 0 && code_id < 32) seen_ &= ~(1u << code_id);
+  }
+
+ private:
+  uint32_t seen_ = 0;
+};
+
+// The bitmask above is only sound while every registry id fits in it. It does today (ids run to
+// ORBIT_FAULT_MAX_ID) and this is what makes growing past 31 a compile error rather than a fault
+// that silently repeats forever.
+static_assert(ORBIT_FAULT_MAX_ID < 32, "FaultOnce's bitmask cannot hold this many fault codes");

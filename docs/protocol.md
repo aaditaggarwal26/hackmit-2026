@@ -80,6 +80,70 @@ Health and faults:
 Scores are 0–100 floats as the satellite computed them onboard. `item_id` is an integer unique per
 satellite (paired with `from` it is unique on the bus).
 
+## Routing
+
+Who publishes each type, over which transport, and who acts on it. Generated from
+`orbit/protocol/registry.py`, which also owns the stable integer ids below; `tests/test_registry.py`
+pins this table and `uv run python -m orbit.protocol.registry --write` regenerates it. The ids are
+the registry's own — the wire carries the `type` string, never the number.
+
+<!-- registry:bus-routing:begin -->
+Transport `bus`: UDP multicast `239.255.42.99:50000`, TTL 1. Every node on the
+link hears every datagram, so `subscribers` names who *acts* on it, not who receives it.
+
+| id | type | publisher | transport | subscribers | mirrored to laptop |
+|---|---|---|---|---|---|
+| 1 | `offers_open` | ground | `bus` | satellites | yes |
+| 2 | `grant` | ground | `bus` | satellites | yes |
+| 3 | `revoke` | ground | `bus` | satellites | yes |
+| 4 | `tx_ack` | ground | `bus` | satellites | yes |
+| 5 | `state` | ground | `bus` | satellites | yes |
+| 6 | `bid` | satellite | `bus` | ground + peers | yes |
+| 7 | `tx_begin` | satellite | `bus` | ground + peers | yes |
+| 8 | `tx_chunk` | satellite | `bus` | ground + peers | yes |
+| 9 | `tx_done` | satellite | `bus` | ground + peers | yes |
+| 10 | `heartbeat` | satellite | `bus` | ground + peers | yes |
+| 11 | `eviction` | satellite | `bus` | ground + peers | yes |
+| 12 | `scored` | satellite | `bus` | ground + peers | yes |
+| 13 | `fault` | satellite | `bus` | ground + peers | yes |
+<!-- registry:bus-routing:end -->
+
+The other two transports (`event-stream` and `telemetry`) carry none of the above and are tabulated
+in `docs/event_stream.md`.
+
+## Fault codes
+
+`fault.code_id` indexes this table. The table is deliberately not part of the wire schema: a code
+can be added or reclassified without a protocol change, and a receiver that does not recognise an id
+still has `severity` and `detail` to show a human.
+
+**The integer ids are permanent.** They are flashed into firmware that outlives any one checkout, so
+an id is never renumbered and never reused. A code that stops being raised keeps its number and
+becomes `retired`; `reserved` means the meaning is fixed and the id burned, but nothing raises it
+yet. `firmware/satellite_esp32/orbit_faults.h` is generated from this same table, so a board and the
+ground cannot disagree about what a number means.
+
+<!-- registry:faults:begin -->
+| id | slug | source | severity | transport | subscribers | status | description |
+|---|---|---|---|---|---|---|---|
+| 1 | `sat_boot` | satellite | info | `bus` | ground + peers | active | the node finished booting and joined the bus; the first thing it ever says |
+| 2 | `littlefs_mount_failed` | satellite | fatal | `bus` | ground + peers | active | LittleFS would not mount: there are no frames to capture and the node is inert |
+| 3 | `manifest_missing` | satellite | fatal | `bus` | ground + peers | active | /manifest.json is not on the flash image, so no frame knows its scene reference |
+| 4 | `manifest_corrupt` | satellite | fatal | `bus` | ground + peers | active | /manifest.json is present but is not valid JSON; same effect as it being absent |
+| 5 | `frame_checksum_failed` | ground | anomaly | `event-stream` | laptop | reserved | the reassembled frame did not match the sha256 in tx_done; the bytes are not what was sent |
+| 6 | `buffer_alloc_failed` | satellite | fatal | `bus` | ground + peers | active | the fixed frame pool could not be allocated in PSRAM or in internal SRAM: nothing can be held |
+| 7 | `psram_fallback` | satellite | degraded | `bus` | ground + peers | active | the frame pool landed in internal SRAM because PSRAM was absent or full; it works, with less headroom |
+| 8 | `grant_unknown_item` | satellite | anomaly | `bus` | ground + peers | active | the ground granted an item this node does not hold; the two views of the queue have diverged |
+| 9 | `scoring_latency_high` | satellite | degraded | `bus` | ground + peers | active | one frame took longer through the kernel than the capture cadence can absorb |
+| 10 | `ground_down` | ground | anomaly | `event-stream` | laptop | reserved | the bus went quiet or its health thresholds were breached: the ground is not arbitrating |
+| 11 | `auth_reject` | security | anomaly | `event-stream` | laptop | reserved | a datagram was rejected by the authentication layer |
+<!-- registry:faults:end -->
+
+A satellite fault rides the bus as a `fault` datagram and is therefore heard by its peers as well as
+by the ground. A ground fault has no bus form at all — `fault` is a satellite → all type — so it
+reaches the display over the event stream only, which is also the only path that could still report
+a ground that has stopped multicasting.
+
 ## One slot, end to end
 
 ```

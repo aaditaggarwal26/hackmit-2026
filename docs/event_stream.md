@@ -237,6 +237,71 @@ Budget accounting. Emitted on every change.
 
 ---
 
+## `ground_status`
+
+Periodic, once per ground tick (`period_s`, 1 s). **The ground's heartbeat to the display.**
+
+The satellites prove they are alive with `heartbeat`; nothing proved the *ground* was alive,
+and because every other event flows through the ground, a crashed ground and a quiet pass
+looked identical — the stream simply stopped. This event is the difference: it arrives on a
+fixed period whatever else is happening, so the display can time it out.
+
+```json
+{
+  "seq": 61, "t": 8.0, "type": "ground_status",
+  "uptime_s": 8.0,
+  "state": "READY",
+  "rounds": 12,
+  "period_s": 1.0,
+  "nodes": {"expected": 3, "seen": 3, "linked": 2},
+  "window": {"open": true, "budget_bytes": 983040, "used_bytes": 49152, "remaining_bytes": 933888,
+             "slots_used": 3, "slots_remaining": 57, "time_remaining_s": 112.0}
+}
+```
+
+`uptime_s` is seconds since the ground started — the same clock as `t`. `state` is the arbiter
+FSM state (`READY`, `BUSY`, `COMPLETE`, `CLOSED`). `nodes.expected` is the roster from
+`run_start`, `seen` those ever heard from, `linked` those heard from within `peer_stale_s`.
+`period_s` is how often the display should expect the next one: **miss a few and the ground is
+unreachable, not quiet.** This is not a bus message and never goes on the bus.
+
+---
+
+## `bus_health`
+
+Periodic, alongside `ground_status`. A rollup of the ground bus's counters, with the drops as
+**rates over a sliding window** — not totals, and never one event per dropped datagram.
+
+```json
+{
+  "seq": 62, "t": 8.0, "type": "bus_health",
+  "window_s": 60.0,
+  "measured_s": 8.0,
+  "received": 141, "delivered": 96,
+  "dropped": {"malformed": 0, "dup": 12, "oversize": 0, "own": 33},
+  "malformed_by_type": {},
+  "rates_per_min": {"malformed": 0.0, "dup": 90.0, "oversize": 0.0},
+  "alerts": [{"metric": "dup", "rate_per_min": 90.0, "threshold_per_min": 60.0}]
+}
+```
+
+`dropped` are since-start totals and `malformed_by_type` splits the malformed ones by message
+type. `rates_per_min` are measured over the last `window_s` of counter samples (`measured_s` is
+how much of that window exists yet). `alerts` lists only the metrics whose rate is **strictly
+above** its threshold and carries the threshold with it, so the display never needs its own copy
+of the numbers. A bus that loses one datagram an hour is healthy, and a panel that says
+otherwise teaches people to ignore it.
+
+Crossing a threshold also emits one `node_event` (`node_id: null`, `level: warn`); dropping back
+under emits one at `level: info`. **Edge-triggered**, exactly like the HARD and silent flags, so
+a sustained alert is one line in the log rather than one per second.
+
+The thresholds currently live in `orbit/ground/stream.py` (`BUS_ALERT_PER_MIN`,
+`BUS_HEALTH_WINDOW_S`); they are tunables of the same kind as `peer_stale_s` and belong in
+`Settings`.
+
+---
+
 ## `node_event`
 
 Anything worth showing in the log: a satellite joining, an eviction (with what
@@ -287,6 +352,12 @@ the baseline downlinked nothing usable.
    file, never live memory, so the numbers survive a demo hiccup.
 4. Adding a field is fine. Renaming or removing one breaks the display, so say
    so in the group chat first.
+5. `ground_status` and `bus_health` exist only here. They are not bus message types and the
+   ground never puts them on the bus — they are the ground telling the *laptop* it is alive.
+   The display is observe-only: it reads this stream and transmits nothing, anywhere.
+6. If `ground_status` stops arriving, the ground is unreachable — not idle. The display says so
+   and marks every satellite unknown, because the flags it is still showing are last-known
+   assessments from a ground it can no longer hear.
 
 ## Where each event comes from (ground side)
 
@@ -300,7 +371,74 @@ the baseline downlinked nothing usable.
 | `frame_arrived` | `tx_done` confirmed with all chunks (`tx_ack{ok}`) |
 | `baseline_arrival` | the FIFO model, one slot per `frame_arrived` |
 | `window_update` | every completed transmission and window close |
-| `node_event` | `sat_seen`, `eviction`, `revoke`, `tx_failed`, `late_bid`, `unexpected_tx`, `no_bids`, hard/silent flag edges |
+| `ground_status` | the ground's periodic tick (`EventStream.tick`), every `period_s` |
+| `bus_health` | the same tick, from the ground bus's `BusStats` |
+| `node_event` | `sat_seen`, `eviction`, `revoke`, `tx_failed`, `late_bid`, `unexpected_tx`, `no_bids`, hard/silent flag edges, bus-rate threshold edges |
 | `run_end` | window closed, operator stop, or simulator end |
 
 Implementation: `orbit/ground/stream.py`.
+
+## Off-bus routing and fault codes
+
+Generated from `orbit/protocol/registry.py` — the one place message types and fault codes are
+defined — and pinned by `tests/test_registry.py`. Regenerate with
+`uv run python -m orbit.protocol.registry --write`.
+
+<!-- registry:off-bus:begin -->
+Neither transport below touches the bus. `event-stream` is WebSocket JSONL on port 8766
+(`Settings.stream_port`); `telemetry` is fire-and-forget unicast UDP to `display.local:50010`. Both are ground → laptop: a satellite can neither send nor hear one.
+
+| id | type | transport | publisher | subscribers | description |
+|---|---|---|---|---|---|
+| 14 | `run_start` | `event-stream` | ground | laptop | first event of a run: roster, window, scoring and bus configuration |
+| 15 | `node_status` | `event-stream` | ground | laptop | one node's queue, counters and link state, per bid or heartbeat heard |
+| 16 | `queue_window` | `event-stream` | ground | laptop | the top few entries of a node's queue, per bid |
+| 17 | `frame_scored` | `event-stream` | ground | laptop | a node scored a frame; feeds the FIFO baseline and the usable verdict |
+| 18 | `grant` | `event-stream` | ground | laptop | the arbitration decision with every bidder's itemised priority |
+| 19 | `frame_arrived` | `event-stream` | ground | laptop | a transmission completed and was confirmed; one per distinct frame |
+| 20 | `baseline_arrival` | `event-stream` | ground | laptop | the same slot as served by the no-scoring FIFO model |
+| 21 | `window_update` | `event-stream` | ground | laptop | contact-window byte accounting, on every change |
+| 22 | `ground_status` | `event-stream` | ground | laptop | the ground's own heartbeat to the laptop: miss it and the ground is unreachable |
+| 23 | `bus_health` | `event-stream` | ground | laptop | the ground bus's counters as rates over a sliding window, with threshold alerts |
+| 24 | `node_event` | `event-stream` | ground | laptop | the human log line: joins, evictions, revokes, flags, faults |
+| 25 | `run_end` | `event-stream` | ground | laptop | last event: the orbit-vs-baseline headline the stats screen reads |
+| 26 | `round_open` | `telemetry` | ground | display | a round opened and bids are being collected |
+| 27 | `decision` | `telemetry` | ground | display | the arbitration result with the itemised breakdown of every candidate |
+| 28 | `tx_begin` | `telemetry` | ground | display | the granted satellite started transmitting |
+| 29 | `complete` | `telemetry` | ground | display | a transmission was confirmed and the window debited |
+| 30 | `tx_failed` | `telemetry` | ground | display | a transmission ended without every chunk, or with a bad digest |
+| 31 | `revoke` | `telemetry` | ground | display | a grant was taken back and the round re-arbitrated |
+| 32 | `no_bids` | `telemetry` | ground | display | a round opened and nobody bid |
+| 33 | `late_bid` | `telemetry` | ground | display | a bid arrived for a round that had already closed |
+| 34 | `unexpected_tx` | `telemetry` | ground | display | tx traffic from a node or for an item that holds no grant |
+| 35 | `sat_seen` | `telemetry` | ground | display | a satellite was heard from for the first time |
+| 36 | `eviction` | `telemetry` | ground | display | a satellite reported losing a frame to its own storage limits |
+| 37 | `window_closed` | `telemetry` | ground | display | the contact window ended |
+| 38 | `state` | `telemetry` | ground | display | a ground FSM transition |
+| 39 | `flags` | `telemetry` | ground | display | the per-satellite flag set: waiting, starved, memory-pressured, silent |
+| 40 | `bus` | `telemetry` | ground | display | every bus datagram, mirrored verbatim for the display's log |
+| 41 | `snapshot` | `telemetry` | ground | display | the whole ground-station state, for a display that joined late |
+| 42 | `bus_stats` | `telemetry` | ground | display | datagram counters: accepted, malformed, duplicate, too long |
+| 43 | `telemetry_stats` | `telemetry` | ground | display | this transport's own counters, including what it dropped |
+
+Fault codes as the display sees them. A satellite fault is a `fault` datagram on the bus that
+the ground turns into a `node_event`; a ground fault never touches the bus and reaches the
+laptop on this stream only.
+
+| id | slug | severity | reaches the laptop via | crosses the bus |
+|---|---|---|---|---|
+| 1 | `sat_boot` | info | `fault` → `node_event` | yes |
+| 2 | `littlefs_mount_failed` | fatal | `fault` → `node_event` | yes |
+| 3 | `manifest_missing` | fatal | `fault` → `node_event` | yes |
+| 4 | `manifest_corrupt` | fatal | `fault` → `node_event` | yes |
+| 5 | `frame_checksum_failed` | anomaly | `node_event` (ground-side only) | no |
+| 6 | `buffer_alloc_failed` | fatal | `fault` → `node_event` | yes |
+| 7 | `psram_fallback` | degraded | `fault` → `node_event` | yes |
+| 8 | `grant_unknown_item` | anomaly | `fault` → `node_event` | yes |
+| 9 | `scoring_latency_high` | degraded | `fault` → `node_event` | yes |
+| 10 | `ground_down` | anomaly | `node_event` (ground-side only) | no |
+| 11 | `auth_reject` | anomaly | `node_event` (ground-side only) | no |
+<!-- registry:off-bus:end -->
+
+The `fault` bus message itself (`docs/protocol.md`) is a satellite → all type: the display never
+receives one directly, only the `node_event` the ground makes of it.
