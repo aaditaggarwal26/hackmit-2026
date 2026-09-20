@@ -101,6 +101,7 @@ class RunPlot:
     usable_rule: str
     end_reason: str | None
     gain: float | None
+    dropped_full: int | None
     orbit: Series
     baseline: Series
 
@@ -219,14 +220,21 @@ def load_run(path: Path) -> RunPlot:
     scenario, seed = _split_run_id(run_id)
     rule = start.get("usable_rule")
 
+    # No run_end means no totals to check the curves against, and the chart says in its own
+    # footer that it was checked. Refuse rather than draw an unverifiable figure that claims
+    # otherwise -- an interrupted run is exactly when a stream is most likely to be short.
+    if end is None:
+        raise PlotError(
+            f"{path}: no run_end event. This run did not finish, so its curves cannot be held "
+            "against the totals the chart claims to have checked them against."
+        )
+    _check_against_run_end(path, end, orbit, baseline)
+    end_reason = end.get("reason")
     gain: float | None = None
-    end_reason: str | None = None
-    if end is not None:
-        _check_against_run_end(path, end, orbit, baseline)
-        end_reason = end.get("reason")
-        headline = end.get("headline")
-        if isinstance(headline, dict) and isinstance(headline.get("gain"), int | float):
-            gain = float(headline["gain"])
+    headline = end.get("headline")
+    if isinstance(headline, dict) and isinstance(headline.get("gain"), int | float):
+        gain = float(headline["gain"])
+    dropped_full = _baseline_dropped_full(end)
 
     return RunPlot(
         path=path,
@@ -238,6 +246,7 @@ def load_run(path: Path) -> RunPlot:
         usable_rule=_describe_usable_rule(rule if isinstance(rule, dict) else None),
         end_reason=str(end_reason) if end_reason is not None else None,
         gain=gain,
+        dropped_full=dropped_full,
         orbit=orbit,
         baseline=baseline,
     )
@@ -254,17 +263,30 @@ def _check_against_run_end(path: Path, end: Event, orbit: Series, baseline: Seri
         if not isinstance(summary, dict):
             continue
         recorded_usable = summary.get("usable_down")
-        if isinstance(recorded_usable, int):
-            assert series.usable == recorded_usable, (
+        if isinstance(recorded_usable, int) and series.usable != recorded_usable:
+            raise PlotError(
                 f"{path}: {key} curve ends at {series.usable} usable frames but "
                 f"run_end.{key}.usable_down says {recorded_usable}"
             )
         recorded_bytes = summary.get("bytes_used")
-        if isinstance(recorded_bytes, int):
-            assert series.bytes_used == recorded_bytes, (
+        if isinstance(recorded_bytes, int) and series.bytes_used != recorded_bytes:
+            raise PlotError(
                 f"{path}: {key} curve ends at {series.bytes_used} bytes but "
                 f"run_end.{key}.bytes_used says {recorded_bytes}"
             )
+
+
+def _baseline_dropped_full(end: Event) -> int | None:
+    """How many frames the FIFO baseline threw away because a node's pool was full.
+
+    The number that says whether this run was under buffer pressure at all, and so whether
+    the gain beside it is a contention result or a reordering one. Read from run_end.
+    """
+    summary = end.get("baseline")
+    if not isinstance(summary, dict):
+        return None
+    dropped = summary.get("frames_dropped_full")
+    return dropped if isinstance(dropped, int) else None
 
 
 # ------------------------------------------------------------------------- drawing
@@ -408,6 +430,14 @@ def _draw_panel(
     bits.append(run.nodes_badge)
     if run.end_reason is not None:
         bits.append(f"ended {run.end_reason}")
+    if run.dropped_full is not None:
+        # Whether the baseline was ever forced to throw a frame away is what separates a
+        # contention result from a reordering one, so it belongs on the face of the chart.
+        bits.append(
+            f"baseline dropped {run.dropped_full} frames, pool full"
+            if run.dropped_full
+            else "baseline never overflowed its pool"
+        )
     caption_y = top + 4 * s
     for line in _wrap(draw, [f"[ {b} ]" for b in bits], fonts.label, x1 - x0):
         draw.text((x0, caption_y), line, font=fonts.label, fill=INK_2)
@@ -522,6 +552,16 @@ def render(runs: list[RunPlot], out: Path) -> None:
         font=fonts.caption,
         fill=INK_2,
     )
+    # The scope of the claim, so a gain measured under buffer pressure is not read as a
+    # general one. Only drawn when a panel was actually under pressure, and only then.
+    if any(r.dropped_full for r in runs):
+        draw.text(
+            (margin, y + 78 * s),
+            "The gain is in which frames come down, not how many get a slot: where the baseline's "
+            "pool never overflows, both paths finish within a frame of each other.",
+            font=fonts.caption,
+            fill=INK_2,
+        )
 
     out.parent.mkdir(parents=True, exist_ok=True)
     img.resize((width // s, height // s), Image.Resampling.LANCZOS).save(out)
@@ -555,9 +595,6 @@ def main(argv: list[str] | None = None) -> int:
             runs.append(load_run(path))
         except PlotError as e:
             print(f"plot_value: {e}", file=sys.stderr)
-            return 2
-        except AssertionError as e:
-            print(f"plot_value: run file failed its own self-check: {e}", file=sys.stderr)
             return 2
 
     out = Path(args.out)

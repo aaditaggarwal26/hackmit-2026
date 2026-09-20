@@ -125,6 +125,24 @@ The demo's headline is `run_end` in every run file: usable frames downlinked by 
 versus a first-in-first-out baseline given the *same byte budget*, where "usable"
 is cloud fraction ≤ 0.35 — never the score that did the ranking.
 
+![Usable frames per byte of contact window](results/filtered_vs_fifo.png)
+
+Drawn by `tools/plot_value.py` straight from a run file, checked against that file's own
+`run_end` totals before anything is plotted. Regenerate it with:
+
+```bash
+uv run orbit sim --scenario memory_pressure --seed 42 --rounds 200 \
+  --run-id sim-memory_pressure-42-r200
+uv run python tools/plot_value.py runs/sim-memory_pressure-42-r200.jsonl
+```
+
+**What this does and does not claim.** `memory_pressure` is the scenario where the
+satellite's pool overflows and frames have to be thrown away — the baseline dropped 205
+of them here — and choosing *which* ones to keep by score is what pays. Where nothing
+overflows, both paths finish within a frame of each other over a full window
+(`nominal` 37 vs 36, `late_joiner` 35 vs 36). The advantage is a contention result, not
+a general throughput win, and the chart says so on its face.
+
 ## Map
 
 ```
