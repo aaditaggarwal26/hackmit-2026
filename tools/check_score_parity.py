@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,10 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN_REF = "origin/ground-station"
+# Which revision the ground's own modules are read from. Integration work lives on the branch
+# this file sits on, so HEAD is the authoritative source; override to compare against another
+# branch: ORBIT_GOLDEN_REF=origin/ground-station.
+GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
 
 
 def load_golden(tmp: Path):

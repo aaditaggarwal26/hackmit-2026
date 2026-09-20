@@ -71,7 +71,16 @@ class Settings:
     bid_window_n: int = 4  # queue entries a satellite reports beyond its top item; DIAGNOSTIC ONLY
     bid_collect_ms: int = 200  # how long READY collects bids after "offers open"
     grant_timeout_ms: int = 1000  # granted but no tx_begin → revoke, re-arbitrate excluding that bid
-    tx_timeout_ms: int = 8000  # tx_begin but no tx_done → revoke likewise
+    # tx_begin but no tx_done → revoke likewise. This is a budget for the WHOLE transmission, not
+    # an inter-chunk gap: the deadline is set once at tx_begin and chunks never refresh it
+    # (orbit/arbiter/fsm.py, _on_tx_begin / _on_tx_chunk). The ESP32 sends TX_PASSES=3 whole
+    # passes of a frame's 19 chunks (orbit_config.h) paced at the link_rate_bps the grant quotes,
+    # so 3 x 16384 B at 65536 bps = 6.0 s in theory -- but the firmware author's hardware note in
+    # tools/bus_round.py (the --timeout comment) puts one round at ~20 s of airtime before
+    # tx_done, and raised that tool's own timeout to 50 s for it. 8000 ms covers neither, and a
+    # timeout that is too short revokes every real transmission, while one that is too long only
+    # costs a stuck board's slot. Sized for the observed figure with margin.
+    tx_timeout_ms: int = 25000
     tx_straggler_ms: int = 300  # tx_done arrived before the last chunk: wait this long for it before failing
     idle_reopen_ms: int = 500  # nobody bid: wait this long before opening offers again
     state_period_ms: int = 1000  # periodic STATE broadcast between transitions (display heartbeat)
@@ -102,7 +111,14 @@ class Settings:
     stream_backlog_max: int = 200_000  # events kept in memory to catch up a late display; the run file has all
     runs_dir: str = "runs"
     expected_sats: str = "sat-a,sat-b,sat-c"  # node_id order for run_start; late joiners get the next id
-    nodes_real: bool = False  # True once the ESP32s replace the simulated satellites
+    # The hardware roster. There are exactly TWO boards, b and c, and the demo runs those two and no
+    # simulated third: a satellite listed but never heard from would sit at ready=false for the whole
+    # window. The names are not a choice on this side -- the firmware's HOSTNAME is
+    # "esp32-satellite-" + the SAT_ID build flag, fixed at compile time in
+    # firmware/satellite_esp32/satellite_esp32.ino and carried in the `from` field of every
+    # message, so the ground matches the firmware rather than the other way round.
+    expected_sats_real: str = "esp32-satellite-b,esp32-satellite-c"
+    nodes_real: bool = False  # True once the ESP32s replace the simulated satellites: selects the roster below
     usable_cloud_max: float = 0.35  # a downlinked frame is "usable" iff cloud_frac <= this; never from score
 
     # --- satellites (simulated; the ESP32 will report its own real figures) -------------
@@ -113,6 +129,13 @@ class Settings:
 
     # --- determinism -------------------------------------------------------------------
     seed: int = 0
+
+    def sat_names(self) -> list[str]:
+        """The roster the event stream pre-seeds, in node_id order: the real boards once
+        ``nodes_real`` is set, the simulated profiles otherwise. One flat list cannot serve both --
+        the simulator's satellites are sat-a/b/c and the boards are esp32-satellite-b/c."""
+        names = self.expected_sats_real if self.nodes_real else self.expected_sats
+        return [n for n in (part.strip() for part in names.split(",")) if n]
 
     @property
     def window_capacity_bytes(self) -> int:

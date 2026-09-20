@@ -15,24 +15,30 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-GOLDEN_REF = "origin/ground-station"
-SAT_NODE_ID = {"b": 0, "c": 1}          # which corpus sequence each board follows
+# Which revision the ground's own modules are read from. Integration work lives on the branch
+# this file sits on, so HEAD is the authoritative source; override to compare against another
+# branch (ORBIT_GOLDEN_REF=origin/ground-station, or --golden-ref).
+GOLDEN_REF = os.environ.get("ORBIT_GOLDEN_REF", "HEAD")
+SAT_NODE_ID = {"b": 1, "c": 2}          # which corpus sequence each board follows (sim seq_seed)
 
 
-def load_corpus_module(tmp: Path):
+def load_corpus_module(tmp: Path, ref: str = GOLDEN_REF) -> ModuleType:
     pkg = tmp / "orbit"
     (pkg / "corpus").mkdir(parents=True)
     (pkg / "__init__.py").write_text("")
     for path in ("orbit/config.py", "orbit/corpus/__init__.py"):
-        blob = subprocess.run(["git", "-C", str(ROOT), "show", f"{GOLDEN_REF}:{path}"],
+        blob = subprocess.run(["git", "-C", str(ROOT), "show", f"{ref}:{path}"],
                               capture_output=True, text=True, check=True).stdout
         (tmp / path).write_text(blob)
     # the module resolves the corpus relative to its own location, so point it at the real one
@@ -42,9 +48,23 @@ def load_corpus_module(tmp: Path):
     return corpus
 
 
+def capture_sequence(corp: Any, node_id: int, seed: int, n: int) -> list[int]:
+    """The frames a satellite actually captures, in order.
+
+    A scene's reference frame is a stored prior the satellite already carries (it ships in
+    /refs), not something it captures again, so it is dropped from the capture order -- exactly
+    as orbit/sim/satellite.py does when it builds ``FakeSatellite.sequence``. Leaving the
+    references in handed the no-scoring FIFO baseline the corpus's cleanest frames for free,
+    which is the margin corpus/gate_result.json measures.
+    """
+    return [i for i in corp.sequence(node_id, seed) if i != corp.reference_for(i)][:n]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sat", choices=sorted(SAT_NODE_ID), required=True)
+    ap.add_argument("--golden-ref", default=GOLDEN_REF,
+                    help=f"git revision the ground's modules are read from (default {GOLDEN_REF})")
     ap.add_argument("--frames", type=int, default=40, help="frames in the capture sequence")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None, help="output .bin (default firmware/build/littlefs_<sat>.bin)")
@@ -56,9 +76,9 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        corpus_mod = load_corpus_module(tmp)
+        corpus_mod = load_corpus_module(tmp, a.golden_ref)
         corp = corpus_mod.load()
-        seq = corp.sequence(SAT_NODE_ID[a.sat], a.seed)[: a.frames]
+        seq = capture_sequence(corp, SAT_NODE_ID[a.sat], a.seed, a.frames)
 
         root = tmp / "fs"
         (root / "frames").mkdir(parents=True)
