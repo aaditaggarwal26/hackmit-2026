@@ -90,6 +90,22 @@ static FaultOnce     g_fault_once;    // conditions that recur every capture per
 // against a real board: it is a ceiling chosen from the cadence, not from a measurement.
 static const uint32_t SCORING_LATENCY_WARN_US = (uint32_t)(SAT_CAPTURE_PERIOD_S * 1000000.0f / 3.0f);
 
+// The cadence is nominal, not a metronome. Two boards each ticking at exactly
+// SAT_CAPTURE_PERIOD_S hold their relative phase for the whole window: every round finds them
+// in the same relative state it found them in last time, one board tends to lead throughout,
+// and the arbitration that is the point of the demo plays out the same way every run. Real
+// satellites do not share a clock. orbit/sim/satellite.py jitters its captures by this same
+// fraction (SatelliteProfile.capture_jitter); this is the firmware saying the same thing.
+// It is deliberately NOT in orbit_config.h: nothing on the ground needs to know, and that
+// header restates only facts owned by orbit/config.py.
+static const float CAPTURE_JITTER = 0.2f;   // +/- this fraction of the period
+
+static uint32_t captureDelayMs() {
+  const float base = SAT_CAPTURE_PERIOD_S * 1000.0f;
+  const float off = (float)(esp_random() % 2001) / 1000.0f - 1.0f;   // -1.0 .. +1.0
+  return (uint32_t)(base * (1.0f + CAPTURE_JITTER * off));
+}
+
 static uint32_t c_captured = 0, c_evicted = 0, c_rejected = 0, c_bids = 0;
 static uint32_t c_grants = 0, c_transmitted = 0, c_failed = 0, c_revoked = 0;
 static uint32_t c_ack_lost = 0, c_peer_grants = 0, c_late_acks = 0;
@@ -916,7 +932,16 @@ void setup() {
     sendFault(code_id, orbit_fault_severity(code_id), g_boot_faults.detail(i));
   }
 
-  g_next_capture_ms = millis() + (uint32_t)(SAT_CAPTURE_PERIOD_S * 1000);
+  // Where in the roll this board starts. At a fixed 0, two boards flashed from the same corpus
+  // walk their sequences from the same place on every power-up, so the same photograph meets the
+  // same rival photograph in the same round, run after run. The hardware RNG is seeded per boot,
+  // so each start enters the ring somewhere else and the contest is a different one.
+  if (g_frame_count) {
+    g_frame_pos = (uint16_t)(esp_random() % g_frame_count);
+    Serial.printf("[cap] starting at frame %u of %u, cadence %.1fs +/-%.0f%%\n",
+                  g_frame_pos, g_frame_count, SAT_CAPTURE_PERIOD_S, CAPTURE_JITTER * 100.0f);
+  }
+  g_next_capture_ms = millis() + captureDelayMs();
   g_next_heartbeat_ms = millis();
   led(0, 0, 16);
   Serial.println("[ok  ] online");
@@ -929,7 +954,7 @@ void loop() {
     led(0, 16, 0);
     capture();
     led(0, 0, 16);
-    g_next_capture_ms += (uint32_t)(SAT_CAPTURE_PERIOD_S * 1000);
+    g_next_capture_ms += captureDelayMs();
   }
   pumpTx();
   if (await_ack && tx_done_len && (int32_t)(now - tx_done_resend_at) >= 0) {
