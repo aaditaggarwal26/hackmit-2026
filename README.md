@@ -11,8 +11,9 @@ satellite, that satellite transmits to completion, and arbitration runs again.**
 ESA's Φ-sat-1 (2020) proved one satellite can filter its own imagery onboard; the
 multi-satellite arbitration is the part nobody has flown.
 
-Three ESP32-S3 satellites (simulated in software today, firmware is a separate task)
-share one ground station — this repository — over a UDP multicast bus. HackMIT 2026.
+ESP32-S3 satellites share one ground station — this repository — over a UDP multicast
+bus. The roster is three in simulation and two on the bench: the boards call themselves
+`esp32-satellite-b` and `esp32-satellite-c`. Their firmware is in `firmware/`. HackMIT 2026.
 
 ## How a slot is decided
 
@@ -101,7 +102,7 @@ Two ways to look at a run, both reading the same event stream
 
 ```sh
 uv run orbit demo --scenario nominal --display   # live: the ground serves viz/ on :8765
-python3 -m viz.replay runs/<run_id>.jsonl        # the same page, from a recorded run
+uv run python -m viz.replay runs/<id>.jsonl      # the same page, from a recorded run
 
 python3 tools/replay.py runs/sample.jsonl        # display/live.html on :8000, stdlib only
 python3 tools/check_run.py runs/sample.jsonl     # hold any run file against the contract

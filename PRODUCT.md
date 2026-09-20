@@ -35,9 +35,9 @@ is that the app "looked like a mess" until an AI explained it.
 
 Orbit shows a satellite deciding, onboard, which captured images are worth
 sending home — and a ground station arbitrating which satellite gets the next
-transmission slot. Three ESP32-S3 boards stand in for three Earth-observation
-satellites, sharing one ground station over a UDP multicast bus; a laptop
-watches and is never on the control path.
+transmission slot. ESP32-S3 boards stand in for Earth-observation satellites —
+three in simulation, two on the bench — sharing one ground station over a UDP
+multicast bus; a laptop watches and is never on the control path.
 
 Success is a live, running demonstration that a first-time viewer understands
 unaided, and that survives hostile technical questioning without a single
