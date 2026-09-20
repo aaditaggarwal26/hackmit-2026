@@ -20,3 +20,14 @@ vivado/.Xil/
 tb/*.result.xml
 .coverage
 !corpus/png/*.png
+
+# ESP32 firmware build artefacts: both are reproducible from the corpus and the source
+# (tools/build_fs_image.py, firmware/test/score_host.cpp), so they are not committed.
+firmware/build/
+firmware/test/score_host
+
+# ESP32 firmware secrets — never commit WiFi credentials.
+# Broad on purpose: backups and variants of a credentials file are still credentials.
+firmware/**/secrets.h
+firmware/**/secrets*.h
+!firmware/**/secrets.h.example
