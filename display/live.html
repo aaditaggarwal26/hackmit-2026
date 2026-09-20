@@ -528,6 +528,14 @@ let HTTP_BASE = '';
 try { const u = new URL(WS_URL); HTTP_BASE = (u.protocol === 'wss:' ? 'https:' : 'http:') + '//' + u.host; } catch (e) { HTTP_BASE = ''; }
 const FRAMES_BASE = HTTP_BASE + '/frames/';
 const THUMB = id => `${String(id).padStart(4, '0')}.png`;
+// frame_id is a satellite's own item counter, so every node has a frame 1 and they are
+// different photographs; image_id names the bytes in the shared image set. A run recorded
+// before image_id existed has neither, and there frame_id IS the corpus id -- so fall back
+// only until this run proves it names its photos, and after that show nothing rather than
+// the wrong picture.
+const photoId = a => { if (a == null) return null;
+  if (isInt(a.image_id)) { S.namesPhotos = true; return a.image_id; }
+  return S.namesPhotos ? null : (isInt(a.frame_id) ? a.frame_id : null); };
 const SCALE_OVERRIDE = Number(Q.get('scale')) || 0;
 const REASON = { highest_score: 'won on the highest score', starvation_forced: 'was handed the slot by the fairness guard', only_ready: 'was the only one ready' };
 const STALE_S = 3, DEAD_S = 12, FREEZE_S = 5;
@@ -560,6 +568,7 @@ const S = {
   lastGrant: null, bus: null, lastDone: null, grants: [], arrivals: [], scored: new Map(),
   window: null, windowT: null, windowClosedLogged: false, runEnd: null, baseline: { n: 0, usable: 0 },
   seq: { expected: null, gaps: 0, missed: 0, last: null }, badLines: 0, badEvents: 0, unknown: new Map(), maxScore: 0,
+  namesPhotos: false,   // set once any arrival carries image_id
   clock: { t: null, wall: 0, rate: 1 }, conn: 'connecting', attempted: false, lastMsgWall: 0, log: [], listsDirty: true,
 };
 let dirty = true;
@@ -944,7 +953,7 @@ function renderSats(now) {
     const sig = shown.map(a => a.frame_id).join(',');
     if (row.dataset.sig !== sig) {
       row.dataset.sig = sig;
-      row.innerHTML = shown.map(a => `<figure title="slot ${esc(a.slot_id)} · ${fmtScore(a.score)} · ${a.usable === true ? 'usable' : 'not usable'}"><span class="shot">${isInt(a.frame_id) ? `<img alt="" src="${FRAMES_BASE}${THUMB(a.frame_id)}" onerror="this.remove()">` : ''}</span><figcaption>${fmtScore(a.score)}</figcaption></figure>`).join('');
+      row.innerHTML = shown.map(a => `<figure title="slot ${esc(a.slot_id)} · ${fmtScore(a.score)} · ${a.usable === true ? 'usable' : 'not usable'}"><span class="shot">${photoId(a) != null ? `<img alt="" src="${FRAMES_BASE}${THUMB(photoId(a))}" onerror="this.remove()">` : ''}</span><figcaption>${fmtScore(a.score)}</figcaption></figure>`).join('');
     }
   });
 }
@@ -955,7 +964,7 @@ function renderTable(now) {
   if (!S.arrivals.length) { body.innerHTML = '<tr><td colspan="9" class="empty">Nothing has come down yet.</td></tr>'; return; }
   body.innerHTML = S.arrivals.slice(0, ARR_ROWS).map(a => {
     const fresh = now != null && num(a.t) != null && now - a.t < 3;
-    return `<tr${fresh ? ' class="fresh"' : ''}><td class="num">${esc(a.slot_id ?? '?')}</td><td class="thumb"><span>${isInt(a.frame_id) ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(a.frame_id)}" onerror="this.remove()">` : ''}</span></td><td>${esc(satName(a.node_id))} <span class="sub">#${esc(a.frame_id ?? '?')}</span></td><td class="num">${fmtScore(a.score)}</td><td class="num">${fmtPct(a.cloud_frac)}</td><td>${a.usable === true ? '<span class="tag b">usable</span>' : a.usable === false ? '<span class="tag p">not usable</span>' : '<span class="tag e">unknown</span>'}</td><td class="num">${fmtBytes(a.bytes)}</td><td class="num">${fmtDur(a.duration_s)}</td><td class="num dim">T+${fmtClock(a.t)}</td></tr>`;
+    return `<tr${fresh ? ' class="fresh"' : ''}><td class="num">${esc(a.slot_id ?? '?')}</td><td class="thumb"><span>${photoId(a) != null ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(photoId(a))}" onerror="this.remove()">` : ''}</span></td><td>${esc(satName(a.node_id))} <span class="sub">#${esc(a.frame_id ?? '?')}</span></td><td class="num">${fmtScore(a.score)}</td><td class="num">${fmtPct(a.cloud_frac)}</td><td>${a.usable === true ? '<span class="tag b">usable</span>' : a.usable === false ? '<span class="tag p">not usable</span>' : '<span class="tag e">unknown</span>'}</td><td class="num">${fmtBytes(a.bytes)}</td><td class="num">${fmtDur(a.duration_s)}</td><td class="num dim">T+${fmtClock(a.t)}</td></tr>`;
   }).join('');
 }
 
@@ -1092,7 +1101,7 @@ function renderResults() {
       const cols = n - from;
       grid.style.gridTemplateColumns = `max-content repeat(${cols}, minmax(36px, 46px))`;
       const cell = (a, pencil) => { if (!a) return '<div class="slotcell"><div class="shot"></div><span class="v">—</span></div>';
-        const ok = a.usable === true, id2 = a.frame_id;
+        const ok = a.usable === true, id2 = photoId(a);
         return `<div class="slotcell"${a.usable === false ? ' data-bad' : ''} title="photo ${esc(id2 ?? '?')} · ${esc(nodeNameIn(start, a.node_id))} · ${fmtScore(a.score)} · cloud ${fmtPct(a.cloud_frac)} · ${ok ? 'usable' : a.usable === false ? 'not usable' : 'usable ?'}"><div class="shot${pencil ? ' pencil' : ''}"${ok ? ' data-usable' : ''}>${isInt(id2) ? `<img alt="" loading="lazy" src="${FRAMES_BASE}${THUMB(id2)}" onerror="this.remove()">` : ''}</div><span class="v">${fmtScore(a.score)}</span><span class="w">${esc(nodeNameIn(start, a.node_id).replace('Satellite ', 'Sat '))}</span></div>`; };
       let html = '<div class="rl">Slot</div>';
       for (let i = from; i < n; i++) { const a = R.arrivals[i], slot = a && a.slot_id != null ? a.slot_id : i + 1; html += `<div class="hd"${forced.has(slot) ? ' data-forced' : ''} title="${forced.has(slot) ? 'the fairness guard forced this slot' : ''}">${esc(slot)}</div>`; }
