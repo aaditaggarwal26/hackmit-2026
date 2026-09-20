@@ -155,6 +155,7 @@ class FakeSatellite:
         self.p = profile
         self.s = settings
         self.hostname = profile.hostname
+        self._payload_key = codec.payload_key_bytes(settings.payload_key)  # b"" unless confidentiality is on
         self.corpus = corp
         self.rng = random.Random(seed * 7919 + profile.seq_seed)
         # A scene's reference frame is a stored prior the satellite already carries, not something it captures
@@ -362,7 +363,7 @@ class FakeSatellite:
         data = bytes(self.buffer.read(g.item_id))
         # Compress the frame, then chunk the COMPRESSED blob: the chunk arithmetic, the pacing
         # and the airtime are all over the encoded length now. The digest stays over `data`.
-        enc, payload = codec.compress(data)
+        enc, payload = codec.compress(data, self._payload_key)
         chunks = codec.split(payload, self.s.chunk_bytes)
         self.tx = Transmission(
             round_id=g.round_id,

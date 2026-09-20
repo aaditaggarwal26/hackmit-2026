@@ -56,6 +56,7 @@ class GrantState:
     chunks: dict[int, bytes] = field(default_factory=dict)  # kept until tx_done so the digest can be checked
     bytes_seen: int = 0  # ENCODED bytes that actually arrived: airtime, not frame size
     enc: str | None = None  # the payload encoding this transfer declared; None = raw (codec.ENC_RAW)
+    key: bytes = b""  # AES-GCM key to unseal a `+gcm` payload; b"" when confidentiality is off
     done_pending: M.TxDone | None = None  # tx_done arrived before the last chunk: wait a little for stragglers
     done_deadline: float = 0.0
 
@@ -72,7 +73,7 @@ class GrantState:
         plausible: a frame the ground cannot reconstruct exactly must fail the transfer, not
         reach the scorer.
         """
-        return codec.decompress(self.enc, self.payload(), raw_bytes)
+        return codec.decompress(self.enc, self.payload(), raw_bytes, self.key)
 
     def digest(self, raw_bytes: int) -> str:
         return hashlib.sha256(self.frame(raw_bytes)).hexdigest()
@@ -100,6 +101,7 @@ class GroundStation:
     def __init__(self, settings: Settings, hostname: str, sink: EventSink | None = None) -> None:
         self.s = settings
         self.hostname = hostname
+        self._payload_key = codec.payload_key_bytes(settings.payload_key)  # b"" unless confidentiality is on
         self.window = ContactWindow.from_settings(settings)
         self.state = config.STATE_READY
         self.sats: dict[str, SatelliteRecord] = {}
@@ -258,6 +260,7 @@ class GroundStation:
             item_id=w.item_id,
             deadline=now + self.s.grant_timeout_ms / 1000.0,
             granted_at=now,
+            key=self._payload_key,
         )
         self.state = config.STATE_BUSY
         self._emit(

@@ -150,6 +150,12 @@ class Settings:
     # hex; "" on either side disables the layer, so HMAC-only and the sim digest are unchanged.
     ground_sign_key: str = ""  # ground only: 64 hex chars = the 32-byte Ed25519 seed
     ground_pubkey: str = ""  # all verifiers: 64 hex chars = the ground's 32-byte Ed25519 public key
+    # Payload confidentiality (orbit/protocol/codec.py): AES-GCM the frame bytes so a real
+    # product's imagery is not readable on the air. The corpus here is public MODIS data, so this
+    # is off by default and the readable bus / deterministic sim are unchanged; a deployment sets
+    # ORBIT_PAYLOAD_KEY (hex, 16/24/32 bytes = AES-128/192/256-GCM), redacted in as_dict. Control
+    # and telemetry JSON stay in the clear either way -- only the bulk frame payload is sealed.
+    payload_key: str = ""  # "" = no encryption; else hex of the AES-GCM key
 
     # --- determinism -------------------------------------------------------------------
     seed: int = 0
@@ -199,6 +205,7 @@ class Settings:
         out = {f.name: getattr(self, f.name) for f in fields(self)}
         out["auth_key"] = "<set>" if self.auth_key else ""
         out["ground_sign_key"] = "<set>" if self.ground_sign_key else ""  # the Ed25519 seed; never logged
+        out["payload_key"] = "<set>" if self.payload_key else ""  # the AES-GCM key; never logged
         return out
 
 

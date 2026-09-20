@@ -79,6 +79,7 @@ is cloud fraction ≤ 0.35 — never the score that did the ranking.
 ```
 orbit/config.py            every constant and tunable
 orbit/protocol/messages.py the bus wire protocol            docs/protocol.md
+orbit/protocol/auth.py     control-bus authenticity (HMAC + ground Ed25519)  docs/security.md
 orbit/arbiter/             priority formula, ground FSM, contact window, flags
 orbit/bus/                 multicast bus, loopback twin, dedup with restart detection
 orbit/sim/                 simulated satellites, scenarios, deterministic harness

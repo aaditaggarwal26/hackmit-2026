@@ -88,6 +88,14 @@ default route the bus falls back to loopback so the demo runs unplugged.
 `orbit/bus/loopback.py` is the same bus in-process, through the same codec, with
 seeded duplication/reordering/loss for the simulator and the tests.
 
+The bus authenticates the control path, and can encrypt the imagery: HMAC on every datagram, an
+Ed25519 signature on the ground's `grant`/`revoke`/`tx_ack` (so even a leaked shared key cannot
+forge a command), sender pinning, anti-replay, and optional AES-256-GCM on the frame payload —
+all off by default, since this repo's MODIS corpus is public placeholder data and the bus log is
+worth keeping readable. The reasoning, what is implemented vs. the firmware port, and the
+per-node-key / X25519-ECDH forward-secrecy path for a real constellation, are in
+`docs/security.md`.
+
 ## Observation, never control
 
 Two outputs, both fire-and-forget:

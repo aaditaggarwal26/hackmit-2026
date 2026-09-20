@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "websockets>=13",
+    "cryptography>=42",  # AES-256-GCM for the payload confidentiality layer (orbit/protocol/codec.py)
 ]
 
 [project.optional-dependencies]
