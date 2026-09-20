@@ -82,11 +82,14 @@ disables the MAC, which is the default and is how the bus behaved before this mo
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import itertools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from orbit.protocol import ed25519
 
 if TYPE_CHECKING:
     from orbit.config import Settings
@@ -98,8 +101,18 @@ AUTH_OVERHEAD = TAG_HEX + 10  # the bytes ,"auth":"..." adds to a datagram
 MAX_DEPTH = 5
 MAX_MEMBERS = 24
 
+SIG_BYTES = ed25519.SIG_BYTES  # 64: an Ed25519 signature
+SIG_B64_LEN = 88  # base64 of 64 bytes, with padding; the length of the `sig` field value
+
 # The control messages a satellite must only ever act on from the configured ground.
 CONTROL_TYPES = (b'"offers_open"', b'"grant"', b'"revoke"', b'"tx_ack"')
+
+# The ground commands that actually change a satellite's state. These additionally carry an
+# Ed25519 signature (the `sig` field) over the same canonical bytes as the HMAC tag, so that a
+# holder of the SHARED HMAC key -- a satellite whose key leaked -- still cannot forge one; only
+# the ground's private seed can produce a `sig` that verifies against its public key. A subset of
+# CONTROL_TYPES: `offers_open` merely invites bids and is left to the HMAC + sender pin.
+SIGNED_TYPES = (b'"grant"', b'"revoke"', b'"tx_ack"')
 
 _WS = b" \t\n\r"
 _DIGITS = b"0123456789"
@@ -117,10 +130,11 @@ class Envelope:
 
     type_lit: bytes  # JSON string literals, quotes included
     from_lit: bytes
-    auth_lit: bytes | None  # the tag literal, or None when the datagram carries no `auth`
+    auth_lit: bytes | None  # the HMAC tag literal, or None when the datagram carries no `auth`
+    sig_lit: bytes | None  # the Ed25519 signature literal, or None when there is no `sig`
     seq: int
     t_ms: int
-    members: int  # top-level members, so sign() can see whether a 25th would still fit
+    members: int  # top-level members, so sign() can see whether another would still fit
 
 
 # --- the scanner ----------------------------------------------------------------------
@@ -363,13 +377,14 @@ def canonical(data: bytes) -> tuple[bytes, Envelope]:
     found: dict[bytes, tuple[int, int, int, int]] = {}
     for m in members:
         k = data[m[0] : m[1]]
-        if k in (b'"v"', b'"type"', b'"from"', b'"seq"', b'"t_ms"', b'"auth"'):
+        if k in (b'"v"', b'"type"', b'"from"', b'"seq"', b'"t_ms"', b'"auth"', b'"sig"'):
             found[k] = m
     missing = [k for k in (b'"v"', b'"type"', b'"from"', b'"seq"', b'"t_ms"') if k not in found]
     if missing:
         raise CanonicalError(f"missing envelope field {missing[0].decode()}")
     mv, mt, mf, ms, mu = (found[k] for k in (b'"v"', b'"type"', b'"from"', b'"seq"', b'"t_ms"'))
     ma = found.get(b'"auth"')
+    msig = found.get(b'"sig"')
     if data[mt[2]] != 0x22 or data[mf[2]] != 0x22:
         raise CanonicalError("type/from must be strings")
 
@@ -384,7 +399,7 @@ def canonical(data: bytes) -> tuple[bytes, Envelope]:
     out += b"|"
     out += data[mu[2] : mu[3]]  # t_ms
     out += b"|{"
-    skip = {mv, mt, mf, ms, mu} | ({ma} if ma is not None else set())
+    skip = {mv, mt, mf, ms, mu} | ({ma} if ma is not None else set()) | ({msig} if msig is not None else set())
     first = True
     for span in members:
         ks, ke, vs, _ve = span
@@ -402,6 +417,7 @@ def canonical(data: bytes) -> tuple[bytes, Envelope]:
         type_lit=data[mt[2] : mt[3]],
         from_lit=data[mf[2] : mf[3]],
         auth_lit=data[ma[2] : ma[3]] if ma else None,
+        sig_lit=data[msig[2] : msig[3]] if msig else None,
         seq=_u32(data, ms[2], ms[3]),
         t_ms=_u32(data, mu[2], mu[3]),
         members=len(members),
@@ -419,31 +435,66 @@ def check_key(key: bytes) -> bytes:
     return key
 
 
+def _decode_key(hexstr: str, what: str) -> bytes:
+    """A 32-byte Ed25519 key from its hex config string. ``""`` -> ``b""`` (the layer is off)."""
+    if not hexstr:
+        return b""
+    try:
+        raw = bytes.fromhex(hexstr)
+    except ValueError:
+        raise ValueError(f"{what} must be {ed25519.KEY_BYTES * 2} hex characters") from None
+    if len(raw) != ed25519.KEY_BYTES:
+        raise ValueError(f"{what} must be {ed25519.KEY_BYTES} bytes ({ed25519.KEY_BYTES * 2} hex chars)")
+    return raw
+
+
 def tag(key: bytes, canon: bytes) -> str:
     """The 32 lowercase hex characters that go in the ``auth`` field."""
     return hmac.new(check_key(key), canon, hashlib.sha256).hexdigest()[:TAG_HEX]
 
 
-def sign(data: bytes, key: bytes) -> bytes:
-    """Splice ``,"auth":"<tag>"`` into a serialised datagram, mirroring ``orbit_auth_sign``.
+def signature(seed: bytes, canon: bytes) -> bytes:
+    """The base64 Ed25519 signature that goes in the ``sig`` field, over the canonical bytes."""
+    return base64.b64encode(ed25519.sign(seed, canon))
+
+
+def _apply(data: bytes, key: bytes, sign_seed: bytes) -> bytes:
+    """Splice the authenticity fields into a serialised datagram, mirroring ``orbit_auth_sign``.
+
+    For a control message in :data:`SIGNED_TYPES` with a ``sign_seed`` present, an Ed25519
+    ``sig`` is added; when ``key`` is set, the HMAC ``auth`` tag is added. Both are computed over
+    the SAME canonical bytes, from which both fields are excluded, so their order does not matter
+    and either can be present without the other.
 
     Raises :class:`CanonicalError` if the bytes cannot be canonicalised — the caller must then
-    DROP the datagram rather than send it unsigned.
+    DROP the datagram rather than send it unauthenticated.
     """
-    if not key:
+    if not key and not sign_seed:
         return data
     if len(data) < 2 or data[-1:] != b"}":
         raise CanonicalError("a datagram to sign must be a JSON object")
     canon, env = canonical(data)
-    # The tag is a top-level member like any other, so it has to fit under the same limit, and
-    # it may not be a SECOND one -- re-signing would put two `auth` keys in the object, and a
-    # duplicate key is exactly what neither tier will canonicalise. Signing anyway would produce
-    # a datagram that signs cleanly and then verifies nowhere, so it fails here instead.
-    if env.members >= MAX_MEMBERS:
-        raise CanonicalError("no room for the tag: already at the top-level member limit")
-    if env.auth_lit is not None:
+    # An auth field is a top-level member like any other: it must fit under the member limit and
+    # may not already be present -- re-signing would put a duplicate key in the object, which is
+    # exactly what neither tier will canonicalise, so it would sign cleanly and verify nowhere.
+    if env.auth_lit is not None or env.sig_lit is not None:
         raise CanonicalError("already signed")
-    return data[:-1] + b',"auth":"' + tag(key, canon).encode("ascii") + b'"}'
+    additions: list[tuple[bytes, bytes]] = []
+    if sign_seed and env.type_lit in SIGNED_TYPES:
+        additions.append((b"sig", signature(sign_seed, canon)))
+    if key:
+        additions.append((b"auth", tag(key, canon).encode("ascii")))
+    if env.members + len(additions) > MAX_MEMBERS:
+        raise CanonicalError("no room for the auth field(s): at the top-level member limit")
+    out = data[:-1]
+    for name, value in additions:
+        out += b',"' + name + b'":"' + value + b'"'
+    return out + b"}"
+
+
+def sign(data: bytes, key: bytes) -> bytes:
+    """HMAC-only signing (splice ``,"auth":"<tag>"``). See :func:`_apply` for the hybrid."""
+    return _apply(data, key, b"")
 
 
 def name_literal(name: str) -> bytes:
@@ -472,10 +523,17 @@ class Policy:
     ground_name: str = ""  # "" disables the control-message pin
     sat_names: tuple[str, ...] = ()  # () disables the satellite allowlist
     monotonic_seq: bool = True  # anti-replay, only ever consulted when the MAC is on
+    sign_seed: bytes = b""  # the ground's Ed25519 seed; only the ground holds it, and only it signs
+    ground_pubkey: bytes = b""  # the ground's Ed25519 public key; verifiers require a valid `sig` with it
 
     @classmethod
     def from_settings(cls, settings: Settings) -> Policy:
-        """Built once at start-up from ``Settings``; the roster is ``Settings.sat_names()``."""
+        """Built once at start-up from ``Settings``; the roster is ``Settings.sat_names()``.
+
+        ``ground_sign_key`` is present only on the ground (its env sets it), so only the ground
+        ends up signing; ``ground_pubkey`` is distributed to every node, so every node verifies.
+        Both are independent of ``pin_senders`` -- the asymmetric layer is its own switch.
+        """
         key = check_key(settings.auth_key.encode("utf-8"))
         pin = settings.pin_senders
         return cls(
@@ -483,6 +541,8 @@ class Policy:
             ground_name=settings.ground_name if pin else "",
             sat_names=tuple(settings.sat_names()) if pin else (),
             monotonic_seq=settings.auth_anti_replay,
+            sign_seed=_decode_key(settings.ground_sign_key, "ground_sign_key"),
+            ground_pubkey=_decode_key(settings.ground_pubkey, "ground_pubkey"),
         )
 
     @property
@@ -490,8 +550,13 @@ class Policy:
         return bool(self.key)
 
     @property
+    def ground_signing(self) -> bool:
+        """This node signs control messages with the ground's private key (i.e. it is the ground)."""
+        return bool(self.sign_seed)
+
+    @property
     def enabled(self) -> bool:
-        return bool(self.key) or bool(self.ground_name) or bool(self.sat_names)
+        return bool(self.key) or bool(self.ground_name) or bool(self.sat_names) or bool(self.ground_pubkey)
 
     @property
     def replay_checked(self) -> bool:
@@ -500,7 +565,7 @@ class Policy:
         return self.monotonic_seq and bool(self.key)
 
     def sign(self, data: bytes) -> bytes:
-        return sign(data, self.key) if self.key else data
+        return _apply(data, self.key, self.sign_seed)
 
     def check(self, data: bytes) -> str:
         """``""`` if the datagram may be acted on, else a short reason for the drop counter.
@@ -532,6 +597,19 @@ class Policy:
             got = env.auth_lit[1:-1].decode("ascii", "replace")
             if not hmac.compare_digest(got, tag(self.key, canon)):
                 return "bad_tag"
+
+        # The asymmetric layer: a state-changing ground command must additionally carry a valid
+        # Ed25519 signature from the ground. This survives a leaked shared HMAC key -- a holder of
+        # it can still forge `offers_open` or a satellite's `bid`, but not a `grant`/`revoke`/`tx_ack`.
+        if self.ground_pubkey and env.type_lit in SIGNED_TYPES:
+            if env.sig_lit is None:
+                return "no_sig"
+            try:
+                sig = base64.b64decode(env.sig_lit[1:-1], validate=True)
+            except ValueError:
+                return "bad_sig"
+            if len(sig) != SIG_BYTES or not ed25519.verify(self.ground_pubkey, canon, sig):
+                return "bad_sig"
         return ""
 
 
@@ -543,6 +621,8 @@ __all__ = [
     "MAX_DEPTH",
     "MAX_MEMBERS",
     "OFF",
+    "SIGNED_TYPES",
+    "SIG_BYTES",
     "TAG_BYTES",
     "TAG_HEX",
     "CanonicalError",
@@ -552,5 +632,6 @@ __all__ = [
     "check_key",
     "name_literal",
     "sign",
+    "signature",
     "tag",
 ]

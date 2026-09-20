@@ -142,6 +142,14 @@ class Settings:
     ground_name: str = ""  # the one sender whose offers_open/grant/revoke/tx_ack may be obeyed
     pin_senders: bool = False  # enforce ground_name, and sat_names() for satellite traffic
     auth_anti_replay: bool = True  # with a key set, a seq must beat that sender's last VERIFIED
+    # Targeted Ed25519 hybrid (orbit/protocol/ed25519.py): the ground additionally SIGNS its
+    # grant/revoke/tx_ack with an asymmetric key, so even a holder of the shared HMAC key (a
+    # satellite whose key leaked) cannot forge a command. The private seed lives only on the
+    # ground (ORBIT_GROUND_SIGN_KEY, redacted in as_dict); the public key is distributed to every
+    # verifier (ORBIT_GROUND_PUBKEY, and the gitignored firmware secrets.h). Both are 32 bytes as
+    # hex; "" on either side disables the layer, so HMAC-only and the sim digest are unchanged.
+    ground_sign_key: str = ""  # ground only: 64 hex chars = the 32-byte Ed25519 seed
+    ground_pubkey: str = ""  # all verifiers: 64 hex chars = the ground's 32-byte Ed25519 public key
 
     # --- determinism -------------------------------------------------------------------
     seed: int = 0
@@ -190,6 +198,7 @@ class Settings:
         """
         out = {f.name: getattr(self, f.name) for f in fields(self)}
         out["auth_key"] = "<set>" if self.auth_key else ""
+        out["ground_sign_key"] = "<set>" if self.ground_sign_key else ""  # the Ed25519 seed; never logged
         return out
 
 
