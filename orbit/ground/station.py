@@ -33,8 +33,14 @@ def local_hostname(settings: Settings) -> str:
     return settings.hostname or socket.gethostname().split(".")[0]
 
 
-async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop: asyncio.Event | None = None,
-                     run_id: str | None = None, stream_server: bool = True) -> None:
+async def run_ground(
+    settings: Settings,
+    *,
+    telemetry_network: bool = True,
+    stop: asyncio.Event | None = None,
+    run_id: str | None = None,
+    stream_server: bool = True,
+) -> None:
     hostname = local_hostname(settings)
     run_id = run_id or new_run_id()
     telemetry = Telemetry(settings, hostname, network=telemetry_network)
@@ -46,8 +52,11 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
     except OSError as e:  # unwritable runs/: the arbiter still runs, the display still gets the socket
         log(lg, logging.ERROR, "run_file_unavailable", error=str(e), runs_dir=settings.runs_dir)
     stream = EventStream(settings, run_id, writers=writers)
-    server = StreamServer(stream, settings.stream_host, settings.stream_port, settings.stream_queue_max) \
-        if stream_server else None
+    server = (
+        StreamServer(stream, settings.stream_host, settings.stream_port, settings.stream_queue_max)
+        if stream_server
+        else None
+    )
 
     def sink(kind: str, payload: dict[str, Any]) -> None:
         telemetry.emit(kind, payload)
@@ -69,8 +78,15 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
         telemetry.emit("bus_stats", {"t": now, **bus.stats.as_dict()})
         telemetry.emit("telemetry_stats", {"t": now, **telemetry.stats.as_dict()})
 
-    log(lg, logging.INFO, "ground_start", hostname=hostname, run_id=run_id,
-        run_file=str(run_file.path) if run_file else None, settings=settings.as_dict())
+    log(
+        lg,
+        logging.INFO,
+        "ground_start",
+        hostname=hostname,
+        run_id=run_id,
+        run_file=str(run_file.path) if run_file else None,
+        settings=settings.as_dict(),
+    )
     await bus.start()
     if server is not None:
         try:
@@ -91,8 +107,15 @@ async def run_ground(settings: Settings, *, telemetry_network: bool = True, stop
         await bus.stop()
         if run_file is not None:
             run_file.close()
-        log(lg, logging.INFO, "ground_stop", counters=ground.counters.as_dict(), window=ground.window.snapshot(),
-            run_file=str(run_file.path) if run_file else None, stream_events=stream.seq)
+        log(
+            lg,
+            logging.INFO,
+            "ground_stop",
+            counters=ground.counters.as_dict(),
+            window=ground.window.snapshot(),
+            run_file=str(run_file.path) if run_file else None,
+            stream_events=stream.seq,
+        )
 
 
 def install_signal_stop(stop: asyncio.Event) -> None:

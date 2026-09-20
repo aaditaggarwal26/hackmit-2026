@@ -11,8 +11,18 @@ from orbit.ground.stream import EventStream, FifoBaseline, FrameMeta, StreamServ
 from orbit.sim.run import run_scenario
 
 S = config.Settings()
-TYPES = {"run_start", "node_status", "queue_window", "frame_scored", "grant", "frame_arrived", "baseline_arrival",
-         "window_update", "node_event", "run_end"}
+TYPES = {
+    "run_start",
+    "node_status",
+    "queue_window",
+    "frame_scored",
+    "grant",
+    "frame_arrived",
+    "baseline_arrival",
+    "window_update",
+    "node_event",
+    "run_end",
+}
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +48,11 @@ def test_run_start_contents(run):
     _, ev = run
     rs = ev[0]
     assert rs["mode"] == "live" and rs["run_id"] == "t"
-    assert [n["node_id"] for n in rs["nodes"]] == [0, 1, 2] and [n["label"] for n in rs["nodes"]] == ["sat-a", "sat-b", "sat-c"]
+    assert [n["node_id"] for n in rs["nodes"]] == [0, 1, 2] and [n["label"] for n in rs["nodes"]] == [
+        "sat-a",
+        "sat-b",
+        "sat-c",
+    ]
     assert all(n["real"] is False for n in rs["nodes"])  # simulated satellites: the display shows a badge
     assert rs["window"] == {"budget_bytes": S.window_capacity_bytes, "duration_s": S.window_duration_s}
     assert rs["usable_rule"] == {"metric": "cloud_frac", "max": S.usable_cloud_max}
@@ -108,8 +122,10 @@ def test_window_update_and_node_status(run):
     assert wu and all(w["budget_bytes"] == w["used_bytes"] + w["remaining_bytes"] for w in wu)
     assert all(wu[i]["used_bytes"] <= wu[i + 1]["used_bytes"] for i in range(len(wu) - 1))
     ns = [e for e in ev if e["type"] == "node_status"]
-    assert ns and all({"queue_depth", "top_score", "frames_scored", "frames_evicted", "frames_sent", "busy", "link_ok"}
-                      <= set(e) for e in ns)
+    assert ns and all(
+        {"queue_depth", "top_score", "frames_scored", "frames_evicted", "frames_sent", "busy", "link_ok"} <= set(e)
+        for e in ns
+    )
     assert all(e["link_ok"] for e in ns)
     qw = [e for e in ev if e["type"] == "queue_window"]
     assert qw and all(1 <= len(e["top"]) <= 5 for e in qw)
@@ -130,8 +146,9 @@ def test_fifo_baseline_drops_newest_when_full_and_round_robins():
 
 
 def test_late_joiner_gets_next_node_id_and_an_event(tmp_path):
-    sim = run_scenario("late_joiner", 20, seed=1, settings=S.with_overrides(runs_dir=str(tmp_path),
-                                                                              expected_sats="sat-a,sat-b"))
+    sim = run_scenario(
+        "late_joiner", 20, seed=1, settings=S.with_overrides(runs_dir=str(tmp_path), expected_sats="sat-a,sat-b")
+    )
     ev = [json.loads(x) for x in sim.stream.lines]
     assert [n["label"] for n in ev[0]["nodes"]] == ["sat-a", "sat-b"]
     joined = [e for e in ev if e["type"] == "node_event" and "sat-c joined" in e["message"]]
@@ -156,6 +173,7 @@ def test_websocket_backlog_then_live():
         await server.start()
         port = next(iter(server._server.sockets)).getsockname()[1]
         from websockets.asyncio.client import connect
+
         async with connect(f"ws://127.0.0.1:{port}/") as ws:
             first = json.loads(await asyncio.wait_for(ws.recv(), 2))
             assert first["type"] == "run_start" and first["seq"] == 1  # backlog on connect
@@ -172,8 +190,10 @@ def test_slow_client_is_dropped_not_waited_for():
         stream = EventStream(S, "slow", wall=False)
         server = StreamServer(stream, "127.0.0.1", 0, queue_max=3)
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=3)
+
         async def fake_handler():
             await asyncio.sleep(3600)
+
         task = asyncio.create_task(fake_handler())
         server._clients[q] = task
         for i in range(10):
@@ -189,13 +209,31 @@ def test_slow_client_is_dropped_not_waited_for():
 def test_run_end_is_the_last_event_even_if_the_bus_keeps_talking(tmp_path):
     """After the window closes satellites still heartbeat; the contract says run_end is last, so the stream goes quiet."""
     from orbit.protocol import messages as M
-    sim = run_scenario("nominal", 500, seed=1, settings=S.with_overrides(window_duration_s=10.0, runs_dir=str(tmp_path)))
+
+    sim = run_scenario(
+        "nominal", 500, seed=1, settings=S.with_overrides(window_duration_s=10.0, runs_dir=str(tmp_path))
+    )
     ev = [json.loads(x) for x in sim.stream.lines]
     assert ev[-1]["type"] == "run_end" and ev[-1]["reason"] == "window_closed"
     n = len(ev)
     buf = M.BufferStats(8, 8 * config.FRAME_BYTES, 1, 7, 12.5)
-    sim.stream.on_bus(M.Heartbeat("sat-a", 999, 0, buffer=buf, eviction_count=0, queue_len=1, top_score=50.0,
-                                  top_item_id=1, uptime_s=1.0, frames_scored=1, frames_sent=0), sim.now + 1, False)
+    sim.stream.on_bus(
+        M.Heartbeat(
+            "sat-a",
+            999,
+            0,
+            buffer=buf,
+            eviction_count=0,
+            queue_len=1,
+            top_score=50.0,
+            top_item_id=1,
+            uptime_s=1.0,
+            frames_scored=1,
+            frames_sent=0,
+        ),
+        sim.now + 1,
+        False,
+    )
     sim.stream.on_event("no_bids", {"t": sim.now + 1, "round_id": 999, "excluded": []})
     sim.stream.end(sim.now + 2, reason="stopped")
     assert len(sim.stream.lines) == n and sim.stream.seq == n

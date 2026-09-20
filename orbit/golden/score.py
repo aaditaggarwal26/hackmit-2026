@@ -2,6 +2,7 @@
 form used everywhere; `score_frame_ref` is the per-pixel pure-Python transcription of
 the spec that the tests hold NumPy to. Both are pure functions of (frame, ref, config)
 and must match the RTL bit for bit."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -79,10 +80,16 @@ def score_frame_ref(frame: np.ndarray, ref: np.ndarray, cfg: Config = DEFAULT_CO
     s = 0
     for y in range(1, H - 1):
         for x in range(1, W - 1):
-            gx = ((p[y - 1][x + 1] - p[y - 1][x - 1]) + 2 * (p[y][x + 1] - p[y][x - 1])
-                  + (p[y + 1][x + 1] - p[y + 1][x - 1]))
-            gy = ((p[y + 1][x - 1] - p[y - 1][x - 1]) + 2 * (p[y + 1][x] - p[y - 1][x])
-                  + (p[y + 1][x + 1] - p[y - 1][x + 1]))
+            gx = (
+                (p[y - 1][x + 1] - p[y - 1][x - 1])
+                + 2 * (p[y][x + 1] - p[y][x - 1])
+                + (p[y + 1][x + 1] - p[y + 1][x - 1])
+            )
+            gy = (
+                (p[y + 1][x - 1] - p[y - 1][x - 1])
+                + 2 * (p[y + 1][x] - p[y - 1][x])
+                + (p[y + 1][x + 1] - p[y - 1][x + 1])
+            )
             s += abs(gx) + abs(gy)
     return composite(cloud_px, changed_px, s, cfg)
 

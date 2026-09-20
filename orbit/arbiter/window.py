@@ -68,11 +68,23 @@ class ContactWindow:
         self.used_bytes, self.slots_used = 0, 0
 
     def status(self) -> WindowStatus:
-        return WindowStatus(capacity_bytes=self.capacity_bytes, used_bytes=self.used_bytes,
-                            remaining_bytes=self.remaining_bytes, slots_remaining=self.slots_remaining)
+        return WindowStatus(
+            capacity_bytes=self.capacity_bytes,
+            used_bytes=self.used_bytes,
+            remaining_bytes=self.remaining_bytes,
+            slots_remaining=self.slots_remaining,
+        )
 
     def snapshot(self) -> dict[str, float | int | bool]:
-        return dict(duration_s=self.duration_s, rate_bps=self.rate_bps, capacity_bytes=self.capacity_bytes,
-                    used_bytes=self.used_bytes, remaining_bytes=self.remaining_bytes, slots_total=self.slots_total,
-                    slots_used=self.slots_used, slots_remaining=self.slots_remaining, open=self.open,
-                    scaled=self.scaled)
+        return dict(
+            duration_s=self.duration_s,
+            rate_bps=self.rate_bps,
+            capacity_bytes=self.capacity_bytes,
+            used_bytes=self.used_bytes,
+            remaining_bytes=self.remaining_bytes,
+            slots_total=self.slots_total,
+            slots_used=self.slots_used,
+            slots_remaining=self.slots_remaining,
+            open=self.open,
+            scaled=self.scaled,
+        )

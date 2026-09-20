@@ -73,8 +73,16 @@ class Deduper:
         if st is None:
             st = self._senders[sender] = _Sender()
         elif (st.last_t_ms - t_ms > self.restart_slack_ms) or (st.max_seq - seq > self.window):
-            log(lg, logging.INFO, "sender_restart", sender=sender, seq=seq, t_ms=t_ms, previous_t_ms=st.last_t_ms,
-                previous_max_seq=st.max_seq)
+            log(
+                lg,
+                logging.INFO,
+                "sender_restart",
+                sender=sender,
+                seq=seq,
+                t_ms=t_ms,
+                previous_t_ms=st.last_t_ms,
+                previous_max_seq=st.max_seq,
+            )
             st.seen.clear()
             st.order.clear()
             st.max_seq = -1
@@ -96,8 +104,9 @@ class Deduper:
 
 
 class Bus(ABC):
-    def __init__(self, hostname: str, dedup_window: int, max_datagram: int, drop_own: bool = True,
-                 restart_slack_ms: int = 5000) -> None:
+    def __init__(
+        self, hostname: str, dedup_window: int, max_datagram: int, drop_own: bool = True, restart_slack_ms: int = 5000
+    ) -> None:
         self.hostname = hostname
         self.max_datagram = max_datagram
         self.drop_own = drop_own

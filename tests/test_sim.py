@@ -27,7 +27,10 @@ def test_nominal_delivers_frames_and_is_deterministic():
 
 
 def test_different_seed_different_run():
-    assert run_scenario("nominal", 12, seed=1, settings=S).digest() != run_scenario("nominal", 12, seed=2, settings=S).digest()
+    assert (
+        run_scenario("nominal", 12, seed=1, settings=S).digest()
+        != run_scenario("nominal", 12, seed=2, settings=S).digest()
+    )
 
 
 def test_memory_pressure_evicts_yet_still_wins_slots():
@@ -77,6 +80,7 @@ def test_lossy_bus_never_loses_a_frame():
         assert sat.buffer.used == len(sat.queue) == len(sat.items)
     # and no frame is ever counted twice, whatever the bus did to the acks
     import json
+
     arrived = [(e["node_id"], e["frame_id"]) for e in map(json.loads, sim.stream.lines) if e["type"] == "frame_arrived"]
     assert len(arrived) == len(set(arrived)) == g.counters.completed
 
@@ -91,14 +95,20 @@ def test_late_joiner_needs_no_configuration():
 def test_window_closes_when_exhausted():
     sim = run_scenario("nominal", 500, seed=1, settings=S.with_overrides(window_duration_s=10.0))
     assert sim.ground.state == config.STATE_CLOSED
-    assert sim.ground.window.slots_used == sim.ground.window.slots_total == S.with_overrides(window_duration_s=10.0).window_slots
+    assert (
+        sim.ground.window.slots_used
+        == sim.ground.window.slots_total
+        == S.with_overrides(window_duration_s=10.0).window_slots
+    )
     assert any(e["kind"] == "window_closed" for e in sim.events)
 
 
 @pytest.mark.parametrize("item_rate,sat_rate", [(0.0, 0.0), (5.0, 0.0), (0.0, 5.0)])
 def test_aging_rates_are_tunable_and_change_outcomes(item_rate, sat_rate):
     base = run_scenario("low_scorer", 25, seed=9, settings=S).digest()
-    tuned = run_scenario("low_scorer", 25, seed=9, settings=S.with_overrides(item_aging_rate=item_rate, sat_aging_rate=sat_rate))
+    tuned = run_scenario(
+        "low_scorer", 25, seed=9, settings=S.with_overrides(item_aging_rate=item_rate, sat_aging_rate=sat_rate)
+    )
     assert tuned.digest() != base or (item_rate, sat_rate) == (S.item_aging_rate, S.sat_aging_rate)
     if sat_rate == 0.0 and item_rate == 0.0:
         assert all(r.item_age_term == 0.0 and r.sat_wait_term == 0.0 for r in tuned.rows)
@@ -111,6 +121,7 @@ def test_restarting_the_ground_mid_pass_resumes_arbitration():
     from orbit.bus.loopback import LoopbackBus
     from orbit.sim.run import GROUND, Simulation
     from orbit.sim.scenarios import SCENARIOS
+
     sim = Simulation(SCENARIOS["nominal"], S, seed=4, write_run=False)
     sim.run(8)
     before = sim.ground.counters.completed

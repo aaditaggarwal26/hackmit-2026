@@ -116,8 +116,15 @@ class FifoBaseline:
 
 
 class EventStream:
-    def __init__(self, settings: Settings, run_id: str, *, mode: str = "live", writers: list[Writer] | None = None,
-                 wall: bool = True) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        run_id: str,
+        *,
+        mode: str = "live",
+        writers: list[Writer] | None = None,
+        wall: bool = True,
+    ) -> None:
         self.s = settings
         self.run_id = run_id
         self.mode = mode
@@ -146,32 +153,66 @@ class EventStream:
         if self.started:
             return
         self.started = True
-        self._emit("run_start", now, run_id=self.run_id, mode=self.mode,
-                   nodes=[dict(node_id=v.node_id, label=v.label,
-                               transport=f"udp-multicast://{self.s.mcast_group}:{self.s.mcast_port}", real=v.real)
-                          for v in sorted(self.nodes.values(), key=lambda v: v.node_id)],
-                   window=dict(budget_bytes=self.s.window_capacity_bytes, duration_s=self.s.window_duration_s),
-                   queue_limit=self.s.sat_buffer_slots,
-                   scoring=dict(w_clear=config.W_CLEAR, w_sharp=config.W_SHARP, w_change=config.W_CHANGE,
-                                cloud_thr=config.CLOUD_THRESHOLD, change_thr=config.CHANGE_THRESHOLD),
-                   usable_rule=dict(metric="cloud_frac", max=self.s.usable_cloud_max),
-                   priority=dict(item_aging_rate=self.s.item_aging_rate, sat_aging_rate=self.s.sat_aging_rate),
-                   bus=dict(group=self.s.mcast_group, port=self.s.mcast_port))
+        self._emit(
+            "run_start",
+            now,
+            run_id=self.run_id,
+            mode=self.mode,
+            nodes=[
+                dict(
+                    node_id=v.node_id,
+                    label=v.label,
+                    transport=f"udp-multicast://{self.s.mcast_group}:{self.s.mcast_port}",
+                    real=v.real,
+                )
+                for v in sorted(self.nodes.values(), key=lambda v: v.node_id)
+            ],
+            window=dict(budget_bytes=self.s.window_capacity_bytes, duration_s=self.s.window_duration_s),
+            queue_limit=self.s.sat_buffer_slots,
+            scoring=dict(
+                w_clear=config.W_CLEAR,
+                w_sharp=config.W_SHARP,
+                w_change=config.W_CHANGE,
+                cloud_thr=config.CLOUD_THRESHOLD,
+                change_thr=config.CHANGE_THRESHOLD,
+            ),
+            usable_rule=dict(metric="cloud_frac", max=self.s.usable_cloud_max),
+            priority=dict(item_aging_rate=self.s.item_aging_rate, sat_aging_rate=self.s.sat_aging_rate),
+            bus=dict(group=self.s.mcast_group, port=self.s.mcast_port),
+        )
 
     def end(self, now: float, reason: str = "window_closed") -> None:
         if self.ended:
             return
         self.ended = True
-        orbit = dict(frames_down=self.orbit_frames_down, usable_down=self.orbit_usable_down,
-                     bytes_used=self.orbit_bytes_used,
-                     frames_left_queued=sum(v.queue_depth for v in self.nodes.values()))
+        orbit = dict(
+            frames_down=self.orbit_frames_down,
+            usable_down=self.orbit_usable_down,
+            bytes_used=self.orbit_bytes_used,
+            frames_left_queued=sum(v.queue_depth for v in self.nodes.values()),
+        )
         b = self.baseline
-        base = dict(frames_down=b.frames_down, usable_down=b.usable_down, bytes_used=b.bytes_used,
-                    frames_left_queued=b.left_queued, frames_dropped_full=b.dropped)
+        base = dict(
+            frames_down=b.frames_down,
+            usable_down=b.usable_down,
+            bytes_used=b.bytes_used,
+            frames_left_queued=b.left_queued,
+            frames_dropped_full=b.dropped,
+        )
         gain = (self.orbit_usable_down / b.usable_down) if b.usable_down else None
-        self._emit("run_end", now, orbit=orbit, baseline=base, reason=reason,
-                   headline=dict(metric="usable frames downlinked", orbit=self.orbit_usable_down,
-                                 baseline=b.usable_down, gain=round(gain, 3) if gain is not None else None))
+        self._emit(
+            "run_end",
+            now,
+            orbit=orbit,
+            baseline=base,
+            reason=reason,
+            headline=dict(
+                metric="usable frames downlinked",
+                orbit=self.orbit_usable_down,
+                baseline=b.usable_down,
+                gain=round(gain, 3) if gain is not None else None,
+            ),
+        )
 
     # ------------------------------------------------------------------ inputs
 
@@ -191,8 +232,14 @@ class EventStream:
                 self._node_status(v, now)
                 top = [dict(frame_id=msg.item_id, score=msg.score, age_s=msg.item_age_s)]
                 top += [dict(frame_id=e.item_id, score=e.score, age_s=e.item_age_s) for e in msg.window]
-                self._emit("queue_window", now, node_id=v.node_id, label=v.label, depth=msg.queue_len,
-                           top=top[:QUEUE_WINDOW_CAP])
+                self._emit(
+                    "queue_window",
+                    now,
+                    node_id=v.node_id,
+                    label=v.label,
+                    depth=msg.queue_len,
+                    top=top[:QUEUE_WINDOW_CAP],
+                )
             case M.Heartbeat():
                 v.queue_depth, v.top_frame_id, v.top_score = msg.queue_len, msg.top_item_id, msg.top_score
                 v.frames_evicted = msg.eviction_count
@@ -226,12 +273,14 @@ class EventStream:
                 by = ""
                 if p.get("displaced_by", -1) != -1:
                     by = f" (displaced by #{p['displaced_by']} scoring {p['displaced_by_score']:.1f})"
-                self._node_event(v, now, "info",
-                                 f"{what} #{p['item_id']} scoring {p['score']:.1f}{by}: onboard storage full")
+                self._node_event(
+                    v, now, "info", f"{what} #{p['item_id']} scoring {p['score']:.1f}{by}: onboard storage full"
+                )
             case "no_bids":
                 excl = f" (excluded {p['excluded']})" if p.get("excluded") else ""
-                self._emit("node_event", now, node_id=None, level="info",
-                           message=f"round {p['round_id']}: no bids{excl}")
+                self._emit(
+                    "node_event", now, node_id=None, level="info", message=f"round {p['round_id']}: no bids{excl}"
+                )
             case "late_bid":
                 v = self._node(str(p["sat"]), now)
                 self._node_event(v, now, "info", f"bid for round {p['bid_round']} arrived during round {p['round_id']}")
@@ -252,11 +301,19 @@ class EventStream:
         meta = FrameMeta(node_id=v.node_id, frame_id=msg.item_id, score=msg.score, cloud_frac=msg.cloud_frac)
         self.frames[(v.node_id, msg.item_id)] = meta
         self.baseline.scored(meta, self.s.sat_buffer_slots)
-        self._emit("frame_scored", now, node_id=v.node_id, label=v.label, frame_id=msg.item_id, score=msg.score,
-                   parts=dict(clear=msg.parts.clear, sharp=msg.parts.sharp, change=msg.parts.change),
-                   cloud_frac=msg.cloud_frac, queued=msg.queued,
-                   evicted_frame_id=msg.evicted_item_id if msg.evicted_item_id >= 0 else None,
-                   queue_depth=msg.queue_depth)
+        self._emit(
+            "frame_scored",
+            now,
+            node_id=v.node_id,
+            label=v.label,
+            frame_id=msg.item_id,
+            score=msg.score,
+            parts=dict(clear=msg.parts.clear, sharp=msg.parts.sharp, change=msg.parts.change),
+            cloud_frac=msg.cloud_frac,
+            queued=msg.queued,
+            evicted_frame_id=msg.evicted_item_id if msg.evicted_item_id >= 0 else None,
+            queue_depth=msg.queue_depth,
+        )
 
     def _on_decision(self, p: dict[str, Any], now: float) -> None:
         ranked = list(p.get("ranked", []))
@@ -279,14 +336,37 @@ class EventStream:
             if c is None:
                 bids.append(dict(node_id=v.node_id, top_score=0, ready=False))
             else:
-                bids.append(dict(node_id=v.node_id, top_score=c["score"], ready=True, priority=c["total"],
-                                 item_age_term=c["item_age_term"], sat_wait_term=c["sat_wait_term"],
-                                 item_age_s=c["item_age_s"], sat_wait_s=c["sat_wait_s"], frame_id=c["item_id"]))
+                bids.append(
+                    dict(
+                        node_id=v.node_id,
+                        top_score=c["score"],
+                        ready=True,
+                        priority=c["total"],
+                        item_age_term=c["item_age_term"],
+                        sat_wait_term=c["sat_wait_term"],
+                        item_age_s=c["item_age_s"],
+                        sat_wait_s=c["sat_wait_s"],
+                        frame_id=c["item_id"],
+                    )
+                )
         wb = bidders[winner.label]
-        self._emit("grant", now, slot_id=int(p["round_id"]), node_id=winner.node_id, budget_bytes=self.s.frame_bytes,
-                   reason=reason, bids=bids, frame_id=wb["item_id"],
-                   priority=dict(score=wb["score"], item_age_term=wb["item_age_term"],
-                                 sat_wait_term=wb["sat_wait_term"], total=wb["total"]), margin=p.get("margin"))
+        self._emit(
+            "grant",
+            now,
+            slot_id=int(p["round_id"]),
+            node_id=winner.node_id,
+            budget_bytes=self.s.frame_bytes,
+            reason=reason,
+            bids=bids,
+            frame_id=wb["item_id"],
+            priority=dict(
+                score=wb["score"],
+                item_age_term=wb["item_age_term"],
+                sat_wait_term=wb["sat_wait_term"],
+                total=wb["total"],
+            ),
+            margin=p.get("margin"),
+        )
 
     def _on_complete(self, p: dict[str, Any], now: float) -> None:
         v = self._node(str(p["sat"]), now)
@@ -303,9 +383,19 @@ class EventStream:
         self.orbit_frames_down += 1
         self.orbit_usable_down += 1 if usable else 0
         self.orbit_bytes_used += self.s.frame_bytes
-        self._emit("frame_arrived", now, slot_id=int(p["round_id"]), node_id=v.node_id, frame_id=fid,
-                   score=p.get("score"), bytes=nbytes, duration_s=round(now - float(p.get("granted_at", now)), 3),
-                   cloud_frac=cloud, usable=usable, sha256=p.get("sha256"))
+        self._emit(
+            "frame_arrived",
+            now,
+            slot_id=int(p["round_id"]),
+            node_id=v.node_id,
+            frame_id=fid,
+            score=p.get("score"),
+            bytes=nbytes,
+            duration_s=round(now - float(p.get("granted_at", now)), 3),
+            cloud_frac=cloud,
+            usable=usable,
+            sha256=p.get("sha256"),
+        )
         # the baseline gets the same slot: one frame of budget, FIFO, round-robin, no scoring
         w = dict(p["window"])
         remaining_for_baseline = int(w["capacity_bytes"]) - self.baseline.bytes_used
@@ -315,8 +405,16 @@ class EventStream:
             self.baseline.frames_down += 1
             self.baseline.usable_down += 1 if b_usable else 0
             self.baseline.bytes_used += self.s.frame_bytes
-            self._emit("baseline_arrival", now, node_id=b.node_id, frame_id=b.frame_id, score=b.score,
-                       bytes=self.s.frame_bytes, cloud_frac=b.cloud_frac, usable=b_usable)
+            self._emit(
+                "baseline_arrival",
+                now,
+                node_id=b.node_id,
+                frame_id=b.frame_id,
+                score=b.score,
+                bytes=self.s.frame_bytes,
+                cloud_frac=b.cloud_frac,
+                usable=b_usable,
+            )
         self._window_update(w, now)
 
     def _on_flags(self, host: str, f: dict[str, Any], now: float) -> None:
@@ -332,18 +430,33 @@ class EventStream:
         v.hard, v.silent = hard, silent
 
     def _window_update(self, w: dict[str, Any], now: float) -> None:
-        self._emit("window_update", now, budget_bytes=int(w["capacity_bytes"]), used_bytes=int(w["used_bytes"]),
-                   remaining_bytes=int(w["remaining_bytes"]),
-                   time_remaining_s=round(max(0.0, self.s.window_duration_s - now), 1), open=bool(w["open"]),
-                   slots_remaining=int(w.get("slots_remaining", 0)))
+        self._emit(
+            "window_update",
+            now,
+            budget_bytes=int(w["capacity_bytes"]),
+            used_bytes=int(w["used_bytes"]),
+            remaining_bytes=int(w["remaining_bytes"]),
+            time_remaining_s=round(max(0.0, self.s.window_duration_s - now), 1),
+            open=bool(w["open"]),
+            slots_remaining=int(w.get("slots_remaining", 0)),
+        )
 
     def _node_status(self, v: NodeView, now: float) -> None:
-        self._emit("node_status", now, node_id=v.node_id, label=v.label, queue_depth=v.queue_depth,
-                   top_frame_id=v.top_frame_id if v.queue_depth else None,
-                   top_score=v.top_score if v.queue_depth else 0,
-                   top_age_s=v.top_age_s if v.queue_depth else 0.0, frames_scored=v.frames_scored,
-                   frames_evicted=v.frames_evicted, frames_sent=v.frames_sent, busy=v.busy,
-                   link_ok=(now - v.last_seen) <= self.s.peer_stale_s)
+        self._emit(
+            "node_status",
+            now,
+            node_id=v.node_id,
+            label=v.label,
+            queue_depth=v.queue_depth,
+            top_frame_id=v.top_frame_id if v.queue_depth else None,
+            top_score=v.top_score if v.queue_depth else 0,
+            top_age_s=v.top_age_s if v.queue_depth else 0.0,
+            frames_scored=v.frames_scored,
+            frames_evicted=v.frames_evicted,
+            frames_sent=v.frames_sent,
+            busy=v.busy,
+            link_ok=(now - v.last_seen) <= self.s.peer_stale_s,
+        )
 
     def _node_event(self, v: NodeView, now: float, level: str, message: str) -> None:
         self._emit("node_event", now, node_id=v.node_id, label=v.label, level=level, message=message)
@@ -364,8 +477,14 @@ class EventStream:
             line = json.dumps(doc, separators=(",", ":"), default=_default, allow_nan=False)
         except ValueError:  # a non-finite number got in somewhere: keep the stream valid JSON, burn the seq
             lg.error("non-finite value in %s event; emitting a placeholder", type_)
-            doc = {"seq": self.seq, "t": round(now, 3), "type": "node_event", "node_id": None, "level": "error",
-                   "message": f"{type_} event dropped: non-finite value"}
+            doc = {
+                "seq": self.seq,
+                "t": round(now, 3),
+                "type": "node_event",
+                "node_id": None,
+                "level": "error",
+                "message": f"{type_} event dropped: non-finite value",
+            }
             line = json.dumps(doc, separators=(",", ":"))
         if len(self.lines) == self.lines.maxlen:
             self.backlog_dropped += 1
@@ -450,6 +569,7 @@ class StreamServer:
 
     async def start(self) -> None:
         from websockets.asyncio.server import serve
+
         self._server = await serve(self._handler, self.host, self.port)
         log(lg, logging.INFO, "stream_listening", host=self.host, port=self.port)
 

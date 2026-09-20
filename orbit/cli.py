@@ -52,6 +52,7 @@ def _settings(a: argparse.Namespace) -> Settings:
 
 def cmd_sim(a: argparse.Namespace) -> int:
     from orbit.sim.run import main
+
     argv = ["--scenario", a.scenario, "--rounds", str(a.rounds), "--seed", str(a.seed)]
     if a.digest:
         argv.append("--digest")
@@ -72,12 +73,14 @@ def cmd_sim(a: argparse.Namespace) -> int:
 
 def cmd_ground(a: argparse.Namespace) -> int:
     from orbit.ground.station import main_async
+
     asyncio.run(main_async(_settings(a), telemetry_network=not a.no_telemetry, run_id=a.run_id))
     return 0
 
 
 def cmd_sat(a: argparse.Namespace) -> int:
     from orbit.sim.live import main_async, profile_for
+
     asyncio.run(main_async(profile_for(a.scenario, a.profile), _settings(a), a.seed))
     return 0
 
@@ -133,22 +136,26 @@ def _stop_all(procs: list[subprocess.Popen[bytes]]) -> None:
 
 def cmd_bench(a: argparse.Namespace) -> int:
     from orbit.bench.runner import main
+
     return main(a.rest)
 
 
 def cmd_bus_smoke(a: argparse.Namespace) -> int:
     from tools.bus_smoke import main
+
     return main(a.rest)
 
 
 def cmd_display(a: argparse.Namespace) -> int:
     from viz.server import main
+
     return main(["--port", str(a.port), "--telemetry-port", str(_settings(a).telemetry_port)])
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="orbit", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="orbit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--log-level", default=os.environ.get("ORBIT_LOG_LEVEL", "INFO"))
     ap.add_argument("--set", action="append", metavar="NAME=VALUE", help="override any Settings field")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -208,7 +215,7 @@ def _hoist_sets(argv: list[str]) -> tuple[list[str], list[str]]:
         if tok == "--set":
             sets.append(next(it, ""))
         elif tok.startswith("--set="):
-            sets.append(tok[len("--set="):])
+            sets.append(tok[len("--set=") :])
         else:
             rest.append(tok)
     return rest, sets
@@ -220,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     passthrough: list[str] = []
     for i, tok in enumerate(rest):  # bench/bus-smoke own everything after their name; argparse never sees it
         if tok in PASSTHROUGH:
-            rest, passthrough = rest[: i + 1], rest[i + 1:]
+            rest, passthrough = rest[: i + 1], rest[i + 1 :]
             break
     a = parser.parse_args(rest)
     a.rest = passthrough

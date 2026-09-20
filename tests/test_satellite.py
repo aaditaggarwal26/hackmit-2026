@@ -16,7 +16,9 @@ def corp():
 
 
 def sat(corp, **kw):
-    s = FakeSatellite(SatelliteProfile("sat-t", capture_period_s=1.0, capture_jitter=0.0, buffer_slots=4, **kw), S, corp)
+    s = FakeSatellite(
+        SatelliteProfile("sat-t", capture_period_s=1.0, capture_jitter=0.0, buffer_slots=4, **kw), S, corp
+    )
     s.start(0.0)
     return s
 
@@ -76,23 +78,30 @@ def test_grant_transmit_ack_pops_only_on_ok(corp):
     s.on_tick(1.0)
     [b] = s.on_message(M.OffersOpen("g", 1, 0, round_id=1, window_remaining_bytes=1, collect_ms=1), 1.0)
     bd = M.Breakdown(b.score, 0, 0, 0, 0, b.score)
-    [begin] = s.on_message(M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.1)
+    [begin] = s.on_message(
+        M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.1
+    )
     assert isinstance(begin, M.TxBegin) and begin.chunks == 4 and begin.total_bytes == config.FRAME_BYTES
     out = s.on_tick(1.2)
     chunks = [m for m in out if isinstance(m, M.TxChunk)]
     assert len(chunks) == 4 and b"".join(c.data for c in chunks) == bytes(s.buffer.read(b.item_id))
     assert isinstance(out[-1], M.TxDone) and s.awaiting_ack == b.item_id
     import hashlib
+
     assert out[-1].sha256 == hashlib.sha256(bytes(s.buffer.read(b.item_id))).hexdigest()  # what the ground checks
     # while awaiting the ack the satellite neither bids nor pops (a re-sent offer for the same round proves nothing)
     assert s.on_message(M.OffersOpen("g", 3, 0, round_id=1, window_remaining_bytes=1, collect_ms=1), 1.3) == []
-    s.on_message(M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=False, bytes_received=0, reason="x"), 1.4)
+    s.on_message(
+        M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=False, bytes_received=0, reason="x"), 1.4
+    )
     assert b.item_id in s.items and s.counters.failed == 1 and s.awaiting_ack is None  # frame kept
     [b2] = s.on_message(M.OffersOpen("g", 5, 0, round_id=3, window_remaining_bytes=1, collect_ms=1), 1.5)
     assert b2.item_id == b.item_id  # offered again
     s.on_message(M.Grant("g", 6, 0, round_id=3, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.6)
     s.on_tick(1.7)
-    s.on_message(M.TxAck("g", 7, 0, round_id=3, to="sat-t", item_id=b.item_id, ok=True, bytes_received=1, reason=""), 1.8)
+    s.on_message(
+        M.TxAck("g", 7, 0, round_id=3, to="sat-t", item_id=b.item_id, ok=True, bytes_received=1, reason=""), 1.8
+    )
     assert b.item_id not in s.items and len(s.queue) == 0 and s.buffer.free == 4 and s.counters.transmitted == 1
 
 
@@ -122,7 +131,10 @@ def test_never_transmit_profile_stays_silent(corp):
     s.on_tick(1.0)
     [b] = s.on_message(M.OffersOpen("g", 1, 0, round_id=1, window_remaining_bytes=1, collect_ms=1), 1.0)
     bd = M.Breakdown(b.score, 0, 0, 0, 0, b.score)
-    assert s.on_message(M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.0) == []
+    assert (
+        s.on_message(M.Grant("g", 2, 0, round_id=1, to="sat-t", item_id=b.item_id, pace_bps=1e9, breakdown=bd), 1.0)
+        == []
+    )
     assert s.counters.grants == 1 and s.tx is None
 
 
@@ -134,6 +146,7 @@ def test_in_flight_item_is_never_evicted(corp):
     # pretend the worst item is being transmitted; a much better newcomer must be rejected, not admitted over it
     s.awaiting_ack = worst_id
     from orbit.sim.satellite import Item
+
     out = s._admit(Item(999, 0, 65535, 4.5), bytes(config.FRAME_BYTES), 4.5)
     assert out and out[0].kind == "rejected" and worst_id in s.items
 
@@ -175,5 +188,7 @@ def test_late_positive_ack_pops_without_resending(corp):
     s.on_tick(1.1)
     s.on_message(M.OffersOpen("g", 3, 0, round_id=2, window_remaining_bytes=1, collect_ms=1), 1.2)  # gives up, re-bids
     assert s.awaiting_ack is None and b.item_id in s.items
-    s.on_message(M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=True, bytes_received=1, reason=""), 1.21)
+    s.on_message(
+        M.TxAck("g", 4, 0, round_id=1, to="sat-t", item_id=b.item_id, ok=True, bytes_received=1, reason=""), 1.21
+    )
     assert b.item_id not in s.items and s.counters.late_acks == 1 and s.counters.transmitted == 1 and s.buffer.free == 4

@@ -23,8 +23,9 @@ def test_roundtrip(name, msg):
 
 
 def test_vectors_committed():
-    assert json.loads((ROOT / "docs" / "protocol_vectors.json").read_text()) == M.vectors(), \
-        "run: uv run python -c 'from orbit.protocol.messages import vectors; import json; json.dump(vectors(), open(\"docs/protocol_vectors.json\",\"w\"), indent=1)'"
+    assert json.loads((ROOT / "docs" / "protocol_vectors.json").read_text()) == M.vectors(), (
+        'run: uv run python -c \'from orbit.protocol.messages import vectors; import json; json.dump(vectors(), open("docs/protocol_vectors.json","w"), indent=1)\''
+    )
 
 
 def test_every_type_has_exactly_one_class():
@@ -33,20 +34,30 @@ def test_every_type_has_exactly_one_class():
     assert not (M.GROUND_TYPES & M.SATELLITE_TYPES)
 
 
-@pytest.mark.parametrize("raw", [
-    b"", b"{", b"[]", b"null", b'"bid"', b"\xff\xfe\x00", b'{"v":1}', b'{"v":2,"type":"bid"}',
-    b'{"v":1,"type":"nope","from":"x","seq":1,"t_ms":0}',
-    b'{"v":1,"type":"bid","from":"x","seq":1,"t_ms":0}',
-    b'{"v":1,"type":"bid","from":7,"seq":1,"t_ms":0}',
-    b'{"v":1,"type":"tx_ack","from":"g","seq":1,"t_ms":0,"round_id":1,"to":"s","item_id":1,"ok":"yes","bytes_received":1,"reason":""}',
-    b'{"v":1,"type":"tx_chunk","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"idx":0,"n":1,"data":"!!!"}',
-    b'{"v":1,"type":"tx_chunk","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"idx":0,"n":1,"data":5}',
-    b'{"v":1,"type":"offers_open","from":"g","seq":1.5,"t_ms":0,"round_id":1,"window_remaining_bytes":1,"collect_ms":1}',
-    b'{"v":1,"type":"offers_open","from":"g","seq":true,"t_ms":0,"round_id":1,"window_remaining_bytes":1,"collect_ms":1}',
-    b'{"v":1,"type":"state","from":"g","seq":1,"t_ms":0,"state":"READY","round_id":1,"granted_to":"","window":[]}',
-    b'{"v":1,"type":"bid","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"score":1,"item_age_s":0,"window":{},"buffer":{},"eviction_count":0,"queue_len":0}',
-    b'{"v":1,"type":"heartbeat","from":"s","seq":1,"t_ms":0,"buffer":{"slots":1},"eviction_count":0,"queue_len":0,"top_score":0,"top_item_id":0,"uptime_s":0}',
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"",
+        b"{",
+        b"[]",
+        b"null",
+        b'"bid"',
+        b"\xff\xfe\x00",
+        b'{"v":1}',
+        b'{"v":2,"type":"bid"}',
+        b'{"v":1,"type":"nope","from":"x","seq":1,"t_ms":0}',
+        b'{"v":1,"type":"bid","from":"x","seq":1,"t_ms":0}',
+        b'{"v":1,"type":"bid","from":7,"seq":1,"t_ms":0}',
+        b'{"v":1,"type":"tx_ack","from":"g","seq":1,"t_ms":0,"round_id":1,"to":"s","item_id":1,"ok":"yes","bytes_received":1,"reason":""}',
+        b'{"v":1,"type":"tx_chunk","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"idx":0,"n":1,"data":"!!!"}',
+        b'{"v":1,"type":"tx_chunk","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"idx":0,"n":1,"data":5}',
+        b'{"v":1,"type":"offers_open","from":"g","seq":1.5,"t_ms":0,"round_id":1,"window_remaining_bytes":1,"collect_ms":1}',
+        b'{"v":1,"type":"offers_open","from":"g","seq":true,"t_ms":0,"round_id":1,"window_remaining_bytes":1,"collect_ms":1}',
+        b'{"v":1,"type":"state","from":"g","seq":1,"t_ms":0,"state":"READY","round_id":1,"granted_to":"","window":[]}',
+        b'{"v":1,"type":"bid","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"score":1,"item_age_s":0,"window":{},"buffer":{},"eviction_count":0,"queue_len":0}',
+        b'{"v":1,"type":"heartbeat","from":"s","seq":1,"t_ms":0,"buffer":{"slots":1},"eviction_count":0,"queue_len":0,"top_score":0,"top_item_id":0,"uptime_s":0}',
+    ],
+)
 def test_hostile_input_is_rejected_not_raised(raw):
     r = M.decode(raw)
     assert isinstance(r, M.DecodeError) and r.reason
@@ -73,10 +84,26 @@ def test_int_accepted_where_float_expected():
 
 def test_full_chunk_fits_one_datagram():
     s = config.DEFAULTS
-    chunk = M.TxChunk("sat-abcdefgh", 2**31 - 1, 2**31 - 1, round_id=2**31 - 1, item_id=2**31 - 1, idx=99, n=99,
-                      data=bytes(range(256)) * (s.chunk_bytes // 256 + 1))
-    chunk = M.TxChunk("sat-abcdefgh", 2**31 - 1, 2**31 - 1, round_id=2**31 - 1, item_id=2**31 - 1, idx=99, n=99,
-                      data=chunk.data[: s.chunk_bytes])
+    chunk = M.TxChunk(
+        "sat-abcdefgh",
+        2**31 - 1,
+        2**31 - 1,
+        round_id=2**31 - 1,
+        item_id=2**31 - 1,
+        idx=99,
+        n=99,
+        data=bytes(range(256)) * (s.chunk_bytes // 256 + 1),
+    )
+    chunk = M.TxChunk(
+        "sat-abcdefgh",
+        2**31 - 1,
+        2**31 - 1,
+        round_id=2**31 - 1,
+        item_id=2**31 - 1,
+        idx=99,
+        n=99,
+        data=chunk.data[: s.chunk_bytes],
+    )
     assert len(chunk.encode()) <= s.bus_max_datagram, (len(chunk.encode()), s.bus_max_datagram)
 
 
@@ -84,8 +111,19 @@ def test_bid_with_max_window_fits_one_datagram():
     s = config.DEFAULTS
     win = tuple(M.QueueEntry(2**31 - 1, 100.0, 99999.999) for _ in range(s.bid_window_n))
     buf = M.BufferStats(slots=999, capacity_bytes=2**31 - 1, used=999, free=0, occupancy_pct=100.0)
-    bid = M.Bid("sat-abcdefgh", 2**31 - 1, 2**31 - 1, round_id=2**31 - 1, item_id=2**31 - 1, score=100.0,
-                item_age_s=99999.999, window=win, buffer=buf, eviction_count=2**31 - 1, queue_len=999)
+    bid = M.Bid(
+        "sat-abcdefgh",
+        2**31 - 1,
+        2**31 - 1,
+        round_id=2**31 - 1,
+        item_id=2**31 - 1,
+        score=100.0,
+        item_age_s=99999.999,
+        window=win,
+        buffer=buf,
+        eviction_count=2**31 - 1,
+        queue_len=999,
+    )
     assert len(bid.encode()) <= s.bus_max_datagram
 
 
@@ -95,12 +133,15 @@ def test_spec_markdown_lists_every_type():
         assert f"`{t}`" in md
 
 
-@pytest.mark.parametrize("raw", [
-    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":NaN,"cloud_frac":0,"sha256":""}',
-    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":Infinity,"cloud_frac":0,"sha256":""}',
-    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":1e999,"cloud_frac":0,"sha256":""}',
-    b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":-1e999,"cloud_frac":0,"sha256":""}',
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":NaN,"cloud_frac":0,"sha256":""}',
+        b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":Infinity,"cloud_frac":0,"sha256":""}',
+        b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":1e999,"cloud_frac":0,"sha256":""}',
+        b'{"v":1,"type":"tx_done","from":"s","seq":1,"t_ms":0,"round_id":1,"item_id":1,"total_bytes":1,"score":-1e999,"cloud_frac":0,"sha256":""}',
+    ],
+)
 def test_non_finite_numbers_are_hostile(raw):
     """A bid with score=1e999 would win every round and then break every JSON encoder downstream."""
     assert isinstance(M.decode(raw), M.DecodeError)

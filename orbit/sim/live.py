@@ -31,8 +31,9 @@ def profile_for(scenario: str, hostname: str) -> SatelliteProfile:
     return SatelliteProfile(hostname=hostname, seq_seed=sum(map(ord, hostname)))  # a fourth satellite needs no config
 
 
-async def run_satellite(profile: SatelliteProfile, settings: Settings, seed: int,
-                        stop: asyncio.Event | None = None) -> None:
+async def run_satellite(
+    profile: SatelliteProfile, settings: Settings, seed: int, stop: asyncio.Event | None = None
+) -> None:
     sat = FakeSatellite(profile, settings, corpus.load(), seed=seed)
     bus = MulticastBus(settings, profile.hostname)
     clock = Clock()

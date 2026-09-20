@@ -2,6 +2,7 @@
 
 NumPy only; never imports the fetcher, so the demo has no path to the network.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,14 +13,14 @@ from typing import Any
 
 import numpy as np
 
-SYNTHETIC = False                 # real MODIS imagery, not generated
+SYNTHETIC = False  # real MODIS imagery, not generated
 ROOT = Path(__file__).resolve().parents[2] / "corpus"
 
 
 @dataclass
 class Corpus:
-    frames: np.ndarray            # uint8, N x 128 x 128
-    ids: np.ndarray               # uint16, N; id == row index
+    frames: np.ndarray  # uint8, N x 128 x 128
+    ids: np.ndarray  # uint16, N; id == row index
     manifest: dict[str, Any]
 
     def by_id(self, id: int) -> np.ndarray:

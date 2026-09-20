@@ -98,7 +98,7 @@ class FrameBuffer:
             raise ValueError(f"frame is {len(data)} bytes, pool slot is {self.frame_bytes}")
         slot = self._free.pop()
         off = slot * self.frame_bytes
-        self._pool[off:off + self.frame_bytes] = data
+        self._pool[off : off + self.frame_bytes] = data
         self._slot_of[item_id] = slot
 
     def release(self, item_id: int) -> None:
@@ -107,12 +107,17 @@ class FrameBuffer:
 
     def read(self, item_id: int) -> memoryview:
         off = self._slot_of[item_id] * self.frame_bytes
-        return memoryview(self._pool)[off:off + self.frame_bytes]
+        return memoryview(self._pool)[off : off + self.frame_bytes]
 
     def stats(self) -> M.BufferStats:
         pct = round(100.0 * self.used / self.slots, 1) if self.slots else 0.0
-        return M.BufferStats(slots=self.slots, capacity_bytes=self.slots * self.frame_bytes, used=self.used,
-                             free=self.free, occupancy_pct=pct)
+        return M.BufferStats(
+            slots=self.slots,
+            capacity_bytes=self.slots * self.frame_bytes,
+            used=self.used,
+            free=self.free,
+            occupancy_pct=pct,
+        )
 
 
 @dataclass
@@ -238,18 +243,33 @@ class FakeSatellite:
         ref_id = self.corpus.reference_for(cid)
         ref = self.references.setdefault(ref_id, self.corpus.by_id(ref_id))
         s = score_frame(frame, ref, self.cfg)
-        item = Item(item_id=self._next_item_id, corpus_id=cid, raw_score=s.score, captured_at=now,
-                    cloud_frac=round(s.cloud_px / config.FRAME_BYTES, 4),
-                    parts=(round(display(s.clear), 2), round(display(s.sharp), 2), round(display(s.change), 2)))
+        item = Item(
+            item_id=self._next_item_id,
+            corpus_id=cid,
+            raw_score=s.score,
+            captured_at=now,
+            cloud_frac=round(s.cloud_px / config.FRAME_BYTES, 4),
+            parts=(round(display(s.clear), 2), round(display(s.sharp), 2), round(display(s.change), 2)),
+        )
         self._next_item_id += 1
         self.counters.captured += 1
         out = self._admit(item, frame.tobytes(), now)
         lost = out[0] if out else None
         queued = not (isinstance(lost, M.Eviction) and lost.item_id == item.item_id)
         evicted = lost.item_id if (isinstance(lost, M.Eviction) and queued) else -1
-        out.append(self._mk(M.Scored, now, item_id=item.item_id, score=item.score(self.p.score_bias),
-                            parts=M.ScoreParts(*item.parts), cloud_frac=item.cloud_frac, queued=queued,
-                            evicted_item_id=evicted, queue_depth=len(self.queue)))
+        out.append(
+            self._mk(
+                M.Scored,
+                now,
+                item_id=item.item_id,
+                score=item.score(self.p.score_bias),
+                parts=M.ScoreParts(*item.parts),
+                cloud_frac=item.cloud_frac,
+                queued=queued,
+                evicted_item_id=evicted,
+                queue_depth=len(self.queue),
+            )
+        )
         return out
 
     def _admit(self, item: Item, data: bytes, now: float) -> list[M.Message]:
@@ -275,13 +295,25 @@ class FakeSatellite:
         return [self._lost(lost, "evicted", displaced_by=item, now=now)]
 
     def _lost(self, item: Item, kind: str, displaced_by: Item | None, now: float) -> M.Eviction:
-        entry = dict(t=now, item_id=item.item_id, score=item.score(self.p.score_bias), kind=kind,
-                     displaced_by=displaced_by.item_id if displaced_by else -1,
-                     displaced_by_score=displaced_by.score(self.p.score_bias) if displaced_by else -1.0)
+        entry = dict(
+            t=now,
+            item_id=item.item_id,
+            score=item.score(self.p.score_bias),
+            kind=kind,
+            displaced_by=displaced_by.item_id if displaced_by else -1,
+            displaced_by_score=displaced_by.score(self.p.score_bias) if displaced_by else -1.0,
+        )
         self.eviction_log.append(entry)
         log(lg, logging.INFO, "frame_lost", sat=self.hostname, **entry)
-        return self._mk(M.Eviction, now, item_id=item.item_id, score=entry["score"], kind=kind,
-                        displaced_by=entry["displaced_by"], displaced_by_score=entry["displaced_by_score"])
+        return self._mk(
+            M.Eviction,
+            now,
+            item_id=item.item_id,
+            score=entry["score"],
+            kind=kind,
+            displaced_by=entry["displaced_by"],
+            displaced_by_score=entry["displaced_by_score"],
+        )
 
     def _queue_key(self, item: Item) -> int:
         """Queue order follows the biased score the satellite would report; ties keep insert order."""
@@ -296,14 +328,24 @@ class FakeSatellite:
         if self.tx is not None or self.awaiting_ack is not None or not self.queue.has_data:
             return []
         items = self._top_items()
-        top, rest = items[0], items[1:1 + self.s.bid_window_n]
+        top, rest = items[0], items[1 : 1 + self.s.bid_window_n]
         self.counters.bids += 1
-        return [self._mk(M.Bid, now, round_id=offer.round_id, item_id=top.item_id, score=top.score(self.p.score_bias),
-                         item_age_s=round(now - top.captured_at, 3),
-                         window=tuple(M.QueueEntry(i.item_id, i.score(self.p.score_bias), round(now - i.captured_at, 3))
-                                      for i in rest),
-                         buffer=self.buffer.stats(), eviction_count=self.counters.evicted + self.counters.rejected,
-                         queue_len=len(self.queue))]
+        return [
+            self._mk(
+                M.Bid,
+                now,
+                round_id=offer.round_id,
+                item_id=top.item_id,
+                score=top.score(self.p.score_bias),
+                item_age_s=round(now - top.captured_at, 3),
+                window=tuple(
+                    M.QueueEntry(i.item_id, i.score(self.p.score_bias), round(now - i.captured_at, 3)) for i in rest
+                ),
+                buffer=self.buffer.stats(),
+                eviction_count=self.counters.evicted + self.counters.rejected,
+                queue_len=len(self.queue),
+            )
+        ]
 
     # ------------------------------------------------------------------ transmitting
 
@@ -316,11 +358,18 @@ class FakeSatellite:
             return []  # the fault we model: granted, silent
         data = bytes(self.buffer.read(g.item_id))
         n = self.s.chunk_bytes
-        chunks = [data[i:i + n] for i in range(0, len(data), n)]
-        self.tx = Transmission(round_id=g.round_id, item_id=g.item_id, pace_bps=g.pace_bps, chunks=chunks,
-                               sha256=hashlib.sha256(data).hexdigest(), next_at=now)
-        return [self._mk(M.TxBegin, now, round_id=g.round_id, item_id=g.item_id, total_bytes=len(data),
-                         chunks=len(chunks))]
+        chunks = [data[i : i + n] for i in range(0, len(data), n)]
+        self.tx = Transmission(
+            round_id=g.round_id,
+            item_id=g.item_id,
+            pace_bps=g.pace_bps,
+            chunks=chunks,
+            sha256=hashlib.sha256(data).hexdigest(),
+            next_at=now,
+        )
+        return [
+            self._mk(M.TxBegin, now, round_id=g.round_id, item_id=g.item_id, total_bytes=len(data), chunks=len(chunks))
+        ]
 
     def _pump_tx(self, now: float) -> list[M.Message]:
         tx = self.tx
@@ -332,14 +381,32 @@ class FakeSatellite:
             tx.next_at += len(tx.chunks[idx]) * 8 / tx.pace_bps  # paced at the link rate the ground quoted
             if self.p.chunk_drop_prob and self.rng.random() < self.p.chunk_drop_prob:
                 continue
-            out.append(self._mk(M.TxChunk, now, round_id=tx.round_id, item_id=tx.item_id, idx=idx, n=len(tx.chunks),
-                                data=tx.chunks[idx]))
+            out.append(
+                self._mk(
+                    M.TxChunk,
+                    now,
+                    round_id=tx.round_id,
+                    item_id=tx.item_id,
+                    idx=idx,
+                    n=len(tx.chunks),
+                    data=tx.chunks[idx],
+                )
+            )
         if tx.next_idx >= len(tx.chunks) and not tx.done_sent:
             tx.done_sent = True
             item = self.items[tx.item_id]
-            out.append(self._mk(M.TxDone, now, round_id=tx.round_id, item_id=tx.item_id,
-                                total_bytes=sum(map(len, tx.chunks)), score=item.score(self.p.score_bias),
-                                cloud_frac=item.cloud_frac, sha256=tx.sha256))
+            out.append(
+                self._mk(
+                    M.TxDone,
+                    now,
+                    round_id=tx.round_id,
+                    item_id=tx.item_id,
+                    total_bytes=sum(map(len, tx.chunks)),
+                    score=item.score(self.p.score_bias),
+                    cloud_frac=item.cloud_frac,
+                    sha256=tx.sha256,
+                )
+            )
             self.awaiting_ack = tx.item_id
             self.awaiting_since = now
             self.awaiting_round = tx.round_id
@@ -381,11 +448,18 @@ class FakeSatellite:
 
     def _heartbeat(self, now: float) -> M.Heartbeat:
         top = self._top_items()[0] if self.queue.has_data else None
-        return self._mk(M.Heartbeat, now, buffer=self.buffer.stats(),
-                        eviction_count=self.counters.evicted + self.counters.rejected, queue_len=len(self.queue),
-                        top_score=top.score(self.p.score_bias) if top else -1.0,
-                        top_item_id=top.item_id if top else -1, uptime_s=round(self.uptime_ms(now) / 1000.0, 3),
-                        frames_scored=self.counters.captured, frames_sent=self.counters.transmitted)
+        return self._mk(
+            M.Heartbeat,
+            now,
+            buffer=self.buffer.stats(),
+            eviction_count=self.counters.evicted + self.counters.rejected,
+            queue_len=len(self.queue),
+            top_score=top.score(self.p.score_bias) if top else -1.0,
+            top_item_id=top.item_id if top else -1,
+            uptime_s=round(self.uptime_ms(now) / 1000.0, 3),
+            frames_scored=self.counters.captured,
+            frames_sent=self.counters.transmitted,
+        )
 
     def _period(self) -> float:
         j = self.p.capture_jitter
@@ -397,9 +471,11 @@ class FakeSatellite:
 
     def snapshot(self, now: float) -> dict[str, Any]:
         items = self._top_items()
-        return dict(hostname=self.hostname, online=self.online and now >= (self.boot_at or 0.0),
-                    queue=[(i.item_id, round(i.score(self.p.score_bias), 1), round(now - i.captured_at, 1))
-                           for i in items],
-                    buffer=vars(self.buffer.stats()), counters=vars(self.counters).copy(),
-                    transmitting=self.tx.item_id if self.tx else None)
-
+        return dict(
+            hostname=self.hostname,
+            online=self.online and now >= (self.boot_at or 0.0),
+            queue=[(i.item_id, round(i.score(self.p.score_bias), 1), round(now - i.captured_at, 1)) for i in items],
+            buffer=vars(self.buffer.stats()),
+            counters=vars(self.counters).copy(),
+            transmitting=self.tx.item_id if self.tx else None,
+        )

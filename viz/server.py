@@ -153,7 +153,9 @@ class Store:
         if e.get("type") == "tx_chunk":
             for prev in list(self.bus)[-CHUNK_LOOKBACK:]:  # heartbeats interleave; still one line per item
                 if prev.get("type") == "tx_chunk" and (prev.get("from"), prev.get("item_id")) == (
-                    e.get("from"), e.get("item_id")):
+                    e.get("from"),
+                    e.get("item_id"),
+                ):
                     prev["count"] = int(prev.get("count", 1)) + 1
                     prev["t"] = e.get("t", prev.get("t"))
                     return
@@ -173,14 +175,25 @@ class Store:
                 return  # duplicate datagram
             win: dict[str, Any] = ranked[0] if ranked else {}
             ru: dict[str, Any] | None = ranked[1] if len(ranked) > 1 else None
-            self.decisions.append({
-                "round_id": e.get("round_id"), "t": e.get("t"), "winner": e.get("winner", win.get("sat")),
-                "item_id": e.get("item_id", win.get("item_id")), "score": win.get("score"),
-                "item_age_term": win.get("item_age_term"), "sat_wait_term": win.get("sat_wait_term"),
-                "total": win.get("total"), "runner_up": ru.get("sat") if ru else None,
-                "runner_total": ru.get("total") if ru else None, "margin": e.get("margin"),
-                "excluded": e.get("excluded", []), "ranked": ranked, "outcome": "pending", "reason": "",
-            })
+            self.decisions.append(
+                {
+                    "round_id": e.get("round_id"),
+                    "t": e.get("t"),
+                    "winner": e.get("winner", win.get("sat")),
+                    "item_id": e.get("item_id", win.get("item_id")),
+                    "score": win.get("score"),
+                    "item_age_term": win.get("item_age_term"),
+                    "sat_wait_term": win.get("sat_wait_term"),
+                    "total": win.get("total"),
+                    "runner_up": ru.get("sat") if ru else None,
+                    "runner_total": ru.get("total") if ru else None,
+                    "margin": e.get("margin"),
+                    "excluded": e.get("excluded", []),
+                    "ranked": ranked,
+                    "outcome": "pending",
+                    "reason": "",
+                }
+            )
             return
         if not isinstance(e.get("sat"), str):
             return  # an outcome with no satellite cannot be joined to anything
@@ -201,12 +214,23 @@ class Store:
     def state(self, clients: int = 0) -> Event:
         age = None if self.last_rx_wall is None else round(time.monotonic() - self.last_rx_wall, 2)
         return {
-            "snapshot": self.snapshot, "decisions": list(self.decisions), "recent_events": list(self.recent),
-            "bus": list(self.bus), "flags": self.flags, "rates": self.rates,
-            "telemetry_stats": self.telemetry_stats, "bus_stats": self.bus_stats,
-            "stats": {"datagrams": self.datagrams, "bad_datagrams": self.bad_datagrams, "by_kind": dict(self.by_kind),
-                      "connected_clients": clients, "age_s": age, "restarts": self.restarts,
-                      "last_event_t": self.last_event_t},
+            "snapshot": self.snapshot,
+            "decisions": list(self.decisions),
+            "recent_events": list(self.recent),
+            "bus": list(self.bus),
+            "flags": self.flags,
+            "rates": self.rates,
+            "telemetry_stats": self.telemetry_stats,
+            "bus_stats": self.bus_stats,
+            "stats": {
+                "datagrams": self.datagrams,
+                "bad_datagrams": self.bad_datagrams,
+                "by_kind": dict(self.by_kind),
+                "connected_clients": clients,
+                "age_s": age,
+                "restarts": self.restarts,
+                "last_event_t": self.last_event_t,
+            },
         }
 
     @contextlib.contextmanager
@@ -244,8 +268,9 @@ def create_app(telemetry_port: int = DEFAULTS.telemetry_port, backlog: int = 200
     async def lifespan(app: FastAPI) -> Any:
         loop = asyncio.get_running_loop()
         loop_holder["loop"] = loop
-        transport, _ = await loop.create_datagram_endpoint(lambda: _Listener(store),
-                                                           local_addr=("0.0.0.0", telemetry_port))
+        transport, _ = await loop.create_datagram_endpoint(
+            lambda: _Listener(store), local_addr=("0.0.0.0", telemetry_port)
+        )
         app.state.udp_port = transport.get_extra_info("sockname")[1]
         log(lg, logging.INFO, "display_start", telemetry_port=app.state.udp_port)
         try:

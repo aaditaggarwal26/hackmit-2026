@@ -33,8 +33,24 @@ from orbit.protocol import messages as M
 lg = logging.getLogger("orbit.telemetry")
 
 KINDS = (
-    "round_open", "decision", "tx_begin", "complete", "tx_failed", "revoke", "no_bids", "late_bid", "unexpected_tx",
-    "sat_seen", "eviction", "window_closed", "state", "flags", "bus", "snapshot", "bus_stats", "telemetry_stats",
+    "round_open",
+    "decision",
+    "tx_begin",
+    "complete",
+    "tx_failed",
+    "revoke",
+    "no_bids",
+    "late_bid",
+    "unexpected_tx",
+    "sat_seen",
+    "eviction",
+    "window_closed",
+    "state",
+    "flags",
+    "bus",
+    "snapshot",
+    "bus_stats",
+    "telemetry_stats",
 )
 
 Sink = Callable[[dict[str, Any]], None]
@@ -176,9 +192,15 @@ def bus_summary(msg: M.Message) -> dict[str, Any]:
     d: dict[str, Any] = {"from": msg.sender, "type": str(msg.TYPE), "seq": msg.seq}
     match msg:
         case M.Bid():
-            d.update(round_id=msg.round_id, item_id=msg.item_id, score=msg.score, item_age_s=msg.item_age_s,
-                     queue_len=msg.queue_len, occupancy_pct=msg.buffer.occupancy_pct,
-                     window=[vars(e) for e in msg.window])
+            d.update(
+                round_id=msg.round_id,
+                item_id=msg.item_id,
+                score=msg.score,
+                item_age_s=msg.item_age_s,
+                queue_len=msg.queue_len,
+                occupancy_pct=msg.buffer.occupancy_pct,
+                window=[vars(e) for e in msg.window],
+            )
         case M.Grant():
             d.update(round_id=msg.round_id, to=msg.to, item_id=msg.item_id, total=msg.breakdown.total)
         case M.Revoke() | M.TxAck():

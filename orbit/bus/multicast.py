@@ -67,8 +67,9 @@ def open_socket(group: str, port: int, iface_ip: str, ttl: int) -> socket.socket
 
 class MulticastBus(Bus):
     def __init__(self, settings: Settings, hostname: str) -> None:
-        super().__init__(hostname, settings.dedup_window, settings.bus_max_datagram,
-                         restart_slack_ms=settings.restart_slack_ms)
+        super().__init__(
+            hostname, settings.dedup_window, settings.bus_max_datagram, restart_slack_ms=settings.restart_slack_ms
+        )
         self.s = settings
         self.group = (settings.mcast_group, settings.mcast_port)
         self.iface_ip = settings.bus_iface_ip or default_route_ip()
@@ -80,8 +81,15 @@ class MulticastBus(Bus):
         loop = asyncio.get_running_loop()
         transport, _ = await loop.create_datagram_endpoint(lambda: _Protocol(self), sock=self._sock)
         self._transport = transport
-        log(lg, logging.INFO, "bus_joined", group=self.s.mcast_group, port=self.s.mcast_port, iface=self.iface_ip,
-            hostname=self.hostname)
+        log(
+            lg,
+            logging.INFO,
+            "bus_joined",
+            group=self.s.mcast_group,
+            port=self.s.mcast_port,
+            iface=self.iface_ip,
+            hostname=self.hostname,
+        )
 
     async def stop(self) -> None:
         if self._transport is not None:

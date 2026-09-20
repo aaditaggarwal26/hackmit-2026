@@ -124,8 +124,13 @@ class Message:
     t_ms: int
 
     def encode(self) -> bytes:
-        doc: dict[str, Any] = {"v": config.PROTOCOL_VERSION, "type": str(self.TYPE), "from": self.sender,
-                               "seq": self.seq, "t_ms": self.t_ms}
+        doc: dict[str, Any] = {
+            "v": config.PROTOCOL_VERSION,
+            "type": str(self.TYPE),
+            "from": self.sender,
+            "seq": self.seq,
+            "t_ms": self.t_ms,
+        }
         for f in fields(self):
             if f.name in ("sender", "seq", "t_ms"):
                 continue
@@ -134,8 +139,11 @@ class Message:
 
     @classmethod
     def from_doc(cls, doc: dict[str, Any]) -> Self:
-        kw: dict[str, Any] = {"sender": _need(doc, "from", str), "seq": _need(doc, "seq", int),
-                              "t_ms": _need(doc, "t_ms", int)}
+        kw: dict[str, Any] = {
+            "sender": _need(doc, "from", str),
+            "seq": _need(doc, "seq", int),
+            "t_ms": _need(doc, "t_ms", int),
+        }
         hints = get_type_hints(cls)
         for f in fields(cls):
             if f.name in kw:
@@ -320,12 +328,13 @@ class Scored(Message):
 
 
 MESSAGE_TYPES: dict[MessageType, type[Message]] = {
-    m.TYPE: m for m in (OffersOpen, Bid, Grant, Revoke, TxBegin, TxChunk, TxDone, TxAck, State, Heartbeat, Eviction,
-                        Scored)
+    m.TYPE: m
+    for m in (OffersOpen, Bid, Grant, Revoke, TxBegin, TxChunk, TxDone, TxAck, State, Heartbeat, Eviction, Scored)
 }
 
-GROUND_TYPES = frozenset({MessageType.OFFERS_OPEN, MessageType.GRANT, MessageType.REVOKE, MessageType.TX_ACK,
-                          MessageType.STATE})
+GROUND_TYPES = frozenset(
+    {MessageType.OFFERS_OPEN, MessageType.GRANT, MessageType.REVOKE, MessageType.TX_ACK, MessageType.STATE}
+)
 SATELLITE_TYPES = frozenset(set(MessageType) - GROUND_TYPES)
 
 
@@ -445,23 +454,80 @@ def examples() -> list[tuple[str, Message]]:
     g, s = "gx10-f548", "sat-a"
     return [
         ("offers_open", OffersOpen(g, 1, 1000, round_id=1, window_remaining_bytes=983040, collect_ms=200)),
-        ("bid", Bid(s, 7, 5000, round_id=1, item_id=14, score=91.0, item_age_s=6.0, window=win, buffer=buf,
-                    eviction_count=2, queue_len=3)),
+        (
+            "bid",
+            Bid(
+                s,
+                7,
+                5000,
+                round_id=1,
+                item_id=14,
+                score=91.0,
+                item_age_s=6.0,
+                window=win,
+                buffer=buf,
+                eviction_count=2,
+                queue_len=3,
+            ),
+        ),
         ("grant", Grant(g, 2, 1200, round_id=1, to=s, item_id=14, pace_bps=65536.0, breakdown=bd)),
         ("revoke", Revoke(g, 3, 2200, round_id=1, to=s, item_id=14, reason="grant_timeout")),
         ("tx_begin", TxBegin(s, 8, 5200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, chunks=16)),
         ("tx_chunk", TxChunk(s, 9, 5210, round_id=1, item_id=14, idx=0, n=16, data=bytes(range(8)))),
-        ("tx_done", TxDone(s, 10, 7200, round_id=1, item_id=14, total_bytes=config.FRAME_BYTES, score=91.0,
-                           cloud_frac=0.08, sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")),
-        ("tx_ack", TxAck(g, 4, 3210, round_id=1, to=s, item_id=14, ok=True, bytes_received=config.FRAME_BYTES,
-                         reason="")),
+        (
+            "tx_done",
+            TxDone(
+                s,
+                10,
+                7200,
+                round_id=1,
+                item_id=14,
+                total_bytes=config.FRAME_BYTES,
+                score=91.0,
+                cloud_frac=0.08,
+                sha256="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+        ),
+        (
+            "tx_ack",
+            TxAck(g, 4, 3210, round_id=1, to=s, item_id=14, ok=True, bytes_received=config.FRAME_BYTES, reason=""),
+        ),
         ("state", State(g, 5, 3211, state=config.STATE_READY, round_id=2, granted_to="", window=ws)),
-        ("heartbeat", Heartbeat(s, 11, 8000, buffer=buf, eviction_count=2, queue_len=2, top_score=88.0,
-                                top_item_id=12, uptime_s=8.0, frames_scored=9, frames_sent=4)),
-        ("eviction", Eviction(s, 12, 8100, item_id=3, score=41.0, kind="evicted", displaced_by=15,
-                              displaced_by_score=77.5)),
-        ("scored", Scored(s, 13, 8100, item_id=15, score=77.5, parts=ScoreParts(clear=92.0, sharp=61.5, change=79.0),
-                          cloud_frac=0.08, queued=True, evicted_item_id=3, queue_depth=5)),
+        (
+            "heartbeat",
+            Heartbeat(
+                s,
+                11,
+                8000,
+                buffer=buf,
+                eviction_count=2,
+                queue_len=2,
+                top_score=88.0,
+                top_item_id=12,
+                uptime_s=8.0,
+                frames_scored=9,
+                frames_sent=4,
+            ),
+        ),
+        (
+            "eviction",
+            Eviction(s, 12, 8100, item_id=3, score=41.0, kind="evicted", displaced_by=15, displaced_by_score=77.5),
+        ),
+        (
+            "scored",
+            Scored(
+                s,
+                13,
+                8100,
+                item_id=15,
+                score=77.5,
+                parts=ScoreParts(clear=92.0, sharp=61.5, change=79.0),
+                cloud_frac=0.08,
+                queued=True,
+                evicted_item_id=3,
+                queue_depth=5,
+            ),
+        ),
     ]
 
 
@@ -470,9 +536,31 @@ def vectors() -> list[dict[str, Any]]:
 
 
 __all__ = [
-    "GROUND_TYPES", "MESSAGE_TYPES", "SATELLITE_TYPES", "Bid", "Breakdown", "BufferStats", "DecodeError",
-    "Eviction", "Grant", "Heartbeat", "Message", "MessageType", "OffersOpen", "QueueEntry", "Revoke", "ScoreParts",
-    "Scored", "State", "TxAck", "TxBegin", "TxChunk", "TxDone", "WindowStatus", "decode", "examples", "spec_markdown",
+    "GROUND_TYPES",
+    "MESSAGE_TYPES",
+    "SATELLITE_TYPES",
+    "Bid",
+    "Breakdown",
+    "BufferStats",
+    "DecodeError",
+    "Eviction",
+    "Grant",
+    "Heartbeat",
+    "Message",
+    "MessageType",
+    "OffersOpen",
+    "QueueEntry",
+    "Revoke",
+    "ScoreParts",
+    "Scored",
+    "State",
+    "TxAck",
+    "TxBegin",
+    "TxChunk",
+    "TxDone",
+    "WindowStatus",
+    "decode",
+    "examples",
+    "spec_markdown",
     "vectors",
 ]
-

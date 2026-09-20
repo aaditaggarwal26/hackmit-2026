@@ -18,20 +18,54 @@ def ev(kind: str, **body: Any) -> bytes:
 
 
 def decision(round_id: int, t: float, winner: str = "sat-a", item_id: int = 7, ru: str | None = "sat-b") -> bytes:
-    ranked = [{"sat": winner, "item_id": item_id, "score": 80.0, "item_age_s": 4.0, "item_age_term": 2.0,
-               "sat_wait_s": 10.0, "sat_wait_term": 3.0, "total": 85.0, "window": [], "queue_len": 3,
-               "occupancy_pct": 37.5, "eviction_count": 0}]
+    ranked = [
+        {
+            "sat": winner,
+            "item_id": item_id,
+            "score": 80.0,
+            "item_age_s": 4.0,
+            "item_age_term": 2.0,
+            "sat_wait_s": 10.0,
+            "sat_wait_term": 3.0,
+            "total": 85.0,
+            "window": [],
+            "queue_len": 3,
+            "occupancy_pct": 37.5,
+            "eviction_count": 0,
+        }
+    ]
     if ru:
         ranked.append({**ranked[0], "sat": ru, "item_id": 9, "score": 70.0, "total": 75.0})
-    return ev("decision", t=t, round_id=round_id, winner=winner, item_id=item_id, margin=10.0 if ru else None,
-              excluded=[], ranked=ranked)
+    return ev(
+        "decision",
+        t=t,
+        round_id=round_id,
+        winner=winner,
+        item_id=item_id,
+        margin=10.0 if ru else None,
+        excluded=[],
+        ranked=ranked,
+    )
 
 
 def snapshot(round_id: int, t: float, state: str = "READY") -> bytes:
-    return ev("snapshot", t=t, state=state, round_id=round_id, granted_to="",
-              window={"slots_total": 60, "slots_used": 1, "scaled": True}, counters={"rounds": round_id},
-              sats={"sat-a": {"queue_len": 3, "top_score": 80.0, "window": [[7, 80.0, 4.0]],
-                              "flags": {"kind": "starved", "level": "soft", "memory_pressured": False, "silent": False}}})
+    return ev(
+        "snapshot",
+        t=t,
+        state=state,
+        round_id=round_id,
+        granted_to="",
+        window={"slots_total": 60, "slots_used": 1, "scaled": True},
+        counters={"rounds": round_id},
+        sats={
+            "sat-a": {
+                "queue_len": 3,
+                "top_score": 80.0,
+                "window": [[7, 80.0, 4.0]],
+                "flags": {"kind": "starved", "level": "soft", "memory_pressured": False, "silent": False},
+            }
+        },
+    )
 
 
 @pytest.fixture
@@ -64,9 +98,17 @@ def test_garbage_is_counted_not_raised(client: TestClient) -> None:
 
 
 def test_missing_keys_do_not_crash(client: TestClient) -> None:
-    ingest(client, b'{"kind": "decision"}', b'{"kind": "snapshot"}', b'{"kind": "complete"}', b'{"kind": "revoke"}',
-           b'{"kind": "bus"}', b'{"kind": "flags", "sats": 3}', b'{"kind": "eviction", "t": "soon"}',
-           b'{"kind": "decision", "ranked": "nope", "round_id": "x"}')
+    ingest(
+        client,
+        b'{"kind": "decision"}',
+        b'{"kind": "snapshot"}',
+        b'{"kind": "complete"}',
+        b'{"kind": "revoke"}',
+        b'{"kind": "bus"}',
+        b'{"kind": "flags", "sats": 3}',
+        b'{"kind": "eviction", "t": "soon"}',
+        b'{"kind": "decision", "ranked": "nope", "round_id": "x"}',
+    )
     s = client.get("/api/state").json()
     assert s["stats"]["bad_datagrams"] == 0 and len(s["decisions"]) == 2
     assert s["decisions"][0]["outcome"] == "pending" and s["decisions"][0]["winner"] is None
@@ -83,7 +125,9 @@ def test_outcome_join_by_round_and_item() -> None:
     assert outcomes == {1: ("complete", ""), 2: ("revoked", "grant_timeout"), 3: ("failed", "received 3/19 chunks")}
     row = store.decisions[0]
     assert row["winner"] == "sat-a" and row["score"] == 80.0 and row["item_age_term"] == 2.0
-    assert row["sat_wait_term"] == 3.0 and row["total"] == 85.0 and row["runner_up"] == "sat-b" and row["margin"] == 10.0
+    assert (
+        row["sat_wait_term"] == 3.0 and row["total"] == 85.0 and row["runner_up"] == "sat-b" and row["margin"] == 10.0
+    )
     # a revoke for a round we never saw the decision of, and a stray complete, are simply ignored
     store.ingest(ev("revoke", t=7.0, sat="sat-a", item_id=1, reason="tx_timeout", round_id=99))
     store.ingest(ev("complete", t=7.0, sat="sat-q", item_id=1))
@@ -141,8 +185,20 @@ def test_bus_log_aggregates_chunks_and_excludes_them_from_recent() -> None:
     store = Store()
     store.ingest(ev("bus", t=1.0, dir="in", **{"from": "sat-a"}, type="tx_begin", seq=1, item_id=7, round_id=1))
     for i in range(19):
-        store.ingest(ev("bus", t=1.0 + i / 100, dir="in", **{"from": "sat-a"}, type="tx_chunk", seq=2 + i, item_id=7,
-                        idx=i, n=19, bytes=900))
+        store.ingest(
+            ev(
+                "bus",
+                t=1.0 + i / 100,
+                dir="in",
+                **{"from": "sat-a"},
+                type="tx_chunk",
+                seq=2 + i,
+                item_id=7,
+                idx=i,
+                n=19,
+                bytes=900,
+            )
+        )
     store.ingest(ev("bus", t=1.5, dir="out", **{"from": "ground-test"}, type="tx_ack", seq=30, item_id=7, ok=True))
     types = [(b["type"], b.get("count")) for b in store.bus]
     assert types == [("tx_begin", None), ("tx_chunk", 19), ("tx_ack", None)]

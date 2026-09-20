@@ -122,8 +122,16 @@ class GroundStation:
                 return []
             case M.Eviction():
                 rec.note_eviction(now, self.s)
-                self._emit("eviction", now, sat=msg.sender, item_id=msg.item_id, score=msg.score, loss_kind=msg.kind,
-                           displaced_by=msg.displaced_by, displaced_by_score=msg.displaced_by_score)
+                self._emit(
+                    "eviction",
+                    now,
+                    sat=msg.sender,
+                    item_id=msg.item_id,
+                    score=msg.score,
+                    loss_kind=msg.kind,
+                    displaced_by=msg.displaced_by,
+                    displaced_by_score=msg.displaced_by_score,
+                )
                 return []
             case M.TxBegin():
                 return self._on_tx_begin(msg, now)
@@ -172,8 +180,16 @@ class GroundStation:
         self.collect_deadline = now + self.s.bid_collect_ms / 1000.0
         self.state = config.STATE_READY
         self._emit("round_open", now, round_id=self.round_id, window=self.window.snapshot())
-        return [self._mk(M.OffersOpen, now, round_id=self.round_id, window_remaining_bytes=self.window.remaining_bytes,
-                         collect_ms=self.s.bid_collect_ms), self._state_msg(now)]
+        return [
+            self._mk(
+                M.OffersOpen,
+                now,
+                round_id=self.round_id,
+                window_remaining_bytes=self.window.remaining_bytes,
+                collect_ms=self.s.bid_collect_ms,
+            ),
+            self._state_msg(now),
+        ]
 
     def _on_bid(self, bid: M.Bid, rec: SatelliteRecord, now: float) -> list[M.Message]:
         rec.queue_len = bid.queue_len
@@ -186,8 +202,18 @@ class GroundStation:
             # it: the satellite pops it and offers its next item in the next round.
             self.counters.duplicate_offers += 1
             self._emit("duplicate_offer", now, sat=bid.sender, item_id=bid.item_id, round_id=bid.round_id)
-            return [self._mk(M.TxAck, now, round_id=bid.round_id, to=bid.sender, item_id=bid.item_id, ok=True,
-                             bytes_received=0, reason="already delivered")]
+            return [
+                self._mk(
+                    M.TxAck,
+                    now,
+                    round_id=bid.round_id,
+                    to=bid.sender,
+                    item_id=bid.item_id,
+                    ok=True,
+                    bytes_received=0,
+                    reason="already delivered",
+                )
+            ]
         if self.state != config.STATE_READY:
             self.counters.ignored_while_busy += 1
             return []
@@ -212,30 +238,75 @@ class GroundStation:
         rec = self.sats[w.hostname]
         rec.grants += 1
         self.counters.grants += 1
-        self.grant = GrantState(round_id=self.round_id, to=w.hostname, item_id=w.item_id,
-                                deadline=now + self.s.grant_timeout_ms / 1000.0, granted_at=now)
+        self.grant = GrantState(
+            round_id=self.round_id,
+            to=w.hostname,
+            item_id=w.item_id,
+            deadline=now + self.s.grant_timeout_ms / 1000.0,
+            granted_at=now,
+        )
         self.state = config.STATE_BUSY
-        self._emit("decision", now, round_id=self.round_id, winner=w.hostname, item_id=w.item_id,
-                   margin=decision.margin, excluded=sorted(decision.excluded),
-                   ranked=[dict(sat=c.hostname, item_id=c.item_id, **vars(c.breakdown),
-                                window=[vars(e) for e in c.bid.window], queue_len=c.bid.queue_len,
-                                occupancy_pct=c.bid.buffer.occupancy_pct, eviction_count=c.bid.eviction_count)
-                           for c in decision.ranked])
-        log(lg, logging.INFO, "grant", round_id=self.round_id, to=w.hostname, item_id=w.item_id,
-            total=round(w.total, 2), score=w.breakdown.score, item_age_term=round(w.breakdown.item_age_term, 2),
-            sat_wait_term=round(w.breakdown.sat_wait_term, 2))
-        return [self._mk(M.Grant, now, round_id=self.round_id, to=w.hostname, item_id=w.item_id,
-                         pace_bps=self.s.link_rate_bps, breakdown=w.breakdown), self._state_msg(now)]
+        self._emit(
+            "decision",
+            now,
+            round_id=self.round_id,
+            winner=w.hostname,
+            item_id=w.item_id,
+            margin=decision.margin,
+            excluded=sorted(decision.excluded),
+            ranked=[
+                dict(
+                    sat=c.hostname,
+                    item_id=c.item_id,
+                    **vars(c.breakdown),
+                    window=[vars(e) for e in c.bid.window],
+                    queue_len=c.bid.queue_len,
+                    occupancy_pct=c.bid.buffer.occupancy_pct,
+                    eviction_count=c.bid.eviction_count,
+                )
+                for c in decision.ranked
+            ],
+        )
+        log(
+            lg,
+            logging.INFO,
+            "grant",
+            round_id=self.round_id,
+            to=w.hostname,
+            item_id=w.item_id,
+            total=round(w.total, 2),
+            score=w.breakdown.score,
+            item_age_term=round(w.breakdown.item_age_term, 2),
+            sat_wait_term=round(w.breakdown.sat_wait_term, 2),
+        )
+        return [
+            self._mk(
+                M.Grant,
+                now,
+                round_id=self.round_id,
+                to=w.hostname,
+                item_id=w.item_id,
+                pace_bps=self.s.link_rate_bps,
+                breakdown=w.breakdown,
+            ),
+            self._state_msg(now),
+        ]
 
     # ------------------------------------------------------------------ transmission
 
     def _holder(self, msg: M.TxBegin | M.TxChunk | M.TxDone, now: float) -> GrantState | None:
         g = self.grant
-        if (self.state != config.STATE_BUSY or g is None or msg.sender != g.to or msg.item_id != g.item_id
-                or msg.round_id != g.round_id):
+        if (
+            self.state != config.STATE_BUSY
+            or g is None
+            or msg.sender != g.to
+            or msg.item_id != g.item_id
+            or msg.round_id != g.round_id
+        ):
             self.counters.unexpected += 1
-            self._emit("unexpected_tx", now, sat=msg.sender, type=str(msg.TYPE), item_id=msg.item_id,
-                       round_id=msg.round_id)
+            self._emit(
+                "unexpected_tx", now, sat=msg.sender, type=str(msg.TYPE), item_id=msg.item_id, round_id=msg.round_id
+            )
             return None
         return g
 
@@ -246,8 +317,15 @@ class GroundStation:
         g.began = True
         g.chunks_expected = msg.chunks
         g.deadline = now + self.s.tx_timeout_ms / 1000.0
-        self._emit("tx_begin", now, round_id=g.round_id, sat=msg.sender, item_id=msg.item_id, chunks=msg.chunks,
-                   bytes=msg.total_bytes)
+        self._emit(
+            "tx_begin",
+            now,
+            round_id=g.round_id,
+            sat=msg.sender,
+            item_id=msg.item_id,
+            chunks=msg.chunks,
+            bytes=msg.total_bytes,
+        )
         return []
 
     def _on_tx_chunk(self, msg: M.TxChunk, now: float) -> list[M.Message]:
@@ -297,8 +375,16 @@ class GroundStation:
             self.counters.failed_tx += 1
             self._emit("tx_failed", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, reason=reason)
             log(lg, logging.WARNING, "tx_failed", sat=g.to, item_id=g.item_id, reason=reason)
-            ack = self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=False,
-                           bytes_received=g.bytes_seen, reason=reason)
+            ack = self._mk(
+                M.TxAck,
+                now,
+                round_id=g.round_id,
+                to=g.to,
+                item_id=g.item_id,
+                ok=False,
+                bytes_received=g.bytes_seen,
+                reason=reason,
+            )
             return [ack, *self._rearbitrate_without(g.to, now)]
         # COMPLETE: debit the window, record the transmission, confirm to the satellite
         self.state = config.STATE_COMPLETE
@@ -308,12 +394,33 @@ class GroundStation:
         rec.transmissions += 1
         rec.queue_len = max(0, rec.queue_len - 1)
         self.counters.completed += 1
-        self._emit("complete", now, round_id=g.round_id, sat=g.to, item_id=g.item_id, score=msg.score,
-                   cloud_frac=msg.cloud_frac, bytes=g.bytes_seen, granted_at=g.granted_at, sha256=msg.sha256,
-                   window=self.window.snapshot())
+        self._emit(
+            "complete",
+            now,
+            round_id=g.round_id,
+            sat=g.to,
+            item_id=g.item_id,
+            score=msg.score,
+            cloud_frac=msg.cloud_frac,
+            bytes=g.bytes_seen,
+            granted_at=g.granted_at,
+            sha256=msg.sha256,
+            window=self.window.snapshot(),
+        )
         log(lg, logging.INFO, "complete", sat=g.to, item_id=g.item_id, slots_remaining=self.window.slots_remaining)
-        out: list[M.Message] = [self._mk(M.TxAck, now, round_id=g.round_id, to=g.to, item_id=g.item_id, ok=True,
-                                         bytes_received=g.bytes_seen, reason=""), self._state_msg(now)]
+        out: list[M.Message] = [
+            self._mk(
+                M.TxAck,
+                now,
+                round_id=g.round_id,
+                to=g.to,
+                item_id=g.item_id,
+                ok=True,
+                bytes_received=g.bytes_seen,
+                reason="",
+            ),
+            self._state_msg(now),
+        ]
         self.grant = None
         return out + self._open_round(now)
 
@@ -365,8 +472,14 @@ class GroundStation:
 
     def _state_msg(self, now: float) -> M.State:
         self._last_state_at = now
-        return self._mk(M.State, now, state=self.state, round_id=self.round_id,
-                        granted_to=self.grant.to if self.grant else "", window=self.window.status())
+        return self._mk(
+            M.State,
+            now,
+            state=self.state,
+            round_id=self.round_id,
+            granted_to=self.grant.to if self.grant else "",
+            window=self.window.status(),
+        )
 
     def _mk(self, cls: type[TMsg], now: float, **body: Any) -> TMsg:
         self._seq += 1
@@ -379,12 +492,27 @@ class GroundStation:
             lg.exception("event sink failed on %s", kind)
 
     def snapshot(self, now: float) -> dict[str, Any]:
-        return dict(state=self.state, round_id=self.round_id, granted_to=self.grant.to if self.grant else "",
-                    window=self.window.snapshot(), counters=self.counters.as_dict(),
-                    sats={h: dict(queue_len=r.queue_len, top_score=r.top_score, transmissions=r.transmissions,
-                                  grants=r.grants, revokes=r.revokes, failed_tx=r.failed_tx,
-                                  eviction_count=r.eviction_count, wait_s=r.wait_s(now),
-                                  occupancy_pct=r.buffer.occupancy_pct if r.buffer else None,
-                                  window=[list(e) for e in r.last_window],
-                                  flags=vars(a) | {"kind": str(a.kind), "level": str(a.level)})
-                          for h, r in sorted(self.sats.items()) for a in [assess(r, now, self.s)]})
+        return dict(
+            state=self.state,
+            round_id=self.round_id,
+            granted_to=self.grant.to if self.grant else "",
+            window=self.window.snapshot(),
+            counters=self.counters.as_dict(),
+            sats={
+                h: dict(
+                    queue_len=r.queue_len,
+                    top_score=r.top_score,
+                    transmissions=r.transmissions,
+                    grants=r.grants,
+                    revokes=r.revokes,
+                    failed_tx=r.failed_tx,
+                    eviction_count=r.eviction_count,
+                    wait_s=r.wait_s(now),
+                    occupancy_pct=r.buffer.occupancy_pct if r.buffer else None,
+                    window=[list(e) for e in r.last_window],
+                    flags=vars(a) | {"kind": str(a.kind), "level": str(a.level)},
+                )
+                for h, r in sorted(self.sats.items())
+                for a in [assess(r, now, self.s)]
+            },
+        )

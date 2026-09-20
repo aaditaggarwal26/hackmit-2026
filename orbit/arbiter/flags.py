@@ -137,8 +137,17 @@ def assess(rec: SatelliteRecord, now: float, s: Settings) -> Assessment:
         why += "; aging should have won a slot by now"
     if pressured:
         why += f"; evicting at {rate:.1f}/min"
-    return Assessment(hostname=rec.hostname, kind=kind, level=level, wait_s=wait, memory_pressured=pressured,
-                      evictions_per_min=rate, silent=silent, has_items=rec.has_items, reason=why)
+    return Assessment(
+        hostname=rec.hostname,
+        kind=kind,
+        level=level,
+        wait_s=wait,
+        memory_pressured=pressured,
+        evictions_per_min=rate,
+        silent=silent,
+        has_items=rec.has_items,
+        reason=why,
+    )
 
 
 def _level(wait: float, s: Settings) -> Level:

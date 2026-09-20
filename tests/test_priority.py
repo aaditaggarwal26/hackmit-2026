@@ -13,8 +13,19 @@ BUF = M.BufferStats(slots=8, capacity_bytes=8 * config.FRAME_BYTES, used=1, free
 
 
 def bid(host, score, age=0.0, window=(), item_id=1, round_id=1, seq=1):
-    return M.Bid(host, seq, 0, round_id=round_id, item_id=item_id, score=score, item_age_s=age,
-                 window=tuple(M.QueueEntry(i, s, a) for i, s, a in window), buffer=BUF, eviction_count=0, queue_len=1)
+    return M.Bid(
+        host,
+        seq,
+        0,
+        round_id=round_id,
+        item_id=item_id,
+        score=score,
+        item_age_s=age,
+        window=tuple(M.QueueEntry(i, s, a) for i, s, a in window),
+        buffer=BUF,
+        eviction_count=0,
+        queue_len=1,
+    )
 
 
 def test_breakdown_is_the_formula():
@@ -65,8 +76,18 @@ def test_window_is_never_an_input():
 
 
 @settings(max_examples=200, deadline=None)
-@given(st.lists(st.tuples(st.sampled_from(["sat-a", "sat-b", "sat-c", "sat-d"]), st.floats(0, 100), st.floats(0, 1000),
-                          st.floats(0, 1000)), min_size=1, max_size=8))
+@given(
+    st.lists(
+        st.tuples(
+            st.sampled_from(["sat-a", "sat-b", "sat-c", "sat-d"]),
+            st.floats(0, 100),
+            st.floats(0, 1000),
+            st.floats(0, 1000),
+        ),
+        min_size=1,
+        max_size=8,
+    )
+)
 def test_winner_has_maximal_total(entries):
     bids = [bid(h, sc, age=a, seq=i) for i, (h, sc, a, _) in enumerate(entries)]
     waits = {h: w for h, _, _, w in entries}

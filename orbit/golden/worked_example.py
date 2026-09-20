@@ -3,6 +3,7 @@ a 3x3 window's Sobel taps, the three counts, the normalisations and the composit
 then the same frame through a 4-cell queue. Emits docs/worked_example.md
 (`python -m orbit.golden.worked_example --md docs/worked_example.md`); a test pins
 that file to this code."""
+
 from __future__ import annotations
 
 import sys
@@ -21,11 +22,11 @@ def example_frame() -> tuple[np.ndarray, np.ndarray]:
     """Deterministic, structured, small numbers: a dark field with a bright 'cloud' block
     in the top-left quarter, a diagonal edge, and a reference that differs in one band."""
     y, x = np.indices((H, W))
-    frame = (40 + (x // 8) * 3).astype(np.int32)              # gentle horizontal ramp, 40..87
-    frame[y + x > 160] += 60                                    # diagonal edge, +60
-    frame[(y < 64) & (x < 64)] = 230                            # cloud block above CLOUD_THRESHOLD
+    frame = (40 + (x // 8) * 3).astype(np.int32)  # gentle horizontal ramp, 40..87
+    frame[y + x > 160] += 60  # diagonal edge, +60
+    frame[(y < 64) & (x < 64)] = 230  # cloud block above CLOUD_THRESHOLD
     ref = frame.copy()
-    ref[96:112, :] = 0                                          # a band the reference lacks
+    ref[96:112, :] = 0  # a band the reference lacks
     return frame.clip(0, 255).astype(np.uint8), ref.clip(0, 255).astype(np.uint8)
 
 
@@ -42,19 +43,21 @@ def render(md: bool = False) -> str:
     p("Frame: 128×128, a 40..87 ramp, +60 beyond the diagonal y+x>160, a 230-valued 64×64 block")
     p("top-left (cloud). Reference: the same frame with rows 96..111 set to 0.")
     p("")
-    p(f"Config: w_clear={cfg.w_clear} w_sharp={cfg.w_sharp} w_change={cfg.w_change} "
-      f"cloud_thr={cfg.cloud_thr} change_thr={cfg.change_thr} sharp_shift={cfg.sharp_shift}")
+    p(
+        f"Config: w_clear={cfg.w_clear} w_sharp={cfg.w_sharp} w_change={cfg.w_change} "
+        f"cloud_thr={cfg.cloud_thr} change_thr={cfg.change_thr} sharp_shift={cfg.sharp_shift}"
+    )
     p("")
     p("## One 3×3 window, at the diagonal edge (y=100, x=61)")
     y0, x0 = 100, 61
-    win = frame[y0 - 1:y0 + 2, x0 - 1:x0 + 2].astype(int)
+    win = frame[y0 - 1 : y0 + 2, x0 - 1 : x0 + 2].astype(int)
     p("```")
     for row in win:
         p("  " + " ".join(f"{v:3d}" for v in row))
     gx = (win[0, 2] - win[0, 0]) + 2 * (win[1, 2] - win[1, 0]) + (win[2, 2] - win[2, 0])
     gy = (win[2, 0] - win[0, 0]) + 2 * (win[2, 1] - win[0, 1]) + (win[2, 2] - win[0, 2])
-    p(f"Gx = ({win[0,2]}−{win[0,0]}) + 2·({win[1,2]}−{win[1,0]}) + ({win[2,2]}−{win[2,0]}) = {gx}")
-    p(f"Gy = ({win[2,0]}−{win[0,0]}) + 2·({win[2,1]}−{win[0,1]}) + ({win[2,2]}−{win[0,2]}) = {gy}")
+    p(f"Gx = ({win[0, 2]}−{win[0, 0]}) + 2·({win[1, 2]}−{win[1, 0]}) + ({win[2, 2]}−{win[2, 0]}) = {gx}")
+    p(f"Gy = ({win[2, 0]}−{win[0, 0]}) + 2·({win[2, 1]}−{win[0, 1]}) + ({win[2, 2]}−{win[0, 2]}) = {gy}")
     p(f"|Gx|+|Gy| = {abs(gx) + abs(gy)}   (this window's contribution to sobel_sum)")
     p("```")
     p("")
@@ -80,8 +83,10 @@ def render(md: bool = False) -> str:
     p("```")
     for score, fid in [(s.score, 1), (30000, 2), (s.score, 3), (10, 4), (5, 5), (60000, 6)]:
         lost = q.insert(score, fid)
-        p(f"insert score={score:5d} id={fid}  → cells={[(a, b) for a, b in q.cells]}"
-          f"  lost={'none' if lost == NO_FRAME else lost}")
+        p(
+            f"insert score={score:5d} id={fid}  → cells={[(a, b) for a, b in q.cells]}"
+            f"  lost={'none' if lost == NO_FRAME else lost}"
+        )
     top = q.pop()
     p(f"pop → {top}; new top = {q.top}; frames_evicted = {q.evicted}")
     p("```")

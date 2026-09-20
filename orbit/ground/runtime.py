@@ -39,9 +39,17 @@ class Clock:
         return time.monotonic() - self.t0
 
 
-async def drive(node: Node, bus: Bus, clock: Callable[[], float], *, tick_s: float = DEFAULT_TICK_S,
-                stop: asyncio.Event | None = None, observer: Callable[[M.Message, bool, float], None] | None = None,
-                periodic: Callable[[float], None] | None = None, period_s: float = 1.0) -> None:
+async def drive(
+    node: Node,
+    bus: Bus,
+    clock: Callable[[], float],
+    *,
+    tick_s: float = DEFAULT_TICK_S,
+    stop: asyncio.Event | None = None,
+    observer: Callable[[M.Message, bool, float], None] | None = None,
+    periodic: Callable[[float], None] | None = None,
+    period_s: float = 1.0,
+) -> None:
     """Run until ``stop`` is set. ``observer(msg, outbound, now)`` sees every message in and out;
     ``periodic(now)`` runs every ``period_s`` (snapshots, flag evaluation)."""
     stop = stop or asyncio.Event()

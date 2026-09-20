@@ -70,18 +70,26 @@ def breakdown(score: float, item_age_s: float, sat_wait_s: float, s: Settings) -
     """The formula, itemised so the display can show each contribution separately."""
     item_term = item_age_s * s.item_aging_rate
     sat_term = sat_wait_s * s.sat_aging_rate
-    return Breakdown(score=score, item_age_s=item_age_s, item_age_term=item_term, sat_wait_s=sat_wait_s,
-                     sat_wait_term=sat_term, total=score + item_term + sat_term)
+    return Breakdown(
+        score=score,
+        item_age_s=item_age_s,
+        item_age_term=item_term,
+        sat_wait_s=sat_wait_s,
+        sat_wait_term=sat_term,
+        total=score + item_term + sat_term,
+    )
 
 
 def price(bid: Bid, sat_wait_s: float, s: Settings) -> Candidate:
     """Only the top item is priced. ``bid.window`` is deliberately not read."""
-    return Candidate(hostname=bid.sender, item_id=bid.item_id,
-                     breakdown=breakdown(bid.score, bid.item_age_s, sat_wait_s, s), bid=bid)
+    return Candidate(
+        hostname=bid.sender, item_id=bid.item_id, breakdown=breakdown(bid.score, bid.item_age_s, sat_wait_s, s), bid=bid
+    )
 
 
-def rank(bids: Iterable[Bid], waits: Mapping[str, float], s: Settings,
-         exclude: frozenset[str] = frozenset()) -> tuple[Candidate, ...]:
+def rank(
+    bids: Iterable[Bid], waits: Mapping[str, float], s: Settings, exclude: frozenset[str] = frozenset()
+) -> tuple[Candidate, ...]:
     """Price every non-excluded bid and order them. One bid per hostname: a later duplicate replaces an earlier one
     (a satellite that re-bids has fresher numbers), so the caller can hand over raw bus traffic."""
     latest: dict[str, Bid] = {}
@@ -93,8 +101,9 @@ def rank(bids: Iterable[Bid], waits: Mapping[str, float], s: Settings,
     return tuple(cands)
 
 
-def decide(round_id: int, bids: Iterable[Bid], waits: Mapping[str, float], s: Settings,
-           exclude: frozenset[str] = frozenset()) -> Decision | None:
+def decide(
+    round_id: int, bids: Iterable[Bid], waits: Mapping[str, float], s: Settings, exclude: frozenset[str] = frozenset()
+) -> Decision | None:
     """Grant exactly one slot to exactly one satellite, or None if nobody (eligible) bid."""
     ranked = rank(bids, waits, s, exclude)
     if not ranked:

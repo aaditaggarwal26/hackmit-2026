@@ -110,5 +110,8 @@ def assert_identical(corpus: Corpus, cfg: Config, n: int = 32, device: torch.dev
                 raise WorkloadMismatch(f"torch {label}: {got} != golden {golden}")
     log(logger, logging.INFO, "workload identity ok", frames=len(checked), torch=device is not None)
     # None = torch was not checked (CPU tier); a mismatch never returns, it raises WorkloadMismatch above.
-    return {"frames_checked": len(checked), "numpy_matches_golden": True,
-            "torch_matches_golden": True if device is not None else None}
+    return {
+        "frames_checked": len(checked),
+        "numpy_matches_golden": True,
+        "torch_matches_golden": True if device is not None else None,
+    }
