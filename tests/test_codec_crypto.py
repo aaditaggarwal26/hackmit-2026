@@ -86,6 +86,20 @@ def test_payload_key_bytes_validation() -> None:
         codec.payload_key_bytes("nothex!!")
 
 
+def test_firmware_wire_format_interop() -> None:
+    """The ESP32 seals with mbedtls as `nonce || ciphertext || tag`, AAD ``orbit-tx-v1``. Build a
+    blob that way with the standard cipher (mbedtls and cryptography agree by conformance) and
+    confirm the ground decodes it. Pins the layout/AAD/nonce-size contract both firmware headers
+    (orbit_codec.h ORBIT_GCM_*) and codec.py must share."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    frame = bytes((i * 7) % 256 for i in range(16384))
+    compressed = codec.deflate(frame)  # the firmware compresses first, then seals
+    nonce = bytes(range(codec.NONCE_BYTES))
+    blob = nonce + AESGCM(KEY).encrypt(nonce, compressed, codec.AAD)  # nonce || ct || tag
+    assert codec.decompress(codec.ENC_ZLIB_GCM, blob, len(frame), KEY) == frame
+
+
 def test_encryption_is_transparent_to_arbitration() -> None:
     """With a key set, satellites seal and the ground unseals; the arbitration outcome is
     identical because the ground reconstructs the exact same frames it would have in the clear."""

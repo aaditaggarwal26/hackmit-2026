@@ -67,6 +67,19 @@ typedef uInt orbit_zsize_t;
 // The encoding names as they appear in tx_begin.enc and tx_chunk.enc.
 #define ORBIT_ENC_RAW  "raw"
 #define ORBIT_ENC_ZLIB "zlib"
+// ...and the AES-GCM-sealed variants (orbit/protocol/codec.py: compress-then-encrypt).
+#define ORBIT_ENC_RAW_GCM  "raw+gcm"
+#define ORBIT_ENC_ZLIB_GCM "zlib+gcm"
+#define ORBIT_GCM_NONCE 12   // standard GCM nonce, matches codec.NONCE_BYTES
+#define ORBIT_GCM_TAG   16   // matches codec.GCM_TAG_BYTES
+#define ORBIT_GCM_AAD   "orbit-tx-v1"  // must equal codec.AAD
+
+// The AES-GCM key as hex (32/48/64 chars = AES-128/192/256), set in the gitignored secrets.h.
+// "" = confidentiality off, which is the default and correct for this public corpus. Matches the
+// ground's ORBIT_PAYLOAD_KEY / Settings.payload_key.
+#ifndef ORBIT_PAYLOAD_KEY
+#define ORBIT_PAYLOAD_KEY ""
+#endif
 
 // Pinned encoder settings. Anything that changes one of these changes it in
 // orbit/protocol/codec.py in the same commit.
@@ -180,3 +193,57 @@ static inline size_t orbit_tx_prepare(const uint8_t *raw, size_t raw_len) {
 static inline const uint8_t *orbit_tx_data() { return orbit_tx_payload().buf; }
 static inline size_t orbit_tx_size() { return orbit_tx_payload().len; }
 static inline const char *orbit_tx_enc() { return orbit_tx_payload().enc; }
+
+// ---------------------------------------------------------------- confidentiality (device only)
+//
+// AES-GCM the staging buffer IN PLACE, turning the compressed (or raw) payload into
+// nonce || ciphertext || tag and switching enc to the "+gcm" variant. This is the reverse of
+// what the ground does in orbit/protocol/codec.py::decompress, and the ground decrypts with
+// cryptography's AESGCM by standard conformance -- so unlike the canonicaliser this needs no
+// portable host twin: the end-to-end check is the ground re-scoring the frame and matching the
+// tx_done sha256, which it already does.
+//
+// mbedtls only, so it is compiled only for the device; the host codec test builds the
+// compression path unchanged. Call AFTER orbit_tx_prepare. Returns the new payload length, or 0
+// on failure -- and a product must treat 0 as "abort the transmission", never "send it in the
+// clear", so the caller drops the grant rather than downlinking unencrypted imagery.
+#if defined(ESP32) || defined(ARDUINO) || defined(ORBIT_HAS_MBEDTLS)
+#include <mbedtls/gcm.h>
+#if defined(ESP32)
+#include <esp_random.h>
+#endif
+
+static inline size_t orbit_tx_seal(const uint8_t *key, size_t keylen) {
+  OrbitTxPayload &p = orbit_tx_payload();
+  if (!key || (keylen != 16 && keylen != 24 && keylen != 32) || p.len == 0) return 0;
+  if ((size_t)ORBIT_GCM_NONCE + p.len + ORBIT_GCM_TAG > sizeof(p.buf)) return 0;
+
+  uint8_t nonce[ORBIT_GCM_NONCE];
+#if defined(ESP32)
+  esp_fill_random(nonce, sizeof(nonce));   // hardware RNG: a fresh nonce per frame
+#else
+  for (size_t i = 0; i < sizeof(nonce); i++) nonce[i] = (uint8_t)rand();  // host-only; device uses the TRNG
+#endif
+
+  memmove(p.buf + ORBIT_GCM_NONCE, p.buf, p.len);   // open a gap for the nonce prefix
+  memcpy(p.buf, nonce, ORBIT_GCM_NONCE);
+  uint8_t *pt = p.buf + ORBIT_GCM_NONCE;            // plaintext, now shifted; encrypted in place
+  uint8_t tag[ORBIT_GCM_TAG];
+
+  mbedtls_gcm_context g;
+  mbedtls_gcm_init(&g);
+  int rc = mbedtls_gcm_setkey(&g, MBEDTLS_CIPHER_ID_AES, key, (unsigned)(keylen * 8));
+  if (rc == 0) {
+    rc = mbedtls_gcm_crypt_and_tag(&g, MBEDTLS_GCM_ENCRYPT, p.len, nonce, ORBIT_GCM_NONCE,
+                                   (const uint8_t *)ORBIT_GCM_AAD, sizeof(ORBIT_GCM_AAD) - 1,
+                                   pt, pt, ORBIT_GCM_TAG, tag);
+  }
+  mbedtls_gcm_free(&g);
+  if (rc != 0) return 0;
+
+  memcpy(pt + p.len, tag, ORBIT_GCM_TAG);           // wire = nonce || ciphertext || tag
+  p.len = (size_t)ORBIT_GCM_NONCE + p.len + ORBIT_GCM_TAG;
+  p.enc = (strcmp(p.enc, ORBIT_ENC_ZLIB) == 0) ? ORBIT_ENC_ZLIB_GCM : ORBIT_ENC_RAW_GCM;
+  return p.len;
+}
+#endif

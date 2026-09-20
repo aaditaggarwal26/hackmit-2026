@@ -94,6 +94,12 @@ static uint32_t c_captured = 0, c_evicted = 0, c_rejected = 0, c_bids = 0;
 static uint32_t c_grants = 0, c_transmitted = 0, c_failed = 0, c_revoked = 0;
 static uint32_t c_ack_lost = 0, c_peer_grants = 0, c_late_acks = 0;
 
+// Payload confidentiality: the AES-GCM key, decoded once at boot from the ORBIT_PAYLOAD_KEY hex
+// in secrets.h. Length 0 means the layer is off and frames go out compressed-but-clear, exactly
+// as before -- which is correct for this public MODIS corpus.
+static uint8_t g_payload_key[32];
+static size_t  g_payload_key_len = 0;
+
 // in-flight transmission
 static bool     tx_active = false;
 static int32_t  tx_round = -1;
@@ -487,6 +493,13 @@ static void onGrant(JsonDocument &d) {
   tx_pace_bps = d["pace_bps"] | 65536.0f;
   tx_total = orbit_tx_prepare(fbuf.read(item_id), FRAME_BYTES);   // compressed payload, or the raw frame
   if (tx_total == 0) { tx_active = false; Serial.println("[grant] nothing to send"); return; }
+  if (g_payload_key_len) {
+    // Sensitive imagery: seal the payload. A failure to seal must NOT fall back to plaintext --
+    // abort the grant instead. The ground times it out and re-arbitrates; nothing goes out clear.
+    const size_t sealed = orbit_tx_seal(g_payload_key, g_payload_key_len);
+    if (sealed == 0) { tx_active = false; Serial.println("[grant] seal failed; not sending in the clear"); return; }
+    tx_total = sealed;
+  }
   tx_chunks = orbit_chunk_count(tx_total, CHUNK_BYTES);
   tx_next_idx = 0;
   tx_next_at_ms = millis();
@@ -745,10 +758,31 @@ static bool connectWiFi() {
   }
 }
 
+// Decode ORBIT_PAYLOAD_KEY (hex) into g_payload_key. "" leaves confidentiality off; a malformed
+// or wrong-length key is a loud boot failure rather than a board that quietly ships plaintext.
+static void loadPayloadKey() {
+  const char *hex = ORBIT_PAYLOAD_KEY;
+  const size_t n = strlen(hex);
+  if (n == 0) { g_payload_key_len = 0; return; }
+  if (n % 2 || n / 2 > sizeof(g_payload_key) || (n / 2 != 16 && n / 2 != 24 && n / 2 != 32)) {
+    Serial.printf("[crypto] ORBIT_PAYLOAD_KEY must be 32/48/64 hex chars; ignoring\n");
+    g_payload_key_len = 0;
+    return;
+  }
+  for (size_t i = 0; i < n / 2; i++) {
+    const int hi = orbit_unhex((uint8_t)hex[i * 2]), lo = orbit_unhex((uint8_t)hex[i * 2 + 1]);
+    if (hi < 0 || lo < 0) { Serial.println("[crypto] ORBIT_PAYLOAD_KEY is not hex; ignoring"); g_payload_key_len = 0; return; }
+    g_payload_key[i] = (uint8_t)((hi << 4) | lo);
+  }
+  g_payload_key_len = n / 2;
+  Serial.printf("[crypto] payload encryption ON: AES-%u-GCM\n", (unsigned)(g_payload_key_len * 8));
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
   Serial.printf("\n=== orbit satellite %s ===\n", HOSTNAME);
+  loadPayloadKey();
   Serial.printf("chip %s rev %d, heap %u, psram %u\n",
                 ESP.getChipModel(), ESP.getChipRevision(),
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getPsramSize());
