@@ -153,10 +153,18 @@ def main() -> None:
     print(f"shown pass {SHOWN_PASS}:")
     for f in shown:
         mark = "usable" if f["usable"] else "NOT   "
-        print(f"  #{f['capture_index']:2d} id {f['id']:3d} {f['scene']:<12} {f['display']:5.1f}  cloud {f['cloud_frac']:.3f}  {mark}")
+        print(
+            f"  #{f['capture_index']:2d} id {f['id']:3d} {f['scene']:<12} {f['display']:5.1f}"
+            f"  cloud {f['cloud_frac']:.3f}  {mark}"
+        )
     for p in per_pass:
-        print(f"  pass {p['pass']}: orbit {p['orbit_usable']}/{SLOTS_PER_PASS}  fifo {p['fifo_usable']}/{SLOTS_PER_PASS}")
-    print(f"RUN: orbit {orbit_usable}/{len(orbit_sent)} usable, fifo {fifo_usable}/{len(fifo_sent)}, gain {result['gain']}")
+        print(
+            f"  pass {p['pass']}: orbit {p['orbit_usable']}/{SLOTS_PER_PASS}  fifo {p['fifo_usable']}/{SLOTS_PER_PASS}"
+        )
+    print(
+        f"RUN: orbit {orbit_usable}/{len(orbit_sent)} usable,"
+        f" fifo {fifo_usable}/{len(fifo_sent)}, gain {result['gain']}"
+    )
 
 
 if __name__ == "__main__":
