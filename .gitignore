@@ -9,6 +9,8 @@ __pycache__/
 .coverage
 !corpus/png/*.png
 !results/filtered_vs_fifo.png
+# the project page ships its frames next to it, so it needs no build step
+!site/frames/*.png
 results/raw/
 runs/*
 !runs/sample.jsonl
